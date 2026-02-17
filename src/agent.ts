@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import pg from "pg";
-import { Type, getModel, type TextContent, complete, type AssistantMessage } from "@mariozechner/pi-ai";
+import { Type, getModel, type TextContent, complete } from "@mariozechner/pi-ai";
 import { Agent, type AgentTool, type AgentToolResult, type AgentMessage } from "@mariozechner/pi-agent-core";
 import type { Config, TtsConfig } from "./config.js";
 import { getApiKey } from "./auth.js";
@@ -336,6 +336,10 @@ export async function handlePrompt(
     await Promise.all(savePromises);
   }
 
+  if (agent.state.error) {
+    console.error("[stavrobot] Agent error:", agent.state.error);
+  }
+
   if (agent.state.messages.length > 40) {
     const currentMessages = agent.state.messages;
     const messagesToCompact = currentMessages.slice(0, -20);
@@ -376,27 +380,9 @@ export async function handlePrompt(
 
     await saveCompaction(pool, summaryText, upToMessageId);
 
-    const syntheticMessage: AssistantMessage = {
-      role: "assistant",
-      content: [{ type: "text", text: summaryText }],
-      api: "anthropic-messages",
-      provider: "anthropic",
-      model: "synthetic-compaction",
-      usage: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        totalTokens: 0,
-        cost: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-          total: 0,
-        },
-      },
-      stopReason: "stop",
+    const syntheticMessage: AgentMessage = {
+      role: "user",
+      content: [{ type: "text", text: `[Summary of earlier conversation]\n${summaryText}` }],
       timestamp: Date.now(),
     };
 

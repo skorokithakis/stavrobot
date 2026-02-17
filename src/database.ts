@@ -1,5 +1,4 @@
 import pg from "pg";
-import type { AssistantMessage } from "@mariozechner/pi-ai";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { PostgresConfig } from "./config.js";
 
@@ -120,27 +119,9 @@ export async function loadMessages(pool: pg.Pool): Promise<AgentMessage[]> {
   );
   const messages = result.rows.map((row) => row.content as AgentMessage);
   
-  const syntheticMessage: AssistantMessage = {
-    role: "assistant",
-    content: [{ type: "text", text: compaction.summary }],
-    api: "anthropic-messages",
-    provider: "anthropic",
-    model: "synthetic-compaction",
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        total: 0,
-      },
-    },
-    stopReason: "stop",
+  const syntheticMessage: AgentMessage = {
+    role: "user",
+    content: [{ type: "text", text: `[Summary of earlier conversation]\n${compaction.summary}` }],
     timestamp: Date.now(),
   };
   
