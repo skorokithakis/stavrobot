@@ -1,8 +1,8 @@
 import pg from "pg";
-import { Type, getModel, type TextContent } from "@mariozechner/pi-ai";
-import { Agent, type AgentTool, type AgentToolResult } from "@mariozechner/pi-agent-core";
+import { Type, getModel, type TextContent, complete, type AssistantMessage } from "@mariozechner/pi-ai";
+import { Agent, type AgentTool, type AgentToolResult, type AgentMessage } from "@mariozechner/pi-agent-core";
 import type { Config } from "./config.js";
-import { executeSql, loadMessages, saveMessage, readMemory, updateMemory } from "./database.js";
+import { executeSql, loadMessages, saveMessage, readMemory, updateMemory, saveCompaction, loadLatestCompaction } from "./database.js";
 
 export function createExecuteSqlTool(pool: pg.Pool): AgentTool {
   return {
@@ -52,7 +52,7 @@ export function createUpdateMemoryTool(pool: pg.Pool): AgentTool {
 export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent> {
   const model = getModel(config.provider as any, config.model as any);
   const messages = await loadMessages(pool);
-  const tools = [createExecuteSqlTool(pool)];
+  const tools = [createExecuteSqlTool(pool), createUpdateMemoryTool(pool)];
 
   const agent = new Agent({
     initialState: {
@@ -67,11 +67,59 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
   return agent;
 }
 
+function serializeMessagesForSummary(messages: AgentMessage[]): string {
+  const lines: string[] = [];
+  
+  for (const message of messages) {
+    if (message.role === "user") {
+      let textContent: string;
+      if (typeof message.content === "string") {
+        textContent = message.content;
+      } else {
+        const content = Array.isArray(message.content) ? message.content : [];
+        textContent = content
+          .filter((block): block is TextContent => block.type === "text")
+          .map((block) => block.text)
+          .join("");
+      }
+      lines.push(`User: ${textContent}`);
+    } else if (message.role === "assistant") {
+      const content = Array.isArray(message.content) ? message.content : [];
+      const textContent = content
+        .filter((block): block is TextContent => block.type === "text")
+        .map((block) => block.text)
+        .join("");
+      if (textContent) {
+        lines.push(`Assistant: ${textContent}`);
+      }
+    } else if (message.role === "toolResult") {
+      const content = Array.isArray(message.content) ? message.content : [];
+      const textContent = content
+        .filter((block): block is TextContent => block.type === "text")
+        .map((block) => block.text)
+        .join("");
+      lines.push(`Tool result (${message.toolName}): ${textContent}`);
+    }
+  }
+  
+  return lines.join("\n");
+}
+
 export async function handlePrompt(
   agent: Agent,
   pool: pg.Pool,
-  userMessage: string
+  userMessage: string,
+  config: Config
 ): Promise<string> {
+  const memory = await readMemory(pool);
+  
+  if (memory === "") {
+    agent.setSystemPrompt(config.systemPrompt);
+  } else {
+    const systemPromptWithMemory = `${config.systemPrompt}\n\n<memory>\n${memory}\n</memory>`;
+    agent.setSystemPrompt(systemPromptWithMemory);
+  }
+
   const savePromises: Promise<void>[] = [];
 
   const unsubscribe = agent.subscribe((event) => {
@@ -92,6 +140,73 @@ export async function handlePrompt(
   } finally {
     unsubscribe();
     await Promise.all(savePromises);
+  }
+
+  if (agent.state.messages.length > 40) {
+    const currentMessages = agent.state.messages;
+    const messagesToCompact = currentMessages.slice(0, -20);
+    const messagesToKeep = currentMessages.slice(-20);
+
+    const serializedMessages = serializeMessagesForSummary(messagesToCompact);
+    const summarySystemPrompt = "Summarize the following conversation concisely. Preserve all important facts, decisions, user preferences, and context. The summary will replace these messages in the conversation history.";
+    
+    const response = await complete(
+      agent.state.model,
+      {
+        systemPrompt: summarySystemPrompt,
+        messages: [
+          {
+            role: "user" as const,
+            content: serializedMessages,
+            timestamp: Date.now(),
+          },
+        ],
+      },
+      { apiKey: config.apiKey }
+    );
+
+    const summaryText = response.content
+      .filter((block): block is TextContent => block.type === "text")
+      .map((block) => block.text)
+      .join("");
+
+    const previousCompaction = await loadLatestCompaction(pool);
+    const previousBoundary = previousCompaction ? previousCompaction.upToMessageId : 0;
+    
+    const cutoffResult = await pool.query(
+      "SELECT id FROM messages WHERE id > $1 ORDER BY id DESC LIMIT 1 OFFSET 19",
+      [previousBoundary]
+    );
+    const upToMessageId = cutoffResult.rows[0].id as number;
+
+    await saveCompaction(pool, summaryText, upToMessageId);
+
+    const syntheticMessage: AssistantMessage = {
+      role: "assistant",
+      content: [{ type: "text", text: summaryText }],
+      api: "anthropic-messages",
+      provider: "anthropic",
+      model: "synthetic-compaction",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          total: 0,
+        },
+      },
+      stopReason: "stop",
+      timestamp: Date.now(),
+    };
+
+    const newMessages = [syntheticMessage, ...messagesToKeep];
+    agent.replaceMessages(newMessages);
   }
 
   const lastAssistantMessage = agent.state.messages

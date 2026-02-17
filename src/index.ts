@@ -1,8 +1,8 @@
 import http from "http";
 import type pg from "pg";
 import type { Agent } from "@mariozechner/pi-agent-core";
-import { loadConfig } from "./config.js";
-import { connectDatabase, initializeSchema } from "./database.js";
+import { loadConfig, type Config } from "./config.js";
+import { connectDatabase, initializeSchema, initializeMemorySchema, initializeCompactionsSchema } from "./database.js";
 import { createAgent, handlePrompt } from "./agent.js";
 
 async function readRequestBody(request: http.IncomingMessage): Promise<string> {
@@ -17,7 +17,8 @@ async function handleChatRequest(
   request: http.IncomingMessage,
   response: http.ServerResponse,
   agent: Agent,
-  pool: pg.Pool
+  pool: pg.Pool,
+  config: Config
 ): Promise<void> {
   try {
     const body = await readRequestBody(request);
@@ -42,7 +43,7 @@ async function handleChatRequest(
       return;
     }
 
-    const assistantResponse = await handlePrompt(agent, pool, parsedBody.message);
+    const assistantResponse = await handlePrompt(agent, pool, parsedBody.message, config);
     response.writeHead(200, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ response: assistantResponse }));
   } catch (error) {
@@ -56,11 +57,13 @@ async function main(): Promise<void> {
   const config = loadConfig();
   const pool = await connectDatabase(config.postgres);
   await initializeSchema(pool);
+  await initializeMemorySchema(pool);
+  await initializeCompactionsSchema(pool);
   const agent = await createAgent(config, pool);
 
   const server = http.createServer((request: http.IncomingMessage, response: http.ServerResponse): void => {
     if (request.method === "POST" && request.url === "/chat") {
-      handleChatRequest(request, response, agent, pool);
+      handleChatRequest(request, response, agent, pool, config);
     } else {
       response.writeHead(404, { "Content-Type": "application/json" });
       response.end(JSON.stringify({ error: "Not found" }));
