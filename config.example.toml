@@ -44,3 +44,7 @@ voice = "alloy"
 provider = "openai"
 apiKey = "your-openai-api-key-here"
 model = "gpt-4o-transcribe"
+
+# [webSearch]
+# apiKey = "your-anthropic-api-key-here"
+# model = "claude-haiku-4-20250514"

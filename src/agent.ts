@@ -8,6 +8,7 @@ import type { Config, TtsConfig } from "./config.js";
 import { getApiKey } from "./auth.js";
 import { executeSql, loadMessages, saveMessage, saveCompaction, loadLatestCompaction, loadAllMemories, upsertMemory, deleteMemory, createCronEntry, updateCronEntry, deleteCronEntry, listCronEntries, type Memory } from "./database.js";
 import { reloadScheduler } from "./scheduler.js";
+import { createWebSearchTool } from "./web-search.js";
 
 // A simple boolean flag to prevent concurrent compaction runs. If a compaction
 // is already in progress when another request triggers the threshold, we skip
@@ -360,6 +361,9 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
   const model = getModel(config.provider as any, config.model as any);
   const messages = await loadMessages(pool);
   const tools = [createExecuteSqlTool(pool), createUpdateMemoryTool(pool), createDeleteMemoryTool(pool), createSendSignalMessageTool(), createManageCronTool(pool)];
+  if (config.webSearch !== undefined) {
+    tools.push(createWebSearchTool(config.webSearch));
+  }
   if (config.tts !== undefined) {
     tools.push(createTextToSpeechTool(config.tts));
   }

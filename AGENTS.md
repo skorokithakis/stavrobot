@@ -79,6 +79,15 @@ both linting and formatting with good TypeScript ESM support).
   `config.ts` (loading config), `database.ts` (Postgres operations), `agent.ts`
   (LLM agent setup and prompting), `index.ts` (HTTP server and entry point).
 
+### Logging
+
+- Add `console.log` statements to trace code flow at a high level. Not every line, but
+  enough to follow what's happening in the logs: tool invocations, external API calls,
+  key decision points, and results (or at least their size/shape).
+- Use the `[stavrobot]` prefix for all log lines (e.g.,
+  `console.log("[stavrobot] web_search called:", query)`).
+- Use `console.error` for errors and `console.warn` for warnings.
+
 ### Error handling
 
 - Let exceptions propagate. Do not add defensive try/catch blocks unless the function

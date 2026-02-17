@@ -22,6 +22,11 @@ export interface SttConfig {
   model: string;
 }
 
+export interface WebSearchConfig {
+  apiKey: string;
+  model: string;
+}
+
 export interface Config {
   provider: string;
   model: string;
@@ -31,6 +36,7 @@ export interface Config {
   postgres: PostgresConfig;
   tts?: TtsConfig;
   stt?: SttConfig;
+  webSearch?: WebSearchConfig;
 }
 
 export function loadConfig(): Config {
