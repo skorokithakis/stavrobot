@@ -425,16 +425,8 @@ def process_signal_event(
     try:
         agent_response = send_agent_request(message_text, source_number)
         log(f"Agent response: {agent_response}")
-        if not agent_response.strip():
-            log("Agent returned empty response, skipping send.")
-            return
-        plain_text, text_styles = convert_markdown(agent_response)
-        send_signal_message(source_number, plain_text, request_counter.next(), text_styles)
-        log(f"Sent reply to {source_number}")
     except (OSError, RuntimeError, json.JSONDecodeError, KeyError, TypeError) as error:
         log(f"Error processing message: {error}")
-        error_message = "Sorry, I encountered an error processing your message."
-        send_signal_message(source_number, error_message, request_counter.next())
 
 
 def listen_to_sse_stream(
