@@ -371,7 +371,8 @@ def make_send_handler(
                         except OSError as error:
                             log(f"Warning: failed to delete temp file {temp_path}: {error}")
                 else:
-                    success = send_signal_message(recipient, message_text, request_counter.next())
+                    plain_text, text_styles = convert_markdown(message_text)
+                    success = send_signal_message(recipient, plain_text, request_counter.next(), text_styles)
             except (OSError, RuntimeError, json.JSONDecodeError) as error:
                 log(f"Error in /send handler: {error}")
                 self.send_error_response(500, str(error))
@@ -496,6 +497,8 @@ def process_signal_event(
 
     log(f"Received message from {source_number}: {message_text}")
 
+    # The bridge does not reply directly on Signal. The agent uses the
+    # send_signal_message tool to send replies, which hits our /send endpoint.
     try:
         agent_response = send_agent_request(message_text, source_number)
         log(f"Agent response: {agent_response}")
