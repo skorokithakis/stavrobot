@@ -43,10 +43,23 @@ async function handleChatRequest(
       return;
     }
 
-    const assistantResponse = await handlePrompt(agent, pool, parsedBody.message, config);
+    const source = "source" in parsedBody && typeof parsedBody.source === "string" ? parsedBody.source : undefined;
+    const sender = "sender" in parsedBody && typeof parsedBody.sender === "string" ? parsedBody.sender : undefined;
+
+    console.log("[stavrobot] Incoming request:", { message: parsedBody.message, source, sender });
+
+    const assistantResponse = await handlePrompt(agent, pool, parsedBody.message, config, source, sender);
+
+    if (assistantResponse) {
+      console.log("[stavrobot] Agent response:", assistantResponse);
+    } else {
+      console.log("[stavrobot] Agent returned empty response.");
+    }
+
     response.writeHead(200, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ response: assistantResponse }));
   } catch (error) {
+    console.error("[stavrobot] Error handling request:", error);
     const errorMessage = error instanceof Error ? error.message : String(error);
     response.writeHead(500, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ error: errorMessage }));

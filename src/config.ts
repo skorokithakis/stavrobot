@@ -9,12 +9,27 @@ export interface PostgresConfig {
   password: string;
 }
 
+export interface TtsConfig {
+  provider: string;
+  apiKey: string;
+  model: string;
+  voice: string;
+}
+
+export interface SttConfig {
+  provider: string;
+  apiKey: string;
+  model: string;
+}
+
 export interface Config {
   provider: string;
   model: string;
   apiKey: string;
   systemPrompt: string;
   postgres: PostgresConfig;
+  tts?: TtsConfig;
+  stt?: SttConfig;
 }
 
 export function loadConfig(): Config {
