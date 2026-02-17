@@ -9,6 +9,7 @@ import { getApiKey } from "./auth.js";
 import { executeSql, loadMessages, saveMessage, saveCompaction, loadLatestCompaction, loadAllMemories, upsertMemory, deleteMemory, createCronEntry, updateCronEntry, deleteCronEntry, listCronEntries, type Memory } from "./database.js";
 import { reloadScheduler } from "./scheduler.js";
 import { createWebSearchTool } from "./web-search.js";
+import { createWebFetchTool } from "./web-fetch.js";
 
 // A simple boolean flag to prevent concurrent compaction runs. If a compaction
 // is already in progress when another request triggers the threshold, we skip
@@ -363,6 +364,9 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
   const tools = [createExecuteSqlTool(pool), createUpdateMemoryTool(pool), createDeleteMemoryTool(pool), createSendSignalMessageTool(), createManageCronTool(pool)];
   if (config.webSearch !== undefined) {
     tools.push(createWebSearchTool(config.webSearch));
+  }
+  if (config.webFetch !== undefined) {
+    tools.push(createWebFetchTool(config.webFetch));
   }
   if (config.tts !== undefined) {
     tools.push(createTextToSpeechTool(config.tts));

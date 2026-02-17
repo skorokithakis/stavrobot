@@ -27,6 +27,11 @@ export interface WebSearchConfig {
   model: string;
 }
 
+export interface WebFetchConfig {
+  apiKey: string;
+  model: string;
+}
+
 export interface Config {
   provider: string;
   model: string;
@@ -37,6 +42,7 @@ export interface Config {
   tts?: TtsConfig;
   stt?: SttConfig;
   webSearch?: WebSearchConfig;
+  webFetch?: WebFetchConfig;
 }
 
 export function loadConfig(): Config {

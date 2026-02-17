@@ -48,3 +48,7 @@ model = "gpt-4o-transcribe"
 # [webSearch]
 # apiKey = "your-anthropic-api-key-here"
 # model = "claude-haiku-4-20250514"
+
+# [webFetch]
+# apiKey = "your-anthropic-api-key-here"
+# model = "claude-haiku-4-20250514"

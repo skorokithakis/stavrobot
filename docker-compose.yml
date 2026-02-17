@@ -20,7 +20,7 @@ services:
     environment:
       TZ: Europe/Athens
     volumes:
-      - ./config.toml:/app/config.toml:ro
+      - ./data/main/config.toml:/app/config.toml:ro
       - ./data/app:/app/data
     depends_on:
       postgres:
@@ -31,7 +31,7 @@ services:
     mem_limit: 256m
     restart: unless-stopped
     volumes:
-      - ./config.toml:/app/config.toml:ro
+      - ./data/main/config.toml:/app/config.toml:ro
       - ./data/signal-cli:/root/.local/share/signal-cli
     depends_on:
       app:
