@@ -3,3 +3,4 @@ dist
 config.json
 config.toml
 __pycache__/
+data/

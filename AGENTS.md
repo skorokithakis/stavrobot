@@ -130,11 +130,13 @@ The Python code (`client.py`) is a standalone CLI client with no third-party dep
 - docker-compose runs Postgres 17 and the app, with a health check on Postgres before
   the app starts.
 - The app listens on port 3000 by default (configurable via `PORT` env var).
+- After completing a feature, run `docker compose build` to verify all containers build
+  successfully.
 
 ## Version control
 
 - The repo uses Jujutsu (`jj`) alongside git.
-- When asked to commit, run `jj diff` first, then `jj describe -m` with a message
+- When asked to commit, run `jj diff` first, then `jj commit -m` with a message
   describing the whole change.
 - Do not mention AI in commit messages. Write them as if the human wrote the code.
 

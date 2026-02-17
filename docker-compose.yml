@@ -11,7 +11,7 @@ services:
       timeout: 3s
       retries: 10
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
 
   app:
     build: .
@@ -23,5 +23,13 @@ services:
       postgres:
         condition: service_healthy
 
-volumes:
-  postgres_data:
+  signal-bridge:
+    build: ./signal-bridge
+    mem_limit: 256m
+    restart: unless-stopped
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+      - ./data/signal-cli:/root/.local/share/signal-cli
+    depends_on:
+      app:
+        condition: service_started

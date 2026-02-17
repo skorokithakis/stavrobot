@@ -14,3 +14,7 @@ port = 5432
 database = "stavrobot"
 user = "stavrobot"
 password = "stavrobot"
+
+[signal]
+account = "+1234567890"
+allowedNumbers = ["+1234567890"]
