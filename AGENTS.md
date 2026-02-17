@@ -141,6 +141,10 @@ The Python code (`client.py`) is a standalone CLI client with no third-party dep
 - The app listens on port 3000 by default (configurable via `PORT` env var).
 - After completing a feature, run `docker compose build` to verify all containers build
   successfully.
+- `docker-compose.harbormaster.yml` is an override file that replaces `./data` volume
+  paths with `{{ HM_DATA_DIR }}`. Whenever `docker-compose.yml` changes (new services,
+  volume mounts, etc.), update `docker-compose.harbormaster.yml` to match. The volume
+  paths in both files must stay in sync.
 
 ## Version control
 
