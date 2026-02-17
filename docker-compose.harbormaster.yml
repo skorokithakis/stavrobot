@@ -4,9 +4,9 @@ services:
       - {{ HM_DATA_DIR }}/postgres:/var/lib/postgresql/data
   app:
     volumes:
-      - {{ HM_DATA_DIR }}/config.toml:/app/config.toml:ro
+      - {{ HM_DATA_DIR }}/main/config.toml:/app/config.toml:ro
       - {{ HM_DATA_DIR }}/app:/app/data
   signal-bridge:
     volumes:
-      - {{ HM_DATA_DIR }}/config.toml:/app/config.toml:ro
+      - {{ HM_DATA_DIR }}/main/config.toml:/app/config.toml:ro
       - {{ HM_DATA_DIR }}/signal-cli:/root/.local/share/signal-cli
