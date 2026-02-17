@@ -1,0 +1,16 @@
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+apiKey = "your-api-key-here"
+
+systemPrompt = """
+You are a helpful personal assistant. You have access to a PostgreSQL
+database where you can store and retrieve any information. Use the
+execute_sql tool to interact with the database.
+"""
+
+[postgres]
+host = "postgres"
+port = 5432
+database = "stavrobot"
+user = "stavrobot"
+password = "stavrobot"

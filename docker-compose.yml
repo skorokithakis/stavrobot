@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: stavrobot
+      POSTGRES_USER: stavrobot
+      POSTGRES_PASSWORD: stavrobot
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "stavrobot", "-d", "stavrobot"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
