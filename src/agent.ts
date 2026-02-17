@@ -46,6 +46,7 @@ export function createUpdateMemoryTool(pool: pg.Pool): AgentTool {
       const { id, content } = params as { id?: number; content: string };
       const memoryId = await upsertMemory(pool, id, content);
       const message = id === undefined ? `Memory ${memoryId} created.` : `Memory ${memoryId} updated.`;
+      console.log(`[stavrobot] ${message} Content: ${content}`);
       return {
         content: [{ type: "text" as const, text: message }],
         details: { message },
@@ -69,6 +70,7 @@ export function createDeleteMemoryTool(pool: pg.Pool): AgentTool {
       const { id } = params as { id: number };
       await deleteMemory(pool, id);
       const message = `Memory ${id} deleted.`;
+      console.log(`[stavrobot] ${message}`);
       return {
         content: [{ type: "text" as const, text: message }],
         details: { message },
