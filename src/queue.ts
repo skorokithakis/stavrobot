@@ -3,10 +3,14 @@ import type { Agent } from "@mariozechner/pi-agent-core";
 import type { Config } from "./config.js";
 import { handlePrompt } from "./agent.js";
 
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 30_000;
+
 interface QueueEntry {
   message: string;
   source: string | undefined;
   sender: string | undefined;
+  retries: number;
   resolve: (value: string) => void;
   reject: (reason: unknown) => void;
 }
@@ -24,6 +28,10 @@ export function initializeQueue(agent: Agent, pool: pg.Pool, config: Config): vo
   queueConfig = config;
 }
 
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 async function processQueue(): Promise<void> {
   processing = true;
   while (queue.length > 0) {
@@ -32,7 +40,16 @@ async function processQueue(): Promise<void> {
       const response = await handlePrompt(queueAgent!, queuePool!, entry.message, queueConfig!, entry.source, entry.sender);
       entry.resolve(response);
     } catch (error) {
-      entry.reject(error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (entry.retries < MAX_RETRIES) {
+        const attempt = entry.retries + 1;
+        console.log(`[stavrobot] Message failed (attempt ${attempt}/${MAX_RETRIES + 1}), retrying in ${RETRY_DELAY_MS / 1000}s: ${errorMessage}`);
+        await sleep(RETRY_DELAY_MS);
+        queue.push({ ...entry, retries: attempt });
+      } else {
+        console.error(`[stavrobot] Message failed after ${MAX_RETRIES + 1} attempts, giving up: ${errorMessage}`);
+        entry.reject(error);
+      }
     }
   }
   processing = false;
@@ -40,7 +57,7 @@ async function processQueue(): Promise<void> {
 
 export function enqueueMessage(message: string, source?: string, sender?: string): Promise<string> {
   return new Promise<string>((resolve, reject) => {
-    queue.push({ message, source, sender, resolve, reject });
+    queue.push({ message, source, sender, retries: 0, resolve, reject });
     if (!processing) {
       void processQueue();
     }

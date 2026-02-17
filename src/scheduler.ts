@@ -42,24 +42,24 @@ async function loadEntries(pool: pg.Pool): Promise<void> {
 function tick(): void {
   const now = new Date();
 
-  // Step 1: Snapshot all entries that are due.
   const toFire = scheduledEntries.filter((entry) => entry.nextFireAt <= now);
 
-  // Step 2: Update in-memory state synchronously before any async work.
+  if (toFire.length > 0) {
+    console.log(`[stavrobot] Cron tick: firing ${toFire.length} entries (ids: ${toFire.map((e) => e.id).join(", ")})`);
+  }
+
+  // Update in-memory state synchronously before any async work.
   for (const entry of toFire) {
     if (entry.cronExpression !== null) {
-      // Recurring: recompute next fire time in-place.
       entry.nextFireAt = computeNextFireAt(entry.cronExpression);
     } else {
-      // One-shot: remove from in-memory list immediately so the next tick
-      // won't re-fire it, even if the DB deletion hasn't completed yet.
+      // Remove from in-memory list immediately so the next tick won't
+      // re-fire it, even if the DB deletion hasn't completed yet.
       scheduledEntries = scheduledEntries.filter((e) => e.id !== entry.id);
-      // Delete from DB asynchronously; the in-memory list is already updated.
       void deleteCronEntry(schedulerPool!, entry.id);
     }
   }
 
-  // Step 3: Fire all due entries. Fire-and-forget — do not await.
   for (const entry of toFire) {
     const framedNote = `[Cron entry ${entry.id} has fired] ${entry.note}\n\nThis is a scheduled reminder that has just triggered. Act on the note above directly (e.g. send a message, update a memory). Do not create new cron entries in response to this.`;
     void enqueueMessage(framedNote, "cron");

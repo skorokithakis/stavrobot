@@ -491,7 +491,9 @@ export async function handlePrompt(
   }
 
   if (agent.state.error) {
-    console.error("[stavrobot] Agent error:", agent.state.error);
+    const errorJson = JSON.stringify(agent.state.error);
+    console.error("[stavrobot] Agent error:", errorJson);
+    throw new Error(`Agent error: ${errorJson}`);
   }
 
   if (agent.state.messages.length > 40 && !compactionInProgress) {
