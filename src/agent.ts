@@ -283,6 +283,25 @@ function serializeMessagesForSummary(messages: AgentMessage[]): string {
   return lines.join("\n");
 }
 
+function formatDate(date: Date): string {
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const day = days[date.getDay()];
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const dayOfMonth = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
+  return `${day} ${year}-${month}-${dayOfMonth} ${hours}:${minutes}:${seconds}`;
+}
+
+function formatUserMessage(userMessage: string, source?: string, sender?: string): string {
+  const time = formatDate(new Date());
+  const resolvedSource = source ?? "cli";
+  const resolvedSender = sender ?? "unknown";
+  return `Time: ${time}\nSource: ${resolvedSource}\nSender: ${resolvedSender}\nText: ${userMessage}`;
+}
+
 export async function handlePrompt(
   agent: Agent,
   pool: pg.Pool,
@@ -328,9 +347,7 @@ export async function handlePrompt(
     }
   });
 
-  const messageToSend = source !== undefined
-    ? `[Message from ${source}, sender: ${sender ?? "unknown"}]\n${userMessage}`
-    : userMessage;
+  const messageToSend = formatUserMessage(userMessage, source, sender);
 
   console.log("[stavrobot] Sending message to agent:", messageToSend);
 
