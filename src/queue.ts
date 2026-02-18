@@ -11,6 +11,7 @@ interface QueueEntry {
   source: string | undefined;
   sender: string | undefined;
   audio: string | undefined;
+  audioContentType: string | undefined;
   retries: number;
   resolve: (value: string) => void;
   reject: (reason: unknown) => void;
@@ -38,7 +39,7 @@ async function processQueue(): Promise<void> {
   while (queue.length > 0) {
     const entry = queue.shift()!;
     try {
-      const response = await handlePrompt(queueAgent!, queuePool!, entry.message, queueConfig!, entry.source, entry.sender, entry.audio);
+      const response = await handlePrompt(queueAgent!, queuePool!, entry.message, queueConfig!, entry.source, entry.sender, entry.audio, entry.audioContentType);
       entry.resolve(response);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -56,9 +57,9 @@ async function processQueue(): Promise<void> {
   processing = false;
 }
 
-export function enqueueMessage(message: string | undefined, source?: string, sender?: string, audio?: string): Promise<string> {
+export function enqueueMessage(message: string | undefined, source?: string, sender?: string, audio?: string, audioContentType?: string): Promise<string> {
   return new Promise<string>((resolve, reject) => {
-    queue.push({ message, source, sender, audio, retries: 0, resolve, reject });
+    queue.push({ message, source, sender, audio, audioContentType, retries: 0, resolve, reject });
     if (!processing) {
       void processQueue();
     }

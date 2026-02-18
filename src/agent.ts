@@ -570,7 +570,8 @@ export async function handlePrompt(
   config: Config,
   source?: string,
   sender?: string,
-  audio?: string
+  audio?: string,
+  audioContentType?: string
 ): Promise<string> {
   const memories = await loadAllMemories(pool);
   
@@ -619,7 +620,8 @@ export async function handlePrompt(
   if (audio !== undefined) {
     if (config.stt !== undefined) {
       const audioBuffer = Buffer.from(audio, "base64");
-      const transcription = await transcribeAudio(audioBuffer, config.stt);
+      const resolvedContentType = audioContentType ?? "audio/ogg";
+      const transcription = await transcribeAudio(audioBuffer, config.stt, resolvedContentType);
       const voiceNote = `[Voice note]: ${transcription}`;
       resolvedMessage = resolvedMessage !== undefined ? `${resolvedMessage}\n${voiceNote}` : voiceNote;
     } else {

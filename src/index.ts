@@ -48,10 +48,11 @@ async function handleChatRequest(
 
     const source = "source" in parsedBody && typeof parsedBody.source === "string" ? parsedBody.source : undefined;
     const sender = "sender" in parsedBody && typeof parsedBody.sender === "string" ? parsedBody.sender : undefined;
+    const audioContentType = "audioContentType" in parsedBody && typeof parsedBody.audioContentType === "string" ? parsedBody.audioContentType : undefined;
 
-    console.log("[stavrobot] Incoming request:", { message, source, sender, hasAudio: audio !== undefined });
+    console.log("[stavrobot] Incoming request:", { message, source, sender, hasAudio: audio !== undefined, audioContentType });
 
-    const assistantResponse = await enqueueMessage(message, source, sender, audio);
+    const assistantResponse = await enqueueMessage(message, source, sender, audio, audioContentType);
 
     if (assistantResponse) {
       console.log("[stavrobot] Agent response:", assistantResponse);

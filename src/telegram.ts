@@ -4,6 +4,7 @@ import { enqueueMessage } from "./queue.js";
 
 interface TelegramVoice {
   file_id: string;
+  mime_type?: string;
 }
 
 interface TelegramMessage {
@@ -218,10 +219,12 @@ export async function handleTelegramWebhook(
 
   if (voiceOrAudio !== undefined) {
     const fileId = voiceOrAudio.file_id;
-    console.log("[stavrobot] Telegram voice/audio message from chat:", chatId);
+    // Telegram voice notes are always OGG Opus; fall back to that if mime_type is absent.
+    const audioContentType = voiceOrAudio.mime_type ?? "audio/ogg";
+    console.log("[stavrobot] Telegram voice/audio message from chat:", chatId, "contentType:", audioContentType);
     // Fire-and-forget: Telegram requires a fast 200 response, so we don't await.
     void downloadVoiceAsBase64(config, fileId).then((audioBase64) => {
-      void enqueueMessage(message.text ?? message.caption, "telegram", String(chatId), audioBase64);
+      void enqueueMessage(message.text ?? message.caption, "telegram", String(chatId), audioBase64, audioContentType);
     }).catch((error: unknown) => {
       console.error("[stavrobot] Error downloading Telegram voice/audio:", error);
     });
