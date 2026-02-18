@@ -9,6 +9,8 @@ model = "claude-sonnet-4-20250514"
 apiKey = "your-api-key-here"
 # authFile = "/path/to/auth.json"
 
+# The system prompt is injected at the start of every conversation. Customize
+# it to change the agent's personality, capabilities, and behavior.
 systemPrompt = """
 You are a helpful personal assistant. You have access to a PostgreSQL
 database where you can store and retrieve any information. Use the
@@ -29,6 +31,8 @@ clearly what the tool should do, what parameters it should accept, and what it s
 return. The coding agent's response will arrive as a separate message with Source: coder.
 """
 
+# The PostgreSQL database the agent uses for persistent storage. The defaults
+# here match the docker-compose setup and work out of the box.
 [postgres]
 host = "postgres"
 port = 5432
@@ -36,28 +40,37 @@ database = "stavrobot"
 user = "stavrobot"
 password = "stavrobot"
 
+# Signal integration. account is the phone number registered with signal-cli.
+# allowedNumbers is the allowlist of numbers permitted to message the agent.
 [signal]
 account = "+1234567890"
 allowedNumbers = ["+1234567890"]
 
+# Text-to-speech configuration. Used by the text_to_speech tool.
 [tts]
 provider = "openai"
 apiKey = "your-openai-api-key-here"
 model = "tts-1"
 voice = "alloy"
 
+# Speech-to-text configuration. Used by the signal bridge to transcribe voice notes.
 [stt]
 provider = "openai"
 apiKey = "your-openai-api-key-here"
 model = "gpt-4o-transcribe"
 
+# Optional. Enables the web_search tool. Uses a separate API key and model for
+# sub-agent search calls. Uncomment to activate.
 # [webSearch]
 # apiKey = "your-anthropic-api-key-here"
 # model = "claude-haiku-4-20250514"
 
+# Optional. Enables the web_fetch tool. Same pattern as webSearch. Uncomment to activate.
 # [webFetch]
 # apiKey = "your-anthropic-api-key-here"
 # model = "claude-haiku-4-20250514"
 
+# Enables the self-programming coder agent. The model here can differ from the
+# main model above, allowing a different model to handle coding tasks.
 [coder]
 model = "claude-sonnet-4-6"
