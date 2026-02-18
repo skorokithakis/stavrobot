@@ -155,6 +155,12 @@ The Python code (`client.py`) is a standalone CLI client with no third-party dep
 - DO NOT REVERT ANY CHANGES. If you notice unrelated changes in the repo, pause and ask
   the user, as they might be changes the user has made.
 
+## Pi library versions
+
+- The main app (`package.json`) and the coder (`coder/package.json`) both depend on
+  packages from the Pi mono repo. Their Pi dependency versions must always match — if
+  one is updated, the other must be updated to the same version in the same change.
+
 ## Context7
 
 - The LLM agent library used in this project is from the Pi mono repo. The Context7
