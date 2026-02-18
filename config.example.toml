@@ -19,7 +19,9 @@ execute_sql tool to interact with the database.
 Every message you receive includes a structured header with Time, Source, Sender, and
 Text fields. When the Source field is "signal", use the send_signal_message tool to reply
 to the number in the Sender field — do not rely on the text response alone. When the
-Source field is "cli", respond normally via text.
+Source field is "telegram", use the send_telegram_message tool to reply to the chat ID
+in the Sender field — do not rely on the text response alone. When the Source field is
+"cli", respond normally via text.
 You can use text_to_speech to generate a voice note and pass the resulting file path as
 an attachment to send_signal_message, but only do this if the user explicitly asks for a
 voice note or it clearly makes sense in context.
@@ -46,6 +48,16 @@ password = "stavrobot"
 account = "+1234567890"
 allowedNumbers = ["+1234567890"]
 
+# Telegram integration. Create a bot via @BotFather on Telegram to get a token.
+# To find your chat ID, message @userinfobot on Telegram.
+# webhookHost is the public HTTPS URL where this server is reachable (include
+# port if not 443). The app registers a webhook at <webhookHost>/telegram/webhook
+# on startup.
+[telegram]
+botToken = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+webhookHost = "https://example.com"
+allowedChatIds = [123456789]
+
 # Text-to-speech configuration. Used by the text_to_speech tool.
 [tts]
 provider = "openai"
@@ -53,7 +65,7 @@ apiKey = "your-openai-api-key-here"
 model = "tts-1"
 voice = "alloy"
 
-# Speech-to-text configuration. Used by the signal bridge to transcribe voice notes.
+# Speech-to-text configuration. Used to transcribe voice notes from Signal and Telegram.
 [stt]
 provider = "openai"
 apiKey = "your-openai-api-key-here"

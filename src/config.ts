@@ -36,6 +36,12 @@ export interface CoderConfig {
   model: string;
 }
 
+export interface TelegramConfig {
+  botToken: string;
+  webhookHost: string;
+  allowedChatIds: number[];
+}
+
 export interface Config {
   provider: string;
   model: string;
@@ -48,6 +54,7 @@ export interface Config {
   webSearch?: WebSearchConfig;
   webFetch?: WebFetchConfig;
   coder?: CoderConfig;
+  telegram?: TelegramConfig;
 }
 
 export function loadConfig(): Config {

@@ -15,6 +15,7 @@
     "@mariozechner/pi-agent-core": "^0.53.0",
     "@mariozechner/pi-ai": "^0.53.0",
     "cron-parser": "^5.5.0",
+    "marked": "^17.0.3",
     "pg": "^8.11.3"
   },
   "devDependencies": {

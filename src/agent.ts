@@ -4,7 +4,8 @@ import path from "node:path";
 import pg from "pg";
 import { Type, getModel, type TextContent, complete } from "@mariozechner/pi-ai";
 import { Agent, type AgentTool, type AgentToolResult, type AgentMessage } from "@mariozechner/pi-agent-core";
-import type { Config, TtsConfig } from "./config.js";
+import type { Config, TelegramConfig, TtsConfig } from "./config.js";
+import { transcribeAudio } from "./stt.js";
 import { getApiKey } from "./auth.js";
 import { executeSql, loadMessages, saveMessage, saveCompaction, loadLatestCompaction, loadAllMemories, upsertMemory, deleteMemory, createCronEntry, updateCronEntry, deleteCronEntry, listCronEntries, type Memory } from "./database.js";
 import { reloadScheduler } from "./scheduler.js";
@@ -12,6 +13,7 @@ import { createWebSearchTool } from "./web-search.js";
 import { createWebFetchTool } from "./web-fetch.js";
 import { createListToolsTool, createShowToolTool, createRunToolTool, createRequestCodingTaskTool } from "./coder-tools.js";
 import { createRunPythonTool } from "./python.js";
+import { convertMarkdownToTelegramHtml } from "./telegram.js";
 
 // A simple boolean flag to prevent concurrent compaction runs. If a compaction
 // is already in progress when another request triggers the threshold, we skip
@@ -229,6 +231,112 @@ export function createSendSignalMessageTool(): AgentTool {
   };
 }
 
+export function createSendTelegramMessageTool(config: TelegramConfig): AgentTool {
+  return {
+    name: "send_telegram_message",
+    label: "Send Telegram message",
+    description: "Send a message via Telegram to a chat ID. Can send text, an audio file (from a file path returned by text_to_speech), or both.",
+    parameters: Type.Object({
+      recipient: Type.String({ description: "Telegram chat ID to send the message to." }),
+      message: Type.Optional(Type.String({ description: "Text message to send. Markdown formatting is supported." })),
+      attachmentPath: Type.Optional(Type.String({ description: "File path to an audio attachment (e.g., from text_to_speech tool output)." })),
+    }),
+    execute: async (
+      toolCallId: string,
+      params: unknown
+    ): Promise<AgentToolResult<{ message: string }>> => {
+      const raw = params as {
+        recipient: string;
+        message?: string;
+        attachmentPath?: string;
+      };
+
+      const recipient = raw.recipient;
+      const message = raw.message?.trim() || undefined;
+      const attachmentPath = raw.attachmentPath?.trim() || undefined;
+
+      console.log("[stavrobot] send_telegram_message called:", { recipient, hasAttachment: attachmentPath !== undefined });
+
+      if (message === undefined && attachmentPath === undefined) {
+        return {
+          content: [{ type: "text" as const, text: "Error: at least one of message or attachmentPath must be provided." }],
+          details: { message: "Error: at least one of message or attachmentPath must be provided." },
+        };
+      }
+
+      const baseUrl = `https://api.telegram.org/bot${config.botToken}`;
+
+      if (attachmentPath !== undefined) {
+        const fileBuffer = await fs.readFile(attachmentPath);
+        const formData = new FormData();
+        formData.append("chat_id", recipient);
+        formData.append("voice", new Blob([fileBuffer]), path.basename(attachmentPath));
+
+        if (message !== undefined) {
+          const htmlCaption = await convertMarkdownToTelegramHtml(message);
+          formData.append("caption", htmlCaption);
+          formData.append("parse_mode", "HTML");
+        }
+
+        // Only delete files that were created in the OS temp directory to avoid
+        // accidentally removing arbitrary files the agent was given access to.
+        if (attachmentPath.startsWith(os.tmpdir())) {
+          await fs.unlink(attachmentPath);
+        }
+
+        const response = await fetch(`${baseUrl}/sendVoice`, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errorBody = await response.json() as { description?: string };
+          const description = errorBody.description ?? "unknown error";
+          const errorMessage = `Error: Telegram API error ${response.status}: ${description}`;
+          console.error("[stavrobot] send_telegram_message sendVoice error:", errorMessage);
+          return {
+            content: [{ type: "text" as const, text: errorMessage }],
+            details: { message: errorMessage },
+          };
+        }
+
+        console.log("[stavrobot] send_telegram_message sendVoice response status:", response.status);
+        const successMessage = "Message sent successfully.";
+        return {
+          content: [{ type: "text" as const, text: successMessage }],
+          details: { message: successMessage },
+        };
+      }
+
+      // Text-only path: convert markdown to Telegram HTML and call sendMessage.
+      const htmlText = await convertMarkdownToTelegramHtml(message as string);
+      const response = await fetch(`${baseUrl}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: recipient, text: htmlText, parse_mode: "HTML" }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.json() as { description?: string };
+        const description = errorBody.description ?? "unknown error";
+        const errorMessage = `Error: Telegram API error ${response.status}: ${description}`;
+        console.error("[stavrobot] send_telegram_message sendMessage error:", errorMessage);
+        return {
+          content: [{ type: "text" as const, text: errorMessage }],
+          details: { message: errorMessage },
+        };
+      }
+
+      console.log("[stavrobot] send_telegram_message sendMessage response status:", response.status);
+      const successMessage = "Message sent successfully.";
+      return {
+        content: [{ type: "text" as const, text: successMessage }],
+        details: { message: successMessage },
+      };
+    },
+  };
+}
+
 export function createManageCronTool(pool: pg.Pool): AgentTool {
   return {
     name: "manage_cron",
@@ -381,6 +489,9 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
       createRequestCodingTaskTool(),
     );
   }
+  if (config.telegram !== undefined) {
+    tools.push(createSendTelegramMessageTool(config.telegram));
+  }
 
   const agent = new Agent({
     initialState: {
@@ -455,10 +566,11 @@ function formatUserMessage(userMessage: string, source?: string, sender?: string
 export async function handlePrompt(
   agent: Agent,
   pool: pg.Pool,
-  userMessage: string,
+  userMessage: string | undefined,
   config: Config,
   source?: string,
-  sender?: string
+  sender?: string,
+  audio?: string
 ): Promise<string> {
   const memories = await loadAllMemories(pool);
   
@@ -502,7 +614,20 @@ export async function handlePrompt(
     }
   });
 
-  const messageToSend = formatUserMessage(userMessage, source, sender);
+  let resolvedMessage = userMessage;
+
+  if (audio !== undefined) {
+    if (config.stt !== undefined) {
+      const audioBuffer = Buffer.from(audio, "base64");
+      const transcription = await transcribeAudio(audioBuffer, config.stt);
+      const voiceNote = `[Voice note]: ${transcription}`;
+      resolvedMessage = resolvedMessage !== undefined ? `${resolvedMessage}\n${voiceNote}` : voiceNote;
+    } else {
+      console.warn("[stavrobot] Audio received but [stt] is not configured; ignoring audio.");
+    }
+  }
+
+  const messageToSend = formatUserMessage(resolvedMessage ?? "", source, sender);
 
   console.log("[stavrobot] Sending message to agent:", messageToSend);
 

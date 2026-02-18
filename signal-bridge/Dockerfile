@@ -5,7 +5,6 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
-    ffmpeg \
     python3 \
     python3-pip && \
     pip3 install --break-system-packages mistune && \
