@@ -1,5 +1,7 @@
 # Stavrobot
 
+![](misc/stavrobot.jpg)
+
 A personal AI assistant with persistent memory, sandboxed code execution, and Signal integration.
 
 ## Features
