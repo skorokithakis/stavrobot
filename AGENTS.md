@@ -145,6 +145,12 @@ The Python code (`client.py`) is a standalone CLI client with no third-party dep
   paths with `{{ HM_DATA_DIR }}`. Whenever `docker-compose.yml` changes (new services,
   volume mounts, etc.), update `docker-compose.harbormaster.yml` to match. The volume
   paths in both files must stay in sync.
+- NEVER mount the Docker socket (`/var/run/docker.sock`) into any container. The LLM
+  agents have shell access and could use the socket to introspect or control the entire
+  Docker host.
+- Never mount single files as Docker volumes. Mount entire directories instead and place
+  the files inside them. Docker creates a directory with the file's name if the file
+  doesn't exist on the host at container start time.
 
 ## Version control
 
