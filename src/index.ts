@@ -7,6 +7,12 @@ import { initializeScheduler } from "./scheduler.js";
 import type { TelegramConfig } from "./config.js";
 import { registerTelegramWebhook, handleTelegramWebhook } from "./telegram.js";
 import { serveLoginPage, handleLoginPost } from "./login.js";
+import {
+  serveExplorerPage,
+  handleTablesRequest,
+  handleTableSchemaRequest,
+  handleTableRowsRequest,
+} from "./explorer.js";
 
 async function readRequestBody(request: http.IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
@@ -128,14 +134,32 @@ async function main(): Promise<void> {
   }
 
   const server = http.createServer((request: http.IncomingMessage, response: http.ServerResponse): void => {
-    if (request.method === "POST" && request.url === "/chat") {
+    const url = new URL(request.url || "/", `http://${request.headers.host}`);
+    const pathname = url.pathname;
+
+    if (request.method === "POST" && pathname === "/chat") {
       handleChatRequest(request, response);
-    } else if (request.method === "POST" && request.url === "/telegram/webhook") {
+    } else if (request.method === "POST" && pathname === "/telegram/webhook") {
       handleTelegramWebhookRequest(request, response, config.telegram);
-    } else if (request.method === "GET" && request.url === "/providers/anthropic/login") {
+    } else if (request.method === "GET" && pathname === "/providers/anthropic/login") {
       serveLoginPage(response);
-    } else if (request.method === "POST" && request.url === "/providers/anthropic/login") {
+    } else if (request.method === "POST" && pathname === "/providers/anthropic/login") {
       void handleLoginPost(request, response, config);
+    } else if (request.method === "GET" && pathname === "/explorer") {
+      serveExplorerPage(response);
+    } else if (request.method === "GET" && pathname === "/api/explorer/tables") {
+      void handleTablesRequest(response, pool);
+    } else if (request.method === "GET" && pathname.startsWith("/api/explorer/tables/")) {
+      const parts = pathname.slice("/api/explorer/tables/".length).split("/");
+      const tableName = decodeURIComponent(parts[0]);
+      if (parts.length === 1) {
+        void handleTableSchemaRequest(response, pool, tableName);
+      } else if (parts.length === 2 && parts[1] === "rows") {
+        void handleTableRowsRequest(response, pool, tableName, url.searchParams);
+      } else {
+        response.writeHead(404, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ error: "Not found" }));
+      }
     } else {
       response.writeHead(404, { "Content-Type": "application/json" });
       response.end(JSON.stringify({ error: "Not found" }));

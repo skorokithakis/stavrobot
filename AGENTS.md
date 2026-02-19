@@ -178,6 +178,13 @@ The Python code (`client.py`) is a standalone CLI client with no third-party dep
 - When a workaround requires reaching into library internals, flag it explicitly and
   discuss with the user before proceeding. Document the dependency clearly in a comment.
 
+## Documentation
+
+- When adding significant user-facing features (new integrations like Telegram, new UI
+  pages like the database explorer, new API endpoints, etc.), update the README to
+  document them. Users should be able to discover and understand major functionality by
+  reading the README.
+
 ## General rules
 
 - Do not write forgiving code. Let errors propagate rather than silently catching them.
