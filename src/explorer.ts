@@ -312,6 +312,16 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
         item.onclick = () => selectTable(table.name);
         list.appendChild(item);
       }
+
+      // If there's a table parameter in the URL, select that table.
+      const url = new URL(window.location.href);
+      const tableParam = url.searchParams.get("table");
+      if (tableParam) {
+        const tableExists = tables.some(t => t.name === tableParam);
+        if (tableExists) {
+          selectTable(tableParam);
+        }
+      }
     }
 
     async function selectTable(tableName) {
@@ -319,6 +329,11 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
       currentOffset = 0;
       currentOrderBy = null;
       currentOrderDirection = "asc";
+
+      // Update URL to reflect the selected table.
+      const url = new URL(window.location.href);
+      url.searchParams.set("table", tableName);
+      history.replaceState(null, "", url.toString());
 
       document.querySelectorAll(".table-item").forEach((item, index) => {
         const name = item.querySelector(".table-name").textContent;

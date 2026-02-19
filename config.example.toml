@@ -95,7 +95,8 @@ model = "gpt-4o-transcribe"
 # apiKey = "your-anthropic-api-key-here"
 # model = "claude-haiku-4-20250514"
 
-# Enables the self-programming coder agent. The model here can differ from the
-# main model above, allowing a different model to handle coding tasks.
+# Enables the self-programming coder agent. Uses Claude Code headless, which
+# requires subscription auth (see README). The model must be a Claude Code
+# alias: "sonnet", "opus", or "haiku".
 [coder]
-model = "claude-sonnet-4-6"
+model = "sonnet"

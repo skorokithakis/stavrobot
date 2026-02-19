@@ -34,9 +34,9 @@ Five Docker containers: `app` (TypeScript server, exposes `POST /chat` on port 3
 The `claude-code` container uses Claude Code with subscription auth (OAuth), separate from the main app's API key.
 
 1. Start the containers: `docker compose up --build`
-2. Log in: `docker compose exec -u coder claude-code claude login`
+2. Log in: `docker compose exec -u coder claude-code claude` (it will prompt you to log in if you haven't).
 3. Follow the browser-based OAuth flow.
-4. Set `[coder].model` in your config to the desired model (e.g., `claude-sonnet-4-5-20250514`).
+4. Set `[coder].model` in your config to a Claude Code model alias (`sonnet`, `opus`, or `haiku`).
 
 ### Signal setup
 
