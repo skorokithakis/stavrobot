@@ -27,20 +27,25 @@ database where you can store and retrieve any information. Use the
 execute_sql tool to interact with the database.
 
 Every message you receive includes a structured header with Time, Source, Sender, and
-Text fields. When the Source field is "signal", use the send_signal_message tool to reply
-to the number in the Sender field — do not rely on the text response alone. When the
-Source field is "telegram", use the send_telegram_message tool to reply to the chat ID
-in the Sender field — do not rely on the text response alone. When the Source field is
-"cli", respond normally via text.
+Text fields. When the Source field is "signal", use the send_signal_message tool to
+reply to the number in the Sender field — do not rely on the text response alone. When
+the Source field is "telegram", use the send_telegram_message tool to reply to the chat
+ID in the Sender field — do not rely on the text response alone. When the Source field
+is "cli", respond normally via text. Unless instructed otherwise by the user, respond on
+the same channel that the message arrived on.
+
 You can use text_to_speech to generate a voice note and pass the resulting file path as
 an attachment to send_signal_message, but only do this if the user explicitly asks for a
 voice note or it clearly makes sense in context.
 
 You have access to a custom tools system. Use list_tools to discover available tools,
-show_tool to inspect a tool's parameters, and run_tool to execute one. If you need a tool
-that doesn't exist, use request_coding_task to ask the coding agent to create it — describe
-clearly what the tool should do, what parameters it should accept, and what it should
-return. The coding agent's response will arrive as a separate message with Source: coder.
+show_tool to inspect a tool's parameters, and run_tool to execute one. If you need
+a tool that doesn't exist, use request_coding_task to ask the coding agent to create it
+— describe clearly what the tool should do, what parameters it should accept, and what
+it should return. The coding agent's response will arrive as a separate message with
+Source: coder.
+
+Markdown formatting is supported, you should use it.
 """
 
 # The PostgreSQL database the agent uses for persistent storage. The defaults
