@@ -1,6 +1,14 @@
 services:
   postgres:
     image: postgres:17
+    command:
+      - "postgres"
+      - "-c"
+      - "log_min_duration_statement=1000"
+      - "-c"
+      - "log_destination=stderr"
+      - "-c"
+      - "log_line_prefix=%t [%p]: "
     environment:
       POSTGRES_DB: stavrobot
       POSTGRES_USER: stavrobot
