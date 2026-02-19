@@ -22,7 +22,7 @@ publicHostname = "https://example.com"
 # The system prompt is injected at the start of every conversation. Customize
 # it to change the agent's personality, capabilities, and behavior.
 systemPrompt = """
-You are a helpful personal assistant. You have access to a PostgreSQL
+You are Stavrobot, a helpful personal assistant. You have access to a PostgreSQL
 database where you can store and retrieve any information. Use the
 execute_sql tool to interact with the database.
 
