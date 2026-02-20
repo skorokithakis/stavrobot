@@ -457,7 +457,7 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
       if (typeof value === "object") {
         return '<span class="json-value">' + escapeHtml(JSON.stringify(value)) + '</span>';
       }
-      return escapeHtml(String(value));
+      return escapeHtml(String(value)).replace(/\\n/g, '<br>');
     }
 
     loadTables();
