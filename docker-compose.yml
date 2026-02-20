@@ -27,7 +27,7 @@ services:
     ports:
       - "10567:3000"
     environment:
-      TZ: Europe/Athens
+      TZ: ${TZ:-UTC}
       PGHOST: postgres
       PGPORT: 5432
       PGUSER: ${POSTGRES_USER:-stavrobot}
@@ -44,13 +44,13 @@ services:
   python-runner:
     build: ./python-runner
     environment:
-      TZ: Europe/Athens
+      TZ: ${TZ:-UTC}
     restart: unless-stopped
 
   tool-runner:
     build: ./tool-runner
     environment:
-      TZ: Europe/Athens
+      TZ: ${TZ:-UTC}
     restart: unless-stopped
     volumes:
       - ./data/tools:/tools
@@ -58,7 +58,7 @@ services:
   coder:
     build: ./coder
     environment:
-      TZ: Europe/Athens
+      TZ: ${TZ:-UTC}
     restart: unless-stopped
     volumes:
       - ./data/main:/config
@@ -67,6 +67,25 @@ services:
     depends_on:
       app:
         condition: service_started
+
+  pg-backup:
+    image: postgres:17
+    entrypoint: ["/bin/bash", "/scripts/pg-backup.sh"]
+    environment:
+      TZ: ${TZ:-UTC}
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-stavrobot}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-stavrobot}
+      PGDATABASE: ${POSTGRES_DB:-stavrobot}
+      BACKUP_INTERVAL_SECONDS: 86400
+      BACKUP_RETENTION_DAYS: 30
+    restart: unless-stopped
+    volumes:
+      - ./scripts:/scripts:ro
+      - ./data/db-backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   signal-bridge:
     build: ./signal-bridge

@@ -25,6 +25,10 @@ services:
       - {{ HM_DATA_DIR }}/main:/config
       - {{ HM_DATA_DIR }}/coder:/home/coder/.claude
       - {{ HM_DATA_DIR }}/tools:/tools
+  pg-backup:
+    volumes:
+      - ./scripts:/scripts:ro
+      - {{ HM_DATA_DIR }}/db-backups:/backups
   signal-bridge:
     volumes:
       - {{ HM_DATA_DIR }}/main/config.toml:/app/config.toml:ro
