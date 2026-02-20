@@ -102,10 +102,11 @@ export async function handleUploadRequest(
     const effectiveOriginalFilename = originalFilename ?? storedFilename;
     const effectiveMimeType = mimeType ?? "application/octet-stream";
 
+    const fullPath = path.join(UPLOADS_DIR, storedFilename);
     const agentMessage =
       `A file has been uploaded.\n\n` +
       `Original filename: ${effectiveOriginalFilename}\n` +
-      `Stored as: ${storedFilename}\n` +
+      `Stored at: ${fullPath}\n` +
       `MIME type: ${effectiveMimeType}\n` +
       `Size: ${fileSize} bytes\n\n` +
       `You do not need to read this file right now. Use the read_upload tool if and when you need to access its contents.`;

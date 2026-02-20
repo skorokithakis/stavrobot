@@ -4,9 +4,12 @@ import { Type } from "@mariozechner/pi-ai";
 import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { UPLOADS_DIR } from "./uploads.js";
 
-function validateFilename(filename: string): string | null {
-  if (!filename.startsWith("upload-") || filename.includes("/") || filename.includes("\\") || filename.includes("..")) {
-    return "Invalid filename: must start with 'upload-' and must not contain '/', '\\', or '..'.";
+function validatePath(filePath: string): string | null {
+  // Normalize to resolve any .. or . segments, then check the prefix.
+  const normalized = path.normalize(filePath);
+  const uploadsPrefix = UPLOADS_DIR.endsWith("/") ? UPLOADS_DIR : `${UPLOADS_DIR}/`;
+  if (!normalized.startsWith(uploadsPrefix)) {
+    return `Invalid path: must be inside ${UPLOADS_DIR}.`;
   }
   return null;
 }
@@ -15,19 +18,19 @@ export function createReadUploadTool(): AgentTool {
   return {
     name: "read_upload",
     label: "Read upload",
-    description: "Read the text contents of an uploaded file by its stored filename.",
+    description: "Read the text contents of an uploaded file by its full path.",
     parameters: Type.Object({
-      filename: Type.String({ description: "The stored filename of the upload, e.g. upload-abc123.txt." }),
+      path: Type.String({ description: "The full path to the uploaded file, e.g. /tmp/uploads/upload-abc123.txt." }),
     }),
     execute: async (
       toolCallId: string,
       params: unknown
     ): Promise<AgentToolResult<{ message: string }>> => {
-      const { filename } = params as { filename: string };
+      const { path: filePath } = params as { path: string };
 
-      console.log("[stavrobot] read_upload called:", filename);
+      console.log("[stavrobot] read_upload called:", filePath);
 
-      const validationError = validateFilename(filename);
+      const validationError = validatePath(filePath);
       if (validationError !== null) {
         console.warn("[stavrobot] read_upload validation failed:", validationError);
         return {
@@ -35,8 +38,6 @@ export function createReadUploadTool(): AgentTool {
           details: { message: validationError },
         };
       }
-
-      const filePath = path.join(UPLOADS_DIR, filename);
 
       let contents: string;
       try {
@@ -46,7 +47,7 @@ export function createReadUploadTool(): AgentTool {
         if (!isNotFound) {
           throw error;
         }
-        const message = `File not found: ${filename}`;
+        const message = `File not found: ${filePath}`;
         console.warn("[stavrobot] read_upload error:", message);
         return {
           content: [{ type: "text" as const, text: message }],
@@ -54,11 +55,11 @@ export function createReadUploadTool(): AgentTool {
         };
       }
 
-      console.log("[stavrobot] read_upload result: read", contents.length, "characters from", filename);
+      console.log("[stavrobot] read_upload result: read", contents.length, "characters from", filePath);
 
       return {
         content: [{ type: "text" as const, text: contents }],
-        details: { message: `Read ${contents.length} characters from ${filename}.` },
+        details: { message: `Read ${contents.length} characters from ${filePath}.` },
       };
     },
   };
@@ -68,19 +69,19 @@ export function createDeleteUploadTool(): AgentTool {
   return {
     name: "delete_upload",
     label: "Delete upload",
-    description: "Delete an uploaded file by its stored filename.",
+    description: "Delete an uploaded file by its full path.",
     parameters: Type.Object({
-      filename: Type.String({ description: "The stored filename of the upload, e.g. upload-abc123.txt." }),
+      path: Type.String({ description: "The full path to the uploaded file, e.g. /tmp/uploads/upload-abc123.txt." }),
     }),
     execute: async (
       toolCallId: string,
       params: unknown
     ): Promise<AgentToolResult<{ message: string }>> => {
-      const { filename } = params as { filename: string };
+      const { path: filePath } = params as { path: string };
 
-      console.log("[stavrobot] delete_upload called:", filename);
+      console.log("[stavrobot] delete_upload called:", filePath);
 
-      const validationError = validateFilename(filename);
+      const validationError = validatePath(filePath);
       if (validationError !== null) {
         console.warn("[stavrobot] delete_upload validation failed:", validationError);
         return {
@@ -89,8 +90,6 @@ export function createDeleteUploadTool(): AgentTool {
         };
       }
 
-      const filePath = path.join(UPLOADS_DIR, filename);
-
       try {
         await fs.unlink(filePath);
       } catch (error) {
@@ -98,7 +97,7 @@ export function createDeleteUploadTool(): AgentTool {
         if (!isNotFound) {
           throw error;
         }
-        const message = `File not found: ${filename}`;
+        const message = `File not found: ${filePath}`;
         console.warn("[stavrobot] delete_upload error:", message);
         return {
           content: [{ type: "text" as const, text: message }],
@@ -106,7 +105,7 @@ export function createDeleteUploadTool(): AgentTool {
         };
       }
 
-      const message = `File deleted: ${filename}`;
+      const message = `File deleted: ${filePath}`;
       console.log("[stavrobot] delete_upload result:", message);
 
       return {
