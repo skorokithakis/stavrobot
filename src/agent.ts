@@ -26,7 +26,7 @@ export const TEMP_ATTACHMENTS_DIR = "/tmp/stavrobot-temp";
 
 function buildPromptSuffix(publicHostname: string): string {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? process.env.TZ ?? "UTC";
-  return `\n\nYour external hostname is ${publicHostname}. All times are in ${timezone}. Do not convert times to other timezones unless explicitly asked.`;
+  return `\n\nYour external hostname is ${publicHostname}. All times are in ${timezone}. Do not convert times to other timezones unless explicitly asked, or the user is in another timezone.`;
 }
 
 // A simple boolean flag to prevent concurrent compaction runs. If a compaction
@@ -550,7 +550,7 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
 
 function serializeMessagesForSummary(messages: AgentMessage[]): string {
   const lines: string[] = [];
-  
+
   for (const message of messages) {
     if (message.role === "user") {
       let textContent: string;
@@ -582,7 +582,7 @@ function serializeMessagesForSummary(messages: AgentMessage[]): string {
       lines.push(`Tool result (${message.toolName}): ${textContent}`);
     }
   }
-  
+
   return lines.join("\n");
 }
 
@@ -631,7 +631,7 @@ export async function handlePrompt(
       "Here are your memories:",
       "",
     ];
-    
+
     for (const memory of memories) {
       const created = memory.createdAt.toISOString();
       const updated = memory.updatedAt.toISOString();
@@ -642,7 +642,7 @@ export async function handlePrompt(
       memoryLines.push(memory.content);
       memoryLines.push("");
     }
-    
+
     const injectionText = memoryLines.join("\n");
     agent.setSystemPrompt(`${effectiveBasePrompt}\n\n${injectionText}`);
   }
@@ -750,7 +750,7 @@ export async function handlePrompt(
 
         const serializedMessages = serializeMessagesForSummary(messagesToCompact);
         const summarySystemPrompt = "Summarize the following conversation concisely. Preserve all important facts, decisions, user preferences, and context. The summary will replace these messages in the conversation history.";
-        
+
         const apiKey = await getApiKey(config);
         const response = await complete(
           agent.state.model,
