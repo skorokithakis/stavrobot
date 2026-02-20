@@ -11,7 +11,7 @@ export function createUpsertPageTool(pool: pg.Pool): AgentTool {
 
 Pages can fetch data dynamically using named queries in the queries parameter. Each key is a query name mapping to a SQL string (SELECT/WITH only). Use $param:name placeholders for parameters — the client supplies values via query string. Page JS fetches data via GET /api/pages/<path>/queries/<name>?param1=value1. The response is a JSON array of row objects. For private pages the endpoint requires authentication (the browser is already authenticated by the page load); for public pages no authentication is needed.
 
-NEVER set is_public to true unless the user has explicitly and unambiguously said they want the page publicly accessible. Default to false. Only set true if the user says something clearly intentional such as "make this page public". When in doubt, keep it private.`,
+NEVER set is_public to true unless the user has *explicitly* and *unambiguously* said they want THIS SPECIFIC PAGE publicly accessible. Default to false. Only set true if the user says something clearly intentional such as "make this page public". When in doubt, keep it private.`,
     parameters: Type.Object({
       path: Type.String({ description: "Page path, no leading or trailing slashes." }),
       mimetype: Type.Optional(Type.String({ description: "MIME type, e.g. text/html, text/css. Required when creating a new page." })),
