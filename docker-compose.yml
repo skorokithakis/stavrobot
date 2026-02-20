@@ -36,6 +36,12 @@ services:
       postgres:
         condition: service_healthy
 
+  python-runner:
+    build: ./python-runner
+    environment:
+      TZ: Europe/Athens
+    restart: unless-stopped
+
   tool-runner:
     build: ./tool-runner
     environment:

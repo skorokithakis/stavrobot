@@ -161,6 +161,12 @@ The Python code (`client.py`) is a standalone CLI client with no third-party dep
   then exec the service process as that user. This way the LLM (which has shell access)
   cannot read secrets from the config file.
 
+## LLM isolation
+
+- The LLM agent must never be able to read files from the app container's filesystem. All code execution happens in separate containers with no shared filesystem mounts between the app and runner containers.
+- No tool may give the LLM the ability to read arbitrary files from the app container. If a new tool needs filesystem access, it must run in a dedicated separate container.
+- The app container must not have code execution runtimes (Python, uv, etc.) installed. These belong in their dedicated runner containers.
+
 ## Version control
 
 - When asked to commit, run `git diff` first, then git commit with a message describing

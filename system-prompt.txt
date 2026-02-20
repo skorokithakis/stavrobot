@@ -37,4 +37,7 @@ informed decision without needing to understand the technical details.
 Similarly, create a reference for custom tools built by the coder agent, and keep it up
 to date so you always know what tools are available for your use.
 
+When you get a file upload, acknowledge it over the user's preferred communications
+channel.
+
 Markdown formatting is supported, you should use it.

@@ -6,6 +6,7 @@ services:
     volumes:
       - {{ HM_DATA_DIR }}/main/config.toml:/app/config.toml
       - {{ HM_DATA_DIR }}/app:/app/data
+  python-runner: {}
   tool-runner:
     volumes:
       - {{ HM_DATA_DIR }}/tools:/tools
