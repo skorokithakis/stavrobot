@@ -250,11 +250,11 @@ export function createSendTelegramMessageTool(config: TelegramConfig): AgentTool
   return {
     name: "send_telegram_message",
     label: "Send Telegram message",
-    description: "Send a message via Telegram to a chat ID. Can send text, an audio file (from a file path returned by text_to_speech), or both.",
+    description: "Send a message via Telegram to a chat ID. Can send text, a file attachment (image, audio, or any other file), or both.",
     parameters: Type.Object({
       recipient: Type.String({ description: "Telegram chat ID to send the message to." }),
       message: Type.Optional(Type.String({ description: "Text message to send. Markdown formatting is supported." })),
-      attachmentPath: Type.Optional(Type.String({ description: "File path to an audio attachment (e.g., from text_to_speech tool output)." })),
+      attachmentPath: Type.Optional(Type.String({ description: "File path to an attachment. Images (jpg, jpeg, png, gif, webp), audio (mp3, ogg, oga, wav, m4a), and any other file type are supported." })),
     }),
     execute: async (
       toolCallId: string,
@@ -282,10 +282,29 @@ export function createSendTelegramMessageTool(config: TelegramConfig): AgentTool
       const baseUrl = `https://api.telegram.org/bot${config.botToken}`;
 
       if (attachmentPath !== undefined) {
+        const extension = path.extname(attachmentPath).toLowerCase();
+        const imageExtensions = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp"]);
+        const audioExtensions = new Set([".mp3", ".ogg", ".oga", ".wav", ".m4a"]);
+
+        let apiMethod: string;
+        let formFieldName: string;
+        if (imageExtensions.has(extension)) {
+          apiMethod = "sendPhoto";
+          formFieldName = "photo";
+        } else if (audioExtensions.has(extension)) {
+          apiMethod = "sendVoice";
+          formFieldName = "voice";
+        } else {
+          apiMethod = "sendDocument";
+          formFieldName = "document";
+        }
+
+        console.log("[stavrobot] send_telegram_message attachment type detected:", { extension, apiMethod });
+
         const fileBuffer = await fs.readFile(attachmentPath);
         const formData = new FormData();
         formData.append("chat_id", recipient);
-        formData.append("voice", new Blob([fileBuffer]), path.basename(attachmentPath));
+        formData.append(formFieldName, new Blob([fileBuffer]), path.basename(attachmentPath));
 
         if (message !== undefined) {
           const htmlCaption = await convertMarkdownToTelegramHtml(message);
@@ -299,7 +318,7 @@ export function createSendTelegramMessageTool(config: TelegramConfig): AgentTool
           await fs.unlink(attachmentPath);
         }
 
-        const response = await fetch(`${baseUrl}/sendVoice`, {
+        const response = await fetch(`${baseUrl}/${apiMethod}`, {
           method: "POST",
           body: formData,
         });
@@ -308,14 +327,14 @@ export function createSendTelegramMessageTool(config: TelegramConfig): AgentTool
           const errorBody = await response.json() as { description?: string };
           const description = errorBody.description ?? "unknown error";
           const errorMessage = `Error: Telegram API error ${response.status}: ${description}`;
-          console.error("[stavrobot] send_telegram_message sendVoice error:", errorMessage);
+          console.error(`[stavrobot] send_telegram_message ${apiMethod} error:`, errorMessage);
           return {
             content: [{ type: "text" as const, text: errorMessage }],
             details: { message: errorMessage },
           };
         }
 
-        console.log("[stavrobot] send_telegram_message sendVoice response status:", response.status);
+        console.log(`[stavrobot] send_telegram_message ${apiMethod} response status:`, response.status);
         const successMessage = "Message sent successfully.";
         return {
           content: [{ type: "text" as const, text: successMessage }],
