@@ -16,6 +16,10 @@ SYSTEM_PROMPT_PATH = "/app/system-prompt.txt"
 TOOLS_DIR = "/tools/"
 TASK_TIMEOUT_SECONDS = 600
 
+# Lock to ensure only one Claude Code instance runs at a time.
+_claude_lock = threading.Lock()
+_claude_running = False
+
 
 def read_coder_env() -> dict[str, str]:
     """Read password and model from the coder-env file written by entrypoint.sh."""
@@ -54,6 +58,8 @@ def post_result(message: str, password: str) -> None:
 
 def run_coding_task(task_id: str, message: str) -> None:
     """Run claude -p in a subprocess and post the result back to the app."""
+    global _claude_running
+
     print(f"[stavrobot-coder] Starting coding task {task_id}")
 
     env = read_coder_env()
@@ -98,6 +104,9 @@ def run_coding_task(task_id: str, message: str) -> None:
     except Exception as error:
         print(f"[stavrobot-coder] Task {task_id} raised an exception: {error}")
         result_text = f"Coding task failed: {error}"
+    finally:
+        with _claude_lock:
+            _claude_running = False
 
     print(f"[stavrobot-coder] Posting result for task {task_id}, length: {len(result_text)}")
     post_result(result_text, password)
@@ -127,6 +136,17 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
             message = payload["message"]
 
             print(f"[stavrobot-coder] Received coding task {task_id}: {message[:100]}")
+
+            with _claude_lock:
+                global _claude_running
+                if _claude_running:
+                    print(f"[stavrobot-coder] Rejecting task {task_id}: Claude Code already running")
+                    self._send_json(
+                        HTTPStatus.CONFLICT,
+                        {"error": "Claude Code is already running. Only one instance can run at a time. Please try again after the previous run finishes."},
+                    )
+                    return
+                _claude_running = True
 
             thread = threading.Thread(
                 target=run_coding_task,
