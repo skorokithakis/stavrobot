@@ -1,6 +1,8 @@
 import fs from "fs";
 import TOML from "@iarna/toml";
 
+const SYSTEM_PROMPT_PATH = "system-prompt.txt";
+
 export interface PostgresConfig {
   host: string;
   port: number;
@@ -48,7 +50,8 @@ export interface Config {
   authFile?: string;
   publicHostname?: string;
   password?: string;
-  systemPrompt: string;
+  baseSystemPrompt: string;
+  customPrompt?: string;
   postgres: PostgresConfig;
   tts?: TtsConfig;
   stt?: SttConfig;
@@ -62,6 +65,9 @@ export function loadConfig(): Config {
   const configPath = process.env.CONFIG_PATH || "config.toml";
   const configContent = fs.readFileSync(configPath, "utf-8");
   const config = TOML.parse(configContent) as unknown as Config;
+
+  console.log(`[stavrobot] Loading base system prompt from ${SYSTEM_PROMPT_PATH}`);
+  config.baseSystemPrompt = fs.readFileSync(SYSTEM_PROMPT_PATH, "utf-8").trimEnd();
 
   if (config.apiKey === undefined && config.authFile === undefined) {
     throw new Error("Config must specify either apiKey or authFile.");

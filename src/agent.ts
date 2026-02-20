@@ -499,9 +499,13 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
     tools.push(createSendTelegramMessageTool(config.telegram));
   }
 
+  const effectiveBasePrompt = config.customPrompt !== undefined
+    ? `${config.baseSystemPrompt}\n\n${config.customPrompt}`
+    : config.baseSystemPrompt;
+
   const agent = new Agent({
     initialState: {
-      systemPrompt: config.systemPrompt,
+      systemPrompt: effectiveBasePrompt,
       model,
       tools,
       messages,
@@ -580,9 +584,13 @@ export async function handlePrompt(
   audioContentType?: string
 ): Promise<string> {
   const memories = await loadAllMemories(pool);
-  
+
+  const effectiveBasePrompt = config.customPrompt !== undefined
+    ? `${config.baseSystemPrompt}\n\n${config.customPrompt}`
+    : config.baseSystemPrompt;
+
   if (memories.length === 0) {
-    agent.setSystemPrompt(config.systemPrompt);
+    agent.setSystemPrompt(effectiveBasePrompt);
   } else {
     const memoryLines: string[] = [
       "These are your memories, they are things you stored yourself. Use the `update_memory` tool to update a memory, and the `delete_memory` tool to delete a memory. You should add anything that seems important to the user, anything that might have bearing on the future, or anything that will be important to recall later. However, do keep them to a few paragraphs, to avoid filling up the context.",
@@ -603,7 +611,7 @@ export async function handlePrompt(
     }
     
     const injectionText = memoryLines.join("\n");
-    agent.setSystemPrompt(`${config.systemPrompt}\n\n${injectionText}`);
+    agent.setSystemPrompt(`${effectiveBasePrompt}\n\n${injectionText}`);
   }
 
   const savePromises: Promise<void>[] = [];

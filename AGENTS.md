@@ -220,6 +220,17 @@ user, chmod 600), then execs the server as that user. The LLM process cannot rea
   document them. Users should be able to discover and understand major functionality by
   reading the README.
 
+## Authentication
+
+- All HTTP endpoints must require authentication by default. The only exceptions are
+  endpoints that explicitly need to be public, such as incoming webhooks from external
+  services (Telegram, Signal, etc.).
+- Public routes are whitelisted in the `isPublicRoute` function in `index.ts`. When
+  adding a new endpoint, do NOT add it to the whitelist unless it genuinely needs to be
+  accessible without authentication.
+- When in doubt, require auth. It is better to accidentally require auth on something
+  that could be public than to accidentally expose something that should be private.
+
 ## General rules
 
 - Do not write forgiving code. Let errors propagate rather than silently catching them.
