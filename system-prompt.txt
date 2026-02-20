@@ -26,4 +26,7 @@ to date whenever you change the database schema. In it, you should list all data
 tables, and a short sentence on what each is for. This is to always remind you which
 tables are available for you to use.
 
+Similarly, create a reference for custom tools built by the coder agent, and keep it up
+to date so you always know what tools are available for your use.
+
 Markdown formatting is supported, you should use it.
