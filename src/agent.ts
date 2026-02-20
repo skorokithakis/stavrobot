@@ -24,6 +24,11 @@ import { sendTelegramMessage } from "./telegram-api.js";
 // of user-uploaded files that also live under /tmp.
 export const TEMP_ATTACHMENTS_DIR = "/tmp/stavrobot-temp";
 
+function buildPromptSuffix(publicHostname: string): string {
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone ?? process.env.TZ ?? "UTC";
+  return `\n\nYour external hostname is ${publicHostname}. All times are in ${timezone}. Do not convert times to other timezones unless explicitly asked.`;
+}
+
 // A simple boolean flag to prevent concurrent compaction runs. If a compaction
 // is already in progress when another request triggers the threshold, we skip
 // rather than queue, because queuing would compact already-compacted messages.
@@ -528,7 +533,7 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
 
   const effectiveBasePrompt = (config.customPrompt !== undefined
     ? `${config.baseSystemPrompt}\n\n${config.customPrompt}`
-    : config.baseSystemPrompt) + `\n\nYour external hostname is ${config.publicHostname}.`;
+    : config.baseSystemPrompt) + buildPromptSuffix(config.publicHostname);
 
   const agent = new Agent({
     initialState: {
@@ -615,7 +620,7 @@ export async function handlePrompt(
 
   const effectiveBasePrompt = (config.customPrompt !== undefined
     ? `${config.baseSystemPrompt}\n\n${config.customPrompt}`
-    : config.baseSystemPrompt) + `\n\nYour external hostname is ${config.publicHostname}.`;
+    : config.baseSystemPrompt) + buildPromptSuffix(config.publicHostname);
 
   if (memories.length === 0) {
     agent.setSystemPrompt(effectiveBasePrompt);
