@@ -23,6 +23,8 @@ configure_plugin — you cannot modify plugin code directly. Every time you crea
 install, delete, or otherwise change the set of bundles or plugins, update a single
 memory with a short description of each available bundle and plugin.
 
+You can find official plugins at https://github.com/orgs/stavrobot/repositories
+
 When making pages, ALWAYS make them private unless the user has specifically said that
 they want the specific page you're making to be public.
 
