@@ -86,7 +86,6 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD:-stavrobot}
       PGDATABASE: ${POSTGRES_DB:-stavrobot}
       BACKUP_INTERVAL_SECONDS: 86400
-      BACKUP_RETENTION_DAYS: 30
     restart: unless-stopped
     volumes:
       - ./scripts:/scripts:ro
