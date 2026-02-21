@@ -361,9 +361,10 @@ async function handleInstall(
 
   const url = (parsed as Record<string, unknown>)["url"] as string;
 
-  // Use a unique temp directory per install to avoid collisions.
-  fs.mkdirSync("/tmp/plugins", { recursive: true });
-  const tempDir = `/tmp/plugins/install-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  // Use a unique temp directory per install to avoid collisions. The directory
+  // must be on the same filesystem as PLUGINS_DIR so that renameSync works
+  // without crossing filesystem boundaries (which would cause EXDEV).
+  const tempDir = path.join(PLUGINS_DIR, `.tmp-install-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
   try {
     console.log(`[stavrobot-plugin-runner] Cloning ${url} to ${tempDir}`);

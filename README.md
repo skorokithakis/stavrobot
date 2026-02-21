@@ -23,6 +23,10 @@ A personal AI assistant with persistent memory, sandboxed code execution, and Si
 
 See [PLUGIN.md](coder/PLUGIN.md) for everything you need to know to create a Stavrobot plugin. The same document works as a reference for both humans and LLMs.
 
+## Recommended plugins
+
+- Weather plugin: Ask Stavrobot to install https://github.com/stavrobot/plugin-weather.git
+
 ## Architecture
 
 Five Docker containers: `app` (TypeScript server, exposes `POST /chat` on port 3000 and handles Telegram webhooks at `POST /telegram/webhook`), `postgres` (PostgreSQL 17 for persistent state), `signal-bridge` (Python daemon bridging Signal via signal-cli to the app), `tool-runner` (Node.js tool runner — lists, inspects, and executes custom tools), and `coder` (Claude Code headless agent for creating custom tools).

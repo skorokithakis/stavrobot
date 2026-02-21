@@ -16,6 +16,6 @@ WORKDIR /app
 COPY --from=build /app/package.json /app/package-lock.json* ./
 RUN npm install --omit=dev
 COPY --from=build /app/dist/ ./dist/
-RUN mkdir -p /plugins && mkdir -p /tmp/plugins
+RUN mkdir -p /plugins
 EXPOSE 3003
 CMD ["node", "dist/index.js"]
