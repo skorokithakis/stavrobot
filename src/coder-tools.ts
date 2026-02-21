@@ -4,20 +4,20 @@ import type { AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 const TOOL_RUNNER_BASE_URL = "http://tool-runner:3001";
 const CLAUDE_CODE_BASE_URL = "http://coder:3002";
 
-export function createListToolsTool(): AgentTool {
+export function createListBundlesTool(): AgentTool {
   return {
-    name: "list_tools",
-    label: "List tools",
-    description: "List all available custom tools. Returns a list of tool names and descriptions. Use this to discover what tools are available before calling them.",
+    name: "list_bundles",
+    label: "List bundles",
+    description: "List all available tool bundles. Returns bundle names and descriptions. Use this to discover what tool bundles are available before inspecting them.",
     parameters: Type.Object({}),
     execute: async (
       toolCallId: string,
       params: unknown,
     ): Promise<AgentToolResult<{ result: string }>> => {
-      console.log("[stavrobot] list_tools called");
-      const response = await fetch(`${TOOL_RUNNER_BASE_URL}/tools`);
+      console.log("[stavrobot] list_bundles called");
+      const response = await fetch(`${TOOL_RUNNER_BASE_URL}/bundles`);
       const result = await response.text();
-      console.log("[stavrobot] list_tools result:", result.length, "characters");
+      console.log("[stavrobot] list_bundles result:", result.length, "characters");
       return {
         content: [{ type: "text" as const, text: result }],
         details: { result },
@@ -26,30 +26,30 @@ export function createListToolsTool(): AgentTool {
   };
 }
 
-export function createShowToolTool(): AgentTool {
+export function createShowBundleTool(): AgentTool {
   return {
-    name: "show_tool",
-    label: "Show tool",
-    description: "Show the full manifest for a custom tool, including its parameters and their types. Use this to understand how to call a tool before running it.",
+    name: "show_bundle",
+    label: "Show bundle",
+    description: "Show all tools in a bundle, including their names, descriptions, and parameter schemas. Use this to understand what tools a bundle provides and how to call them.",
     parameters: Type.Object({
-      name: Type.String({ description: "The name of the tool to inspect." }),
+      name: Type.String({ description: "The bundle name." }),
     }),
     execute: async (
       toolCallId: string,
       params: unknown,
     ): Promise<AgentToolResult<{ result: string }>> => {
       const { name } = params as { name: string };
-      console.log("[stavrobot] show_tool called:", name);
-      const response = await fetch(`${TOOL_RUNNER_BASE_URL}/tools/${name}`);
+      console.log("[stavrobot] show_bundle called:", name);
+      const response = await fetch(`${TOOL_RUNNER_BASE_URL}/bundles/${name}`);
       if (response.status === 404) {
-        const result = `Tool '${name}' not found.`;
+        const result = `Bundle '${name}' not found.`;
         return {
           content: [{ type: "text" as const, text: result }],
           details: { result },
         };
       }
       const result = await response.text();
-      console.log("[stavrobot] show_tool result:", result.length, "characters");
+      console.log("[stavrobot] show_bundle result:", result.length, "characters");
       return {
         content: [{ type: "text" as const, text: result }],
         details: { result },
@@ -58,23 +58,24 @@ export function createShowToolTool(): AgentTool {
   };
 }
 
-export function createRunToolTool(): AgentTool {
+export function createRunBundleToolTool(): AgentTool {
   return {
     name: "run_tool",
     label: "Run tool",
-    description: "Run a custom tool with the given parameters. The parameters must match the tool's manifest schema.",
+    description: "Run a tool from a bundle with the given parameters. The parameters must match the tool's schema as shown by show_bundle.",
     parameters: Type.Object({
-      name: Type.String({ description: "The name of the tool to run." }),
+      bundle: Type.String({ description: "The bundle name." }),
+      tool: Type.String({ description: "The tool name." }),
       parameters: Type.String({ description: "JSON string of the parameters to pass to the tool." }),
     }),
     execute: async (
       toolCallId: string,
       params: unknown,
     ): Promise<AgentToolResult<{ result: string }>> => {
-      const { name, parameters } = params as { name: string; parameters: string };
-      console.log("[stavrobot] run_tool called:", name, "parameters:", parameters);
+      const { bundle, tool, parameters } = params as { bundle: string; tool: string; parameters: string };
+      console.log("[stavrobot] run_tool called: bundle:", bundle, "tool:", tool, "parameters:", parameters);
       const parsedParameters = JSON.parse(parameters) as unknown;
-      const response = await fetch(`${TOOL_RUNNER_BASE_URL}/tools/${name}/run`, {
+      const response = await fetch(`${TOOL_RUNNER_BASE_URL}/bundles/${bundle}/tools/${tool}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(parsedParameters),

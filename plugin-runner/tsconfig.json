@@ -9,6 +9,5 @@
     "sourceMap": true,
     "esModuleInterop": true,
     "skipLibCheck": true
-  },
-  "exclude": ["tool-runner", "plugin-runner", "src/**/*.test.ts"]
+  }
 }

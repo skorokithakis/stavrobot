@@ -97,6 +97,14 @@ def run_coding_task(task_id: str, message: str) -> None:
             result_text = "Coding task failed: " + "\n".join(str(e) for e in errors)
         else:
             result_text = output.get("result", "")
+            usage_footer = (
+                "\n\n---\n"
+                "To use this tool:\n"
+                "- list_bundles: see all available bundles\n"
+                "- show_bundle(name): see tools in a bundle and their parameters\n"
+                "- run_tool(bundle, tool, parameters): run a tool"
+            )
+            result_text = result_text + usage_footer
 
     except subprocess.TimeoutExpired:
         print(f"[stavrobot-coder] Task {task_id} timed out after {TASK_TIMEOUT_SECONDS}s")

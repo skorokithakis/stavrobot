@@ -11,7 +11,8 @@ import { executeSql, loadMessages, saveMessage, saveCompaction, loadLatestCompac
 import { reloadScheduler } from "./scheduler.js";
 import { createWebSearchTool } from "./web-search.js";
 import { createWebFetchTool } from "./web-fetch.js";
-import { createListToolsTool, createShowToolTool, createRunToolTool, createRequestCodingTaskTool } from "./coder-tools.js";
+import { createListBundlesTool, createShowBundleTool, createRunBundleToolTool, createRequestCodingTaskTool } from "./coder-tools.js";
+import { createInstallPluginTool, createUpdatePluginTool, createRemovePluginTool, createConfigurePluginTool, createListPluginsTool, createShowPluginTool, createRunPluginToolTool } from "./plugin-tools.js";
 import { createRunPythonTool } from "./python.js";
 import { createUpsertPageTool, createDeletePageTool } from "./pages.js";
 import { createReadUploadTool, createDeleteUploadTool } from "./upload-tools.js";
@@ -521,12 +522,21 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
   }
   if (config.coder !== undefined) {
     tools.push(
-      createListToolsTool(),
-      createShowToolTool(),
-      createRunToolTool(),
+      createListBundlesTool(),
+      createShowBundleTool(),
+      createRunBundleToolTool(),
       createRequestCodingTaskTool(),
     );
   }
+  tools.push(
+    createInstallPluginTool(),
+    createUpdatePluginTool(),
+    createRemovePluginTool(),
+    createConfigurePluginTool(),
+    createListPluginsTool(),
+    createShowPluginTool(),
+    createRunPluginToolTool(),
+  );
   if (config.telegram !== undefined) {
     tools.push(createSendTelegramMessageTool(config.telegram));
   }

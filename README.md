@@ -6,17 +6,22 @@ A personal AI assistant with persistent memory, sandboxed code execution, and Si
 
 ## Features
 
+- **Security.** The bot runs in isolated containers with no access to the host system. Code execution is sandboxed with no access to secrets. Signal and Telegram allowlists restrict who can interact with the agent. You can run it on your personal PC with no fear.
+- **Plugins.** Install plugins and extend Stavrobot's capabilities by just giving it a git repo URL.
 - **Signal integration.** Two-way messaging via signal-cli, including voice note transcription (OpenAI STT).
 - **Telegram integration.** Two-way messaging via a Telegram bot webhook, including voice note transcription (OpenAI STT).
 - **Two-tier memory.** Tier 1: a self-managed memory store injected into the system prompt every turn (the agent decides what to remember). Tier 2: full read/write access to a PostgreSQL database via unrestricted SQL — the agent can create tables, query, and store anything.
 - **Self-programming.** The agent can request a secondary coding agent to create new tools at runtime. Tools are executable scripts with a JSON manifest, discovered and invoked by the main agent.
-- **Security.** The bot runs in isolated containers with no access to the host system. Code execution is sandboxed with timeouts and no access to secrets. Signal and Telegram allowlists restrict who can interact with the agent.
 - **Sandboxed Python execution.** Arbitrary Python with pip dependencies via `uv`, isolated from the host environment.
 - **Cron scheduling.** The agent can schedule its own recurring or one-shot reminders.
-- **Conversation compaction.** Auto-summarizes long conversation histories to stay within context limits.
 - **Web search and fetch.** Optional tools for searching the web and fetching/analyzing URLs via sub-agent LLM calls.
 - **Database explorer.** A web UI at `/explorer` for browsing PostgreSQL tables, viewing schemas, and paginating through rows.
-- **Pages.** The agent can create web pages. Pages are private (auth-required) by default, with an option to make individual pages public. Pages can query the database for dynamic content.
+- **Apps.** The agent can create dynamic web apps. Apps are private (auth-required) by default, with an option to make individual pages public.
+- **Conversation compaction.** Auto-summarizes long conversation histories to stay within context limits.
+
+## How to make your own plugin
+
+See [PLUGIN.md](coder/PLUGIN.md) for everything you need to know to create a Stavrobot plugin. The same document works as a reference for both humans and LLMs.
 
 ## Architecture
 

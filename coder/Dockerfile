@@ -21,7 +21,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH="/home/coder/.local/bin:${PATH}"
 
 USER root
-COPY entrypoint.sh server.py system-prompt.txt /app/
+COPY entrypoint.sh server.py system-prompt.txt PLUGIN.md /app/
 RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 3002

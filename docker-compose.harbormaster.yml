@@ -20,6 +20,9 @@ services:
   tool-runner:
     volumes:
       - {{ HM_DATA_DIR }}/tools:/tools
+  plugin-runner:
+    volumes:
+      - {{ HM_DATA_DIR }}/plugins:/plugins
   coder:
     volumes:
       - {{ HM_DATA_DIR }}/main:/config

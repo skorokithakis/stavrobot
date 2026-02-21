@@ -55,6 +55,14 @@ services:
     volumes:
       - ./data/tools:/tools
 
+  plugin-runner:
+    build: ./plugin-runner
+    environment:
+      TZ: ${TZ:-UTC}
+    restart: unless-stopped
+    volumes:
+      - ./data/plugins:/plugins
+
   coder:
     build: ./coder
     environment:

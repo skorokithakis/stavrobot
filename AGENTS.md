@@ -177,6 +177,10 @@ The Python code (`client.py`) is a standalone CLI client with no third-party dep
 
 ## Coder subsystem
 
+The `tool-runner/` and `plugin-runner/` directories share nearly identical code for
+bundle/plugin discovery, loading, and execution. When making changes to one, apply the
+same changes to the other.
+
 The self-programming feature is split across two containers:
 
 - **Tool runner (`tool-runner/`):** Node.js HTTP server with no LLM. Serves tool metadata and
