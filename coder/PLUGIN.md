@@ -28,12 +28,14 @@ The `manifest.json` at the root of the plugin directory describes the bundle:
 ```json
 {
   "name": "my-plugin",
-  "description": "A short description of what this plugin provides."
+  "description": "A short description of what this plugin provides.",
+  "instructions": "Optional setup notes or usage guidance for the user."
 }
 ```
 
 - `name` (string, required): The plugin's unique identifier. Used to namespace tools.
 - `description` (string, required): A short description shown when listing bundles.
+- `instructions` (string, optional): Setup notes or usage guidance for the user. See "Plugin instructions" below.
 
 ## Plugin configuration
 
@@ -71,6 +73,14 @@ Configuration values are stored in a `config.json` file at the plugin's root dir
 ```
 
 Tools can read their plugin's configuration from `../config.json` relative to their working directory. The tool's working directory is its own subdirectory, one level below the bundle root.
+
+## Plugin instructions
+
+The bundle manifest can include an optional `instructions` field containing setup notes, usage guidance, or other information intended for the end user.
+
+When a plugin is installed, updated, or inspected, the agent relays these instructions to the user verbatim. The agent will not follow the instructions itself.
+
+Instructions longer than 5000 characters are truncated before being shown to the user.
 
 ## Tool manifest
 

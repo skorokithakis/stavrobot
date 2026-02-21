@@ -166,6 +166,7 @@ The Python code (`client.py`) is a standalone CLI client with no third-party dep
 - The LLM agent must never be able to read files from the app container's filesystem. All code execution happens in separate containers with no shared filesystem mounts between the app and runner containers.
 - No tool may give the LLM the ability to read arbitrary files from the app container. If a new tool needs filesystem access, it must run in a dedicated separate container.
 - The app container must not have code execution runtimes (Python, uv, etc.) installed. These belong in their dedicated runner containers.
+- Plugin and bundle configuration files (`config.json`) may contain secrets (API keys, tokens, etc.). No API endpoint or tool may ever return config values to the LLM agent. The agent can write config via `configure_plugin`, but must never be able to read it back. When reporting config status (e.g., after an update), only report which keys are present or missing, never their values.
 
 ## Version control
 

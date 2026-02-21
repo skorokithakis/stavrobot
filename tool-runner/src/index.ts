@@ -5,6 +5,7 @@ import { execSync, spawn } from "child_process";
 
 const TOOLS_DIR = "/tools";
 const TOOL_TIMEOUT_MS = 30_000;
+const INSTRUCTIONS_MAX_LENGTH = 5000;
 
 let toolRunnerUid: number | undefined;
 let toolRunnerGid: number | undefined;
@@ -24,6 +25,7 @@ function getToolRunnerIds(): { uid: number; gid: number } {
 interface BundleManifest {
   name: string;
   description: string;
+  instructions?: string;
 }
 
 interface ToolManifest {
@@ -35,12 +37,14 @@ interface ToolManifest {
 
 // A bundle manifest has no entrypoint; a tool manifest does.
 function isBundleManifest(manifest: unknown): manifest is BundleManifest {
+  const record = manifest as Record<string, unknown>;
   return (
     typeof manifest === "object" &&
     manifest !== null &&
-    typeof (manifest as Record<string, unknown>)["name"] === "string" &&
-    typeof (manifest as Record<string, unknown>)["description"] === "string" &&
-    !("entrypoint" in manifest)
+    typeof record["name"] === "string" &&
+    typeof record["description"] === "string" &&
+    !("entrypoint" in manifest) &&
+    (record["instructions"] === undefined || typeof record["instructions"] === "string")
   );
 }
 
@@ -287,14 +291,18 @@ function handleGetBundle(bundleName: string, response: http.ServerResponse): voi
     return rest;
   });
 
+  const responseBody: Record<string, unknown> = {
+    name: bundle.manifest.name,
+    description: bundle.manifest.description,
+    tools,
+  };
+
+  if (bundle.manifest.instructions !== undefined) {
+    responseBody["instructions"] = bundle.manifest.instructions.slice(0, INSTRUCTIONS_MAX_LENGTH);
+  }
+
   response.writeHead(200, { "Content-Type": "application/json" });
-  response.end(
-    JSON.stringify({
-      name: bundle.manifest.name,
-      description: bundle.manifest.description,
-      tools,
-    })
-  );
+  response.end(JSON.stringify(responseBody));
 }
 
 async function handleRunTool(
