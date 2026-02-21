@@ -182,6 +182,13 @@ The `tool-runner/` and `plugin-runner/` directories share nearly identical code 
 bundle/plugin discovery, loading, and execution. When making changes to one, apply the
 same changes to the other.
 
+The tool-runner and plugin-runner containers must have identical runtime environments
+(same apt packages, same runtimes, same uv/Python setup). The only difference is the
+isolation model: plugin-runner creates a dedicated system user per plugin and restricts
+each plugin's directory to its own user (`chmod 700`), so plugins cannot read each
+other's files or config. Tool-runner does not do this because tools are created by the
+trusted coder agent, not installed from arbitrary external repos.
+
 The self-programming feature is split across two containers:
 
 - **Tool runner (`tool-runner/`):** Node.js HTTP server with no LLM. Serves tool metadata and

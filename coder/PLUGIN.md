@@ -6,7 +6,7 @@ Stavrobot is a personal AI assistant that runs as a Docker-based service. It can
 
 ## What is a plugin?
 
-A plugin is a directory (or git repository) containing one or more tools. Each tool is an executable script that receives JSON on stdin and writes JSON to stdout. Plugins are placed in the `data/tools/` directory, where the tool-runner container picks them up automatically.
+A plugin is a directory (or git repository) containing one or more tools. Each tool is an executable script that receives JSON on stdin and writes JSON to stdout. Plugins are installed via the plugin-runner and placed in the `data/plugins/` directory.
 
 ## Directory structure
 
@@ -23,7 +23,7 @@ my-plugin/                 # Repository root (e.g., github.com/user/my-plugin)
     └── run.sh
 ```
 
-When installed, the repository is cloned into `data/tools/my-plugin/`.
+When installed, the repository is cloned into `data/plugins/my-plugin/`.
 
 ## Bundle manifest
 
@@ -37,7 +37,7 @@ The `manifest.json` at the root of the plugin directory describes the bundle:
 }
 ```
 
-- `name` (string, required): The plugin's unique identifier. Used to namespace tools.
+- `name` (string, required): The plugin's unique identifier. Used to namespace tools. Must contain only lowercase letters, digits, and hyphens (`[a-z0-9-]`).
 - `description` (string, required): A short description shown when listing bundles.
 - `instructions` (string, optional): Setup notes or usage guidance for the user. See "Plugin instructions" below.
 
@@ -111,11 +111,10 @@ Each tool subdirectory contains its own `manifest.json`:
 
 ## Runtime environment
 
-Tools run inside the `tool-runner` Docker container, which is completely separate from the main app container. This means:
+Plugin tools run inside the `plugin-runner` Docker container, which is completely separate from the main app container. This means:
 
 - Tools cannot access the app's filesystem, source code, secrets, or config.
-- The only directory accessible to a tool is its own plugin directory (e.g., `/tools/my-plugin/`). Tools cannot read or write outside this directory.
-- Tools run as the unprivileged `toolrunner` user.
+- Each plugin runs as its own dedicated system user (`plug_<name>`). Plugin directories are restricted with `chmod 700`, so a plugin cannot read or write any other plugin's files or configuration. A plugin can only access its own directory (e.g., `/plugins/my-plugin/`).
 - Tools can make outbound network requests (there is no network isolation).
 
 The following runtimes and tools are available in the container:
@@ -132,8 +131,8 @@ The environment passed to the tool process is minimal: only `PATH`, `UV_CACHE_DI
 
 ## How tools are called
 
-- The entrypoint is executed as a subprocess inside the tool-runner container.
-- The working directory is set to the tool's own subdirectory (e.g., `/tools/my-plugin/my_tool/`).
+- The entrypoint is executed as a subprocess inside the plugin-runner container.
+- The working directory is set to the tool's own subdirectory (e.g., `/plugins/my-plugin/my_tool/`).
 - Parameters are passed as a JSON object on stdin.
 - The tool must write a JSON object to stdout.
 - Exit code 0 means success; non-zero means failure.
