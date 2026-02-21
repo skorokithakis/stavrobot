@@ -127,13 +127,25 @@ export function createTextToSpeechTool(ttsConfig: TtsConfig): AgentTool {
 
       console.log("[stavrobot] text_to_speech called: text length", text.length);
 
+      // tts-1 and tts-1-hd are legacy models that don't support the instructions field.
+      const supportsInstructions = ttsConfig.model !== "tts-1" && ttsConfig.model !== "tts-1-hd";
+      const requestBody: Record<string, string> = {
+        model: ttsConfig.model,
+        voice: ttsConfig.voice,
+        input: text,
+        response_format: "mp3",
+      };
+      if (ttsConfig.instructions !== undefined && supportsInstructions) {
+        requestBody["instructions"] = ttsConfig.instructions;
+      }
+
       const response = await fetch("https://api.openai.com/v1/audio/speech", {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${ttsConfig.apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ model: ttsConfig.model, voice: ttsConfig.voice, input: text }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {

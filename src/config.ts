@@ -16,6 +16,7 @@ export interface TtsConfig {
   apiKey: string;
   model: string;
   voice: string;
+  instructions?: string;
 }
 
 export interface SttConfig {

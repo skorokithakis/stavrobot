@@ -44,8 +44,10 @@ allowedChatIds = [123456789]
 [tts]
 provider = "openai"
 apiKey = "your-openai-api-key-here"
-model = "tts-1"
-voice = "onyx"
+model = "gpt-4o-mini-tts"
+voice = "marin"
+# Optional. Ignored for tts-1 and tts-1-hd models, which don't support it.
+instructions = "Speak in a pleasant tone"
 
 # Speech-to-text configuration. Used to transcribe voice notes from Signal and Telegram.
 [stt]
