@@ -142,7 +142,6 @@ function loadBundles(): void {
     return;
   }
 
-  const seenBundleNames = new Set<string>();
   const loadedBundles: LoadedBundle[] = [];
 
   for (const bundleDirName of topLevelEntries) {
@@ -162,13 +161,12 @@ function loadBundles(): void {
 
     const bundleName = rawBundleManifest.name;
 
-    if (seenBundleNames.has(bundleName)) {
-      console.error(
-        `[stavrobot-plugin-runner] Duplicate bundle name "${bundleName}" in directory "${bundleDirName}" — skipping`
+    if (bundleName !== bundleDirName) {
+      console.warn(
+        `[stavrobot-plugin-runner] Skipping "${bundleDirName}": manifest name "${bundleName}" does not match directory name`
       );
       continue;
     }
-    seenBundleNames.add(bundleName);
 
     // Scan tool subdirectories within this bundle.
     let toolDirEntries: string[];
@@ -191,7 +189,12 @@ function loadBundles(): void {
       const rawToolManifest = readJsonFile(toolManifestPath);
 
       if (!isToolManifest(rawToolManifest)) {
-        // Could be a non-tool subdirectory; skip silently.
+        // Could be a non-tool subdirectory or a mismatched name; skip silently.
+        continue;
+      }
+
+      if (rawToolManifest.name !== toolDirName) {
+        // Skip silently — consistent with skipping non-tool subdirectories.
         continue;
       }
 
