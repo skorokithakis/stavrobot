@@ -203,9 +203,11 @@ The async workflow: main app sends `POST /code` with `{ taskId, plugin, message 
 plugin's user → on completion, posts result to `app:3000/chat` with `source: "coder"`.
 
 Configuration: the `coder` entrypoint (running as root) reads `config.toml`,
-extracts `password` and `[coder].model` into `/run/coder-env` (owned by the `coder`
-user, chmod 600), then execs the server as that user. The LLM process cannot read
-`config.toml` directly.
+extracts `[coder].model` into `/run/coder-env` (chmod 600), then execs the server
+as root. The server runs as root so it can switch to different plugin users per task.
+Before each task, it copies `.credentials.json` from `/home/coder/.claude/` into the
+plugin directory (owned by the plugin user), runs claude, then copies refreshed
+credentials back and cleans up. The LLM process cannot read `config.toml` directly.
 
 When changing the plugin system (plugin-runner endpoints, manifest schema, runtime
 environment, lifecycle hooks, etc.), ALWAYS update `coder/PLUGIN.md` to reflect the

@@ -2,7 +2,7 @@
 
 ## What is Stavrobot?
 
-Stavrobot is a personal AI assistant that runs as a Docker-based service. It can be extended with plugins — bundles of tools that the assistant can discover and run.
+Stavrobot is a personal AI assistant that runs as a Docker-based service. It can be extended with plugins — collections of tools that the assistant can discover and run.
 
 ## What is a plugin?
 
@@ -10,11 +10,11 @@ A plugin is a directory (or git repository) containing one or more tools. Each t
 
 ## Directory structure
 
-A plugin is typically a git repository. The bundle manifest lives at the repository root, and each tool is a subdirectory containing its own manifest and entrypoint.
+A plugin is typically a git repository. The plugin manifest lives at the repository root, and each tool is a subdirectory containing its own manifest and entrypoint.
 
 ```
 my-plugin/                 # Repository root (e.g., github.com/user/my-plugin)
-├── manifest.json          # Bundle manifest (required, at repo root)
+├── manifest.json          # Plugin manifest (required, at repo root)
 ├── init.py                # Init script (declared in manifest)
 ├── my_tool/
 │   ├── manifest.json      # Tool manifest (required)
@@ -26,9 +26,9 @@ my-plugin/                 # Repository root (e.g., github.com/user/my-plugin)
 
 When installed, the repository is cloned into `data/plugins/my-plugin/`.
 
-## Bundle manifest
+## Plugin manifest
 
-The `manifest.json` at the root of the plugin directory describes the bundle:
+The `manifest.json` at the root of the plugin directory describes the plugin:
 
 ```json
 {
@@ -43,15 +43,15 @@ The `manifest.json` at the root of the plugin directory describes the bundle:
 ```
 
 - `name` (string, required): The plugin's unique identifier. Used to namespace tools. Must contain only lowercase letters, digits, and hyphens (`[a-z0-9-]`).
-- `description` (string, required): A short description shown when listing bundles.
+- `description` (string, required): A short description shown when listing plugins.
 - `instructions` (string, optional): Setup notes or usage guidance for the user. See "Plugin instructions" below.
 - `init` (object, optional): Declares an init script.
-  - `entrypoint` (string, required): The filename of the executable script at the bundle root.
+  - `entrypoint` (string, required): The filename of the executable script at the plugin root.
   - `async` (boolean, optional, defaults to false): If true, the init script runs in the background and does not block install/update.
 
 ## Plugin configuration
 
-The bundle manifest can declare an optional `config` field listing configuration values the plugin needs:
+The plugin manifest can declare an optional `config` field listing configuration values the plugin needs:
 
 ```json
 {
@@ -84,11 +84,11 @@ Configuration values are stored in a `config.json` file at the plugin's root dir
 }
 ```
 
-Tools can read their plugin's configuration from `../config.json` relative to their working directory. The tool's working directory is its own subdirectory, one level below the bundle root.
+Tools can read their plugin's configuration from `../config.json` relative to their working directory. The tool's working directory is its own subdirectory, one level below the plugin root.
 
 ## Plugin instructions
 
-The bundle manifest can include an optional `instructions` field containing setup notes, usage guidance, or other information intended for the end user.
+The plugin manifest can include an optional `instructions` field containing setup notes, usage guidance, or other information intended for the end user.
 
 When a plugin is installed, updated, or inspected, the agent relays these instructions to the user verbatim. The agent will not follow the instructions itself.
 
@@ -96,9 +96,9 @@ Instructions longer than 5000 characters are truncated before being shown to the
 
 ## Init scripts
 
-An init script is declared in the bundle manifest via the `init` field. The `entrypoint` value names the executable file at the bundle root. The script must be executable (`chmod +x`).
+An init script is declared in the plugin manifest via the `init` field. The `entrypoint` value names the executable file at the plugin root. The script must be executable (`chmod +x`).
 
-The init script runs automatically after install and after update. It runs as the plugin's system user with the same restricted environment as tools. The working directory is the bundle root (not a tool subdirectory). It receives no stdin input.
+The init script runs automatically after install and after update. It runs as the plugin's system user with the same restricted environment as tools. The working directory is the plugin root (not a tool subdirectory). It receives no stdin input.
 
 Anything the init script writes to stdout is captured and returned to the agent as `init_output` in the install/update response. Use this to report setup results, generated credentials, or other information the agent should see.
 
@@ -146,8 +146,8 @@ Each tool subdirectory contains its own `manifest.json`:
 }
 ```
 
-- `name` (string, required): The tool's name within the bundle.
-- `description` (string, required): Shown when inspecting the bundle.
+- `name` (string, required): The tool's name within the plugin.
+- `description` (string, required): Shown when inspecting the plugin.
 - `entrypoint` (string, required): The filename of the executable script inside the tool directory.
 - `async` (boolean, optional, defaults to false): If true, the tool runs asynchronously and the result is delivered via callback instead of inline.
 - `parameters` (object, required): Parameter schema. Each key is a parameter name; each value has `type` (`string`, `integer`, `number`, or `boolean`) and `description`. Use an empty object `{}` if the tool takes no parameters.
