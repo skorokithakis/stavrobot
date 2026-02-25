@@ -7,6 +7,10 @@ rm -rf "$REPO_ROOT/output"
 
 mkdir -p "$REPO_ROOT/output"
 
+cat >"$REPO_ROOT/output/_redirects" <<'EOF'
+/ https://github.com/skorokithakis/stavrobot
+EOF
+
 mkdir -p "$REPO_ROOT/output/skills"
 
 # Write the index header unconditionally; rows are appended per skill file below.
