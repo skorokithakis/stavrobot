@@ -1,7 +1,7 @@
 ---
 title: Skill system bootstrap
 description: Bootstraps the skill system by creating the skills table and teaching the bot how to discover, install, and upgrade skills.
-version: 2
+version: 3
 author: Stavros Korokithakis
 ---
 
@@ -25,7 +25,7 @@ Create a scratchpad entry titled "Skill system description" with the following c
 The skill index lives at `https://stavrobot.stavros.io/skills/index.md`. Fetch it to see
 available skills. Each skill is listed with its path, title, description, and version.
 Individual skill files are at `https://stavrobot.stavros.io/skills/<filename>`.
-The bootstrap file lives at `https://stavrobot.stavros.io/bootstrap.md`.
+The bootstrap file lives at `https://stavrobot.stavros.io/skills/bootstrap.md`.
 
 CRITICAL RULE — MANDATORY USER APPROVAL FOR ALL SKILL OPERATIONS:
 
@@ -49,6 +49,6 @@ To check for upgrades, fetch the skill file again and compare its version agains
 Insert a row into the `skills` table for the bootstrap itself:
 
 - `name`: "bootstrap"
-- `url`: "https://stavrobot.stavros.io/bootstrap.md"
+- `url`: "https://stavrobot.stavros.io/skills/bootstrap.md"
 - `content`: the full text of this file
 - `version`: the version from the front matter of this file

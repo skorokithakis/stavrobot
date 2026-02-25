@@ -5,8 +5,6 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 mkdir -p "$REPO_ROOT/output"
 
-cp "$REPO_ROOT/bootstrap.md" "$REPO_ROOT/output/bootstrap.md"
-
 mkdir -p "$REPO_ROOT/output/skills"
 
 # Write the index header unconditionally; rows are appended per skill file below.
