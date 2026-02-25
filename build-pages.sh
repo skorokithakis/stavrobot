@@ -3,6 +3,8 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+rm -rf "$REPO_ROOT/output"
+
 mkdir -p "$REPO_ROOT/output"
 
 mkdir -p "$REPO_ROOT/output/skills"
