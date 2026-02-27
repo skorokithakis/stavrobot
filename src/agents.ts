@@ -17,7 +17,7 @@ help — Show this documentation.
 create — Create a new subagent.
   name (required): A short, descriptive name for the agent.
   system_prompt (required): The agent's specific instructions, context, and constraints. This is appended to the base agent prompt. Write it as if you're briefing a colleague on a task — include what the agent should do, what information it has, and what constraints it must follow.
-  allowed_tools (optional): Whitelist of tool names the agent may use. Defaults to [] (no tools). An explicit list like ["send_telegram_message"] means only those tools are available. send_agent_message is always available to all agents regardless of this list — do not include it here.
+  allowed_tools (optional): Whitelist of tool names the agent may use. Defaults to [] (no tools). An explicit list like ["send_telegram_message"] means only those tools are available. Use dot notation to scope to specific actions: "manage_interlocutors.list" allows only the list action of that tool. send_agent_message is always available to all agents regardless of this list — do not include it here.
   Returns the new agent's ID.
 
 update — Update an existing agent's fields. Only provided fields are updated. Refuses to modify agent 1 (the main agent).
@@ -34,7 +34,7 @@ Guidance on creating subagents:
 
 - Give agents the minimum tool privileges needed for their task. Start with fewer tools; the subagent can ask for more via send_agent_message.
 - send_agent_message is always available to all agents regardless of their allowed_tools list — do not include it in the list.
-- The allowed_tools field is a whitelist: [] means no tools, and an explicit list like ["send_telegram_message"] means only those tools.
+- The allowed_tools field is a whitelist: [] means no tools, and an explicit list like ["send_telegram_message"] means only those tools. Use dot notation to restrict to specific actions: ["manage_interlocutors.list", "manage_interlocutors.create"] allows only list and create.
 - Almost never give a subagent execute_sql — it can read the entire database and escalate its own privileges.
 - Provide the subagent with all the information it needs to perform its task in the system_prompt field, but no more than necessary. Information about the person it's talking to, the places or facts of the task, etc are especially helpful.
 - Instruct the subagent to ask the main agent (agent 1) if it needs information or tools it doesn't have.

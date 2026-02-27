@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import { serializeMessagesForSummary } from "./agent.js";
+import { describe, it, expect, vi } from "vitest";
+import type { AgentMessage, AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
+import { serializeMessagesForSummary, filterToolsForSubagent } from "./agent.js";
 
 // Helper to build a minimal assistant message without filling in all required
 // fields that the serializer never reads (api, provider, model, usage).
@@ -172,5 +172,121 @@ describe("serializeMessagesForSummary", () => {
         "Tool result (send_signal_message): Message sent successfully.",
       ].join("\n"),
     );
+  });
+});
+
+// Minimal AgentTool factory for testing filterToolsForSubagent.
+function makeTool(name: string): AgentTool {
+  return {
+    name,
+    label: name,
+    description: `Tool ${name}`,
+    parameters: {} as AgentTool["parameters"],
+    execute: vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "ok" }],
+      details: {},
+    }),
+  };
+}
+
+describe("filterToolsForSubagent", () => {
+  it("excludes tools not in the allowed list", () => {
+    const tools = [makeTool("execute_sql"), makeTool("manage_cron"), makeTool("send_agent_message")];
+    const result = filterToolsForSubagent(tools, ["execute_sql"]);
+    expect(result.map((t) => t.name)).toEqual(["execute_sql", "send_agent_message"]);
+  });
+
+  it("always includes send_agent_message even when not listed", () => {
+    const tools = [makeTool("execute_sql"), makeTool("send_agent_message")];
+    const result = filterToolsForSubagent(tools, ["execute_sql"]);
+    expect(result.map((t) => t.name)).toContain("send_agent_message");
+  });
+
+  it("includes send_agent_message only once when explicitly listed", () => {
+    const tools = [makeTool("execute_sql"), makeTool("send_agent_message")];
+    const result = filterToolsForSubagent(tools, ["execute_sql", "send_agent_message"]);
+    const names = result.map((t) => t.name);
+    expect(names.filter((n) => n === "send_agent_message")).toHaveLength(1);
+  });
+
+  it("includes a tool as-is when a bare name is given", async () => {
+    const tool = makeTool("manage_interlocutors");
+    const result = filterToolsForSubagent([tool], ["manage_interlocutors"]);
+    expect(result[0]).toBe(tool);
+  });
+
+  it("wraps execute for dotted entries and allows the listed action", async () => {
+    const tool = makeTool("manage_interlocutors");
+    const result = filterToolsForSubagent([tool], ["manage_interlocutors.list"]);
+    const wrapped = result.find((t) => t.name === "manage_interlocutors");
+    expect(wrapped).toBeDefined();
+    // The wrapped tool should not be the original object.
+    expect(wrapped).not.toBe(tool);
+    // Calling with the allowed action should delegate to the original execute.
+    await wrapped!.execute("id1", { action: "list" });
+    expect(tool.execute).toHaveBeenCalledWith("id1", { action: "list" }, undefined, undefined);
+  });
+
+  it("wraps execute and rejects a disallowed action", async () => {
+    const tool = makeTool("manage_interlocutors");
+    const result = filterToolsForSubagent([tool], ["manage_interlocutors.list"]);
+    const wrapped = result.find((t) => t.name === "manage_interlocutors");
+    const response = await wrapped!.execute("id1", { action: "create" }) as AgentToolResult<{ message: string }>;
+    expect(response.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("not allowed") });
+    expect(response.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("create") });
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+
+  it("combines multiple dotted entries for the same tool", async () => {
+    const tool = makeTool("manage_interlocutors");
+    const result = filterToolsForSubagent([tool], ["manage_interlocutors.list", "manage_interlocutors.create"]);
+    const wrapped = result.find((t) => t.name === "manage_interlocutors");
+    // Both allowed actions should pass through.
+    await wrapped!.execute("id1", { action: "list" });
+    await wrapped!.execute("id2", { action: "create" });
+    expect(tool.execute).toHaveBeenCalledTimes(2);
+    // A third action should be rejected.
+    const response = await wrapped!.execute("id3", { action: "delete" }) as AgentToolResult<{ message: string }>;
+    expect(response.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("not allowed") });
+  });
+
+  it("bare name takes precedence over dotted entries for the same tool", async () => {
+    const tool = makeTool("manage_interlocutors");
+    // Both a bare name and a dotted entry are present.
+    const result = filterToolsForSubagent([tool], ["manage_interlocutors", "manage_interlocutors.list"]);
+    const included = result.find((t) => t.name === "manage_interlocutors");
+    // The bare name wins: the original tool object is returned unchanged.
+    expect(included).toBe(tool);
+  });
+
+  it("passes through calls with no action param without error", async () => {
+    const tool = makeTool("some_tool");
+    const result = filterToolsForSubagent([tool], ["some_tool.list"]);
+    const wrapped = result.find((t) => t.name === "some_tool");
+    // No action field in params: should delegate to original execute.
+    await wrapped!.execute("id1", { query: "SELECT 1" });
+    expect(tool.execute).toHaveBeenCalled();
+  });
+
+  it("returns empty list (except send_agent_message) when allowed list is empty", () => {
+    const tools = [makeTool("execute_sql"), makeTool("manage_cron")];
+    const result = filterToolsForSubagent(tools, []);
+    // send_agent_message is not in the tools array, so nothing is returned.
+    expect(result).toHaveLength(0);
+  });
+
+  it("includes send_agent_message from tools when allowed list is empty", () => {
+    const tools = [makeTool("execute_sql"), makeTool("send_agent_message")];
+    const result = filterToolsForSubagent(tools, []);
+    expect(result.map((t) => t.name)).toEqual(["send_agent_message"]);
+  });
+
+  it("error message lists allowed actions sorted alphabetically", async () => {
+    const tool = makeTool("manage_interlocutors");
+    const result = filterToolsForSubagent([tool], ["manage_interlocutors.update", "manage_interlocutors.list"]);
+    const wrapped = result.find((t) => t.name === "manage_interlocutors");
+    const response = await wrapped!.execute("id1", { action: "delete" }) as AgentToolResult<{ message: string }>;
+    const text = (response.content[0] as { type: string; text: string }).text;
+    expect(text).toContain("list, update");
   });
 });

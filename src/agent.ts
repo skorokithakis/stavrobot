@@ -951,6 +951,68 @@ function formatUserMessage(userMessage: string, source?: string, sender?: string
 
 const PLUGIN_RUNNER_BASE_URL = "http://plugin-runner:3003";
 
+/**
+ * Parses an allowed_tools list and returns the filtered (and possibly wrapped)
+ * tool list for a subagent. `send_agent_message` is always included.
+ *
+ * Entries without a dot grant full access to that tool. Entries with a dot
+ * (e.g. "manage_interlocutors.list") restrict the tool to only the named
+ * action. Multiple dotted entries for the same tool combine. A bare name
+ * takes precedence over any dotted entries for the same tool.
+ */
+export function filterToolsForSubagent(tools: AgentTool[], allowedTools: string[]): AgentTool[] {
+  // Always include send_agent_message regardless of the whitelist.
+  const fullyAllowed = new Set<string>(["send_agent_message"]);
+  const actionMap = new Map<string, Set<string>>();
+
+  for (const entry of allowedTools) {
+    const dotIndex = entry.indexOf(".");
+    if (dotIndex === -1) {
+      fullyAllowed.add(entry);
+    } else {
+      const toolName = entry.slice(0, dotIndex);
+      const action = entry.slice(dotIndex + 1);
+      if (!actionMap.has(toolName)) {
+        actionMap.set(toolName, new Set());
+      }
+      actionMap.get(toolName)!.add(action);
+    }
+  }
+
+  const result: AgentTool[] = [];
+
+  for (const tool of tools) {
+    if (fullyAllowed.has(tool.name)) {
+      // Bare name entry: include as-is, all actions allowed.
+      result.push(tool);
+    } else if (actionMap.has(tool.name)) {
+      // Dotted entries only: wrap execute to enforce action-level filtering.
+      const allowedActions = actionMap.get(tool.name)!;
+      const toolName = tool.name;
+      const originalExecute = tool.execute;
+      const wrappedTool: AgentTool = {
+        ...tool,
+        execute: async (toolCallId, params, signal, onUpdate) => {
+          const action = (params as Record<string, unknown>)["action"];
+          if (typeof action === "string" && !allowedActions.has(action)) {
+            const list = [...allowedActions].sort().join(", ");
+            const errorMessage = `Action "${action}" is not allowed on tool "${toolName}". Allowed actions: ${list}.`;
+            return {
+              content: [{ type: "text" as const, text: errorMessage }],
+              details: { message: errorMessage },
+            };
+          }
+          return originalExecute(toolCallId, params, signal, onUpdate);
+        },
+      };
+      result.push(wrappedTool);
+    }
+    // Otherwise: tool is not in the whitelist, exclude it.
+  }
+
+  return result;
+}
+
 interface PluginSummary {
   name: string;
   description: string;
@@ -1153,8 +1215,7 @@ export async function handlePrompt(
     const allowedTools = subagentRow?.allowedTools ?? [];
     // A wildcard means all tools are allowed (should only be agent 1 in practice).
     if (!allowedTools.includes("*")) {
-      const allowedSet = new Set([...allowedTools, "send_agent_message"]);
-      const filteredTools = fullTools.filter((tool) => allowedSet.has(tool.name));
+      const filteredTools = filterToolsForSubagent(fullTools, allowedTools);
       agent.setTools(filteredTools);
     }
   }
