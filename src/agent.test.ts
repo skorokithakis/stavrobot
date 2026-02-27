@@ -304,4 +304,18 @@ describe("filterToolsForSubagent", () => {
     const text = (response.content[0] as { type: string; text: string }).text;
     expect(text).toContain("list, update");
   });
+
+  it("wrapped tool description includes restriction notice with sorted actions", () => {
+    const tool = makeTool("manage_interlocutors");
+    const result = filterToolsForSubagent([tool], ["manage_interlocutors.update", "manage_interlocutors.list"]);
+    const wrapped = result.find((t) => t.name === "manage_interlocutors");
+    expect(wrapped!.description).toBe("Tool manage_interlocutors (Restricted to actions: list, update.)");
+  });
+
+  it("unwrapped tool (bare name entry) has its original description unchanged", () => {
+    const tool = makeTool("manage_interlocutors");
+    const result = filterToolsForSubagent([tool], ["manage_interlocutors"]);
+    const included = result.find((t) => t.name === "manage_interlocutors");
+    expect(included!.description).toBe("Tool manage_interlocutors");
+  });
 });
