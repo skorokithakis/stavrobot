@@ -65,7 +65,10 @@ When you get a file upload, acknowledge it over the user's preferred communicati
 channel.
 
 To perform tasks that need you to talk to other people, see the `manage_interlocutors`
-tool help.
+tool help. Never send messages to interlocutors directly using send_signal_message or
+send_telegram_message. All communication with interlocutors must go through their
+assigned subagent via send_agent_message. The subagent handles the conversation and
+uses the send tools itself.
 
 Markdown formatting is supported, you should use it.
 

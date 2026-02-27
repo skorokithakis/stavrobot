@@ -182,6 +182,19 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
           };
         }
 
+        // The DB default for enabled is true, so omitting it means the interlocutor
+        // will be enabled. Reject the combination of enabled=true (explicit or default)
+        // with no agent_id, since inbound messages would be silently dropped.
+        const willBeEnabled = raw.enabled !== false;
+        const agentId = raw.agent_id ?? null;
+        if (willBeEnabled && agentId === null) {
+          const errorMessage = "Error: cannot create an enabled interlocutor without an agent_id. Either provide an agent_id or set enabled to false.";
+          return {
+            content: [{ type: "text" as const, text: errorMessage }],
+            details: { message: errorMessage },
+          };
+        }
+
         const client = await pool.connect();
         let newId: number;
         try {
@@ -280,6 +293,33 @@ export function createManageInterlocutorsTool(pool: pg.Pool): AgentTool {
             content: [{ type: "text" as const, text: errorMessage }],
             details: { message: errorMessage },
           };
+        }
+
+        // Fetch the current row to determine the resulting enabled/agent_id state
+        // after the update, so we can reject the enabled=true + agent_id=null combination
+        // before it reaches the database.
+        const currentResult = await pool.query<{ enabled: boolean; agent_id: number | null }>(
+          "SELECT enabled, agent_id FROM interlocutors WHERE id = $1",
+          [raw.id],
+        );
+        if (currentResult.rows.length > 0) {
+          const current = currentResult.rows[0];
+          const resultingEnabled = raw.enabled !== undefined ? raw.enabled : current.enabled;
+          let resultingAgentId: number | null;
+          if (raw.agent_id === 0) {
+            resultingAgentId = null;
+          } else if (raw.agent_id !== undefined) {
+            resultingAgentId = raw.agent_id;
+          } else {
+            resultingAgentId = current.agent_id;
+          }
+          if (resultingEnabled && resultingAgentId === null) {
+            const errorMessage = "Error: cannot enable an interlocutor without an agent_id. Either provide an agent_id or set enabled to false.";
+            return {
+              content: [{ type: "text" as const, text: errorMessage }],
+              details: { message: errorMessage },
+            };
+          }
         }
 
         values.push(raw.id);

@@ -134,17 +134,54 @@ describe("manage_interlocutors — create", () => {
       // The pool.query call for fetchInterlocutorById.
       if (text.includes("WHERE i.id")) {
         return Promise.resolve({
-          rows: [{ id: 42, display_name: "Alice", agent_id: null, owner: false, enabled: true, created_at: new Date("2024-01-01"), service: null, identifier: null }],
+          rows: [{ id: 42, display_name: "Alice", agent_id: 5, owner: false, enabled: true, created_at: new Date("2024-01-01"), service: null, identifier: null }],
           rowCount: 1,
         } as unknown as QueryResult);
       }
       return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
     });
     const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "create", display_name: "Alice", instructions: "Be polite." });
+    // Must provide agent_id when creating an enabled interlocutor.
+    const result = await tool.execute("call-1", { action: "create", display_name: "Alice", agent_id: 5, instructions: "Be polite." });
     const text = makeText(result);
     expect(text).toContain("Alice");
     expect(result.details).toMatchObject({ id: 42, display_name: "Alice" });
+  });
+
+  it("returns an error when creating an enabled interlocutor without agent_id", async () => {
+    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
+    const tool = createManageInterlocutorsTool(pool);
+    const result = await tool.execute("call-1", { action: "create", display_name: "Alice" });
+    expect(makeText(result)).toContain("Error:");
+    expect(makeText(result)).toContain("cannot create an enabled interlocutor without an agent_id");
+  });
+
+  it("returns an error when creating an explicitly enabled interlocutor without agent_id", async () => {
+    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
+    const tool = createManageInterlocutorsTool(pool);
+    const result = await tool.execute("call-1", { action: "create", display_name: "Alice", enabled: true });
+    expect(makeText(result)).toContain("Error:");
+    expect(makeText(result)).toContain("cannot create an enabled interlocutor without an agent_id");
+  });
+
+  it("allows creating a disabled interlocutor without agent_id", async () => {
+    let clientCallCount = 0;
+    const pool = makeMockPool((text: string) => {
+      clientCallCount++;
+      if (clientCallCount === 2) {
+        return Promise.resolve({ rows: [{ id: 42 }], rowCount: 1 } as unknown as QueryResult);
+      }
+      if (text.includes("WHERE i.id")) {
+        return Promise.resolve({
+          rows: [{ id: 42, display_name: "Alice", agent_id: null, owner: false, enabled: false, created_at: new Date("2024-01-01"), service: null, identifier: null }],
+          rowCount: 1,
+        } as unknown as QueryResult);
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
+    });
+    const tool = createManageInterlocutorsTool(pool);
+    const result = await tool.execute("call-1", { action: "create", display_name: "Alice", enabled: false });
+    expect(result.details).toMatchObject({ id: 42, enabled: false });
   });
 
   it("creates an interlocutor with enabled: false and the record reflects disabled state", async () => {
@@ -195,16 +232,18 @@ describe("manage_interlocutors — create", () => {
       // The pool.query call for fetchInterlocutorById.
       if (text.includes("WHERE i.id")) {
         return Promise.resolve({
-          rows: [{ id: 7, display_name: "Bob", agent_id: null, owner: false, enabled: true, created_at: new Date("2024-01-01"), service: "signal", identifier: "+1234567890" }],
+          rows: [{ id: 7, display_name: "Bob", agent_id: 2, owner: false, enabled: true, created_at: new Date("2024-01-01"), service: "signal", identifier: "+1234567890" }],
           rowCount: 1,
         } as unknown as QueryResult);
       }
       return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
     });
     const tool = createManageInterlocutorsTool(pool);
+    // Must provide agent_id when creating an enabled interlocutor.
     const result = await tool.execute("call-1", {
       action: "create",
       display_name: "Bob",
+      agent_id: 2,
       instructions: "Help with code.",
       service: "signal",
       identifier: "+1234567890",
@@ -230,9 +269,11 @@ describe("manage_interlocutors — create", () => {
       return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
     });
     const tool = createManageInterlocutorsTool(pool);
+    // Must provide agent_id when creating an enabled interlocutor.
     const result = await tool.execute("call-1", {
       action: "create",
       display_name: "Bob",
+      agent_id: 2,
       service: "signal",
       identifier: "+1234567890",
     });
@@ -282,11 +323,12 @@ describe("manage_interlocutors — update", () => {
     expect(makeText(result)).toContain("Bob");
   });
 
-  it("updates enabled to true and returns the full record", async () => {
+  it("returns an error when enabling an interlocutor that has no agent_id", async () => {
     const pool = makeMockPool((text: string) => {
-      if (text.includes("WHERE i.id")) {
+      // The SELECT for current state returns agent_id: null, enabled: false.
+      if (text.includes("SELECT enabled, agent_id")) {
         return Promise.resolve({
-          rows: [{ ...interlocutorRow5, enabled: true }],
+          rows: [{ enabled: false, agent_id: null }],
           rowCount: 1,
         } as unknown as QueryResult);
       }
@@ -294,7 +336,48 @@ describe("manage_interlocutors — update", () => {
     });
     const tool = createManageInterlocutorsTool(pool);
     const result = await tool.execute("call-1", { action: "update", id: 5, enabled: true });
-    expect(result.details).toMatchObject({ id: 5, enabled: true });
+    expect(makeText(result)).toContain("Error:");
+    expect(makeText(result)).toContain("cannot enable an interlocutor without an agent_id");
+  });
+
+  it("returns an error when clearing agent_id on an enabled interlocutor", async () => {
+    const pool = makeMockPool((text: string) => {
+      // The SELECT for current state returns agent_id: 3, enabled: true.
+      if (text.includes("SELECT enabled, agent_id")) {
+        return Promise.resolve({
+          rows: [{ enabled: true, agent_id: 3 }],
+          rowCount: 1,
+        } as unknown as QueryResult);
+      }
+      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
+    });
+    const tool = createManageInterlocutorsTool(pool);
+    // Clearing agent_id (sentinel 0) on an enabled interlocutor should be rejected.
+    const result = await tool.execute("call-1", { action: "update", id: 5, agent_id: 0 });
+    expect(makeText(result)).toContain("Error:");
+    expect(makeText(result)).toContain("cannot enable an interlocutor without an agent_id");
+  });
+
+  it("updates enabled to true when the interlocutor has an agent_id", async () => {
+    const pool = makeMockPool((text: string) => {
+      // The SELECT for current state returns agent_id: 3, enabled: false.
+      if (text.includes("SELECT enabled, agent_id")) {
+        return Promise.resolve({
+          rows: [{ enabled: false, agent_id: 3 }],
+          rowCount: 1,
+        } as unknown as QueryResult);
+      }
+      if (text.includes("WHERE i.id")) {
+        return Promise.resolve({
+          rows: [{ ...interlocutorRow10, enabled: true }],
+          rowCount: 1,
+        } as unknown as QueryResult);
+      }
+      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
+    });
+    const tool = createManageInterlocutorsTool(pool);
+    const result = await tool.execute("call-1", { action: "update", id: 10, enabled: true });
+    expect(result.details).toMatchObject({ id: 10, enabled: true });
   });
 
   it("updates display_name and returns the full record", async () => {
@@ -328,11 +411,18 @@ describe("manage_interlocutors — update", () => {
     expect(result.details).toMatchObject({ id: 5, agent_id: 3 });
   });
 
-  it("clears agent_id when set to 0 and returns the full record", async () => {
+  it("clears agent_id when set to 0 on a disabled interlocutor and returns the full record", async () => {
     const pool = makeMockPool((text: string) => {
+      // The SELECT for current state returns agent_id: 3, enabled: false.
+      if (text.includes("SELECT enabled, agent_id")) {
+        return Promise.resolve({
+          rows: [{ enabled: false, agent_id: 3 }],
+          rowCount: 1,
+        } as unknown as QueryResult);
+      }
       if (text.includes("WHERE i.id")) {
         return Promise.resolve({
-          rows: [{ ...interlocutorRow5, agent_id: null }],
+          rows: [{ ...interlocutorRow5, agent_id: null, enabled: false }],
           rowCount: 1,
         } as unknown as QueryResult);
       }
