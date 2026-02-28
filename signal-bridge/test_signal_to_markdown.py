@@ -27,9 +27,9 @@ def test_bold() -> None:
 
 
 def test_italic() -> None:
-    """ITALIC annotation wraps the span in *...*."""
+    """ITALIC annotation wraps the span in _..._."""
     result = convert_signal_to_markdown("hello world", [{"start": 6, "length": 5, "style": "ITALIC"}])
-    assert result == "hello *world*"
+    assert result == "hello _world_"
 
 
 def test_strikethrough() -> None:
@@ -63,7 +63,7 @@ def test_adjacent_annotations() -> None:
         {"start": 5, "length": 5, "style": "ITALIC"},
     ]
     result = convert_signal_to_markdown("helloworld", formatting)
-    assert result == "**hello***world*"
+    assert result == "**hello**_world_"
 
 
 def test_overlapping_annotations() -> None:
@@ -74,7 +74,7 @@ def test_overlapping_annotations() -> None:
         {"start": 6, "length": 5, "style": "ITALIC"},
     ]
     result = convert_signal_to_markdown("hello world", formatting)
-    assert result == "**hello *w**orld*"
+    assert result == "**hello _w**orld_"
 
 
 def test_multibyte_utf16_character() -> None:
@@ -94,7 +94,7 @@ def test_annotation_spanning_multibyte_characters() -> None:
     text = "\U0001f600X"
     formatting = [{"start": 2, "length": 1, "style": "ITALIC"}]
     result = convert_signal_to_markdown(text, formatting)
-    assert result == "\U0001f600*X*"
+    assert result == "\U0001f600_X_"
 
 
 def test_whole_string_annotation() -> None:
@@ -113,7 +113,7 @@ def test_multiple_non_overlapping_annotations() -> None:
         {"start": 8, "length": 3, "style": "ITALIC"},
     ]
     result = convert_signal_to_markdown(text, formatting)
-    assert result == "**foo** bar *baz*"
+    assert result == "**foo** bar _baz_"
 
 
 if __name__ == "__main__":

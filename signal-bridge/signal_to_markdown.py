@@ -5,7 +5,7 @@ from markdown_to_signal import utf16_length
 
 _STYLE_MARKERS: dict[str, tuple[str, str]] = {
     "BOLD": ("**", "**"),
-    "ITALIC": ("*", "*"),
+    "ITALIC": ("_", "_"),
     "STRIKETHROUGH": ("~~", "~~"),
     "MONOSPACE": ("`", "`"),
     "SPOILER": ("<spoiler>", "</spoiler>"),
