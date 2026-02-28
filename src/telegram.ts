@@ -10,10 +10,20 @@ interface TelegramVoice {
   mime_type?: string;
 }
 
+interface TelegramEntity {
+  type: string;
+  offset: number;
+  length: number;
+  url?: string;
+  language?: string;
+}
+
 interface TelegramMessage {
   chat: { id: number };
   text?: string;
   caption?: string;
+  entities?: TelegramEntity[];
+  caption_entities?: TelegramEntity[];
   voice?: TelegramVoice;
   audio?: TelegramVoice;
   photo?: Array<{ file_id: string; file_size?: number }>;
@@ -125,6 +135,112 @@ export async function convertMarkdownToTelegramHtml(markdown: string): Promise<s
   const result = await telegramMarked.parse(markdown, { async: true });
   // Trim trailing whitespace that accumulates from paragraph double-newlines.
   return result.trim();
+}
+
+// Returns the number of UTF-16 code units for a single Unicode code point.
+function utf16Length(codePoint: number): number {
+  return codePoint >= 0x10000 ? 2 : 1;
+}
+
+export function applyTelegramEntitiesToMarkdown(text: string, entities: TelegramEntity[] | undefined): string {
+  if (entities === undefined || entities.length === 0) {
+    return text;
+  }
+
+  // Each event is (utf16Position, isClose, markerString).
+  // isClose is used as a sort key so that close markers sort before open markers
+  // at the same position, preventing adjacent spans from bleeding into each other.
+  const events: Array<[number, boolean, string]> = [];
+
+  for (const entity of entities) {
+    const end = entity.offset + entity.length;
+    let openMarker: string;
+    let closeMarker: string;
+
+    switch (entity.type) {
+      case "bold":
+        openMarker = "**";
+        closeMarker = "**";
+        break;
+      case "italic":
+        openMarker = "_";
+        closeMarker = "_";
+        break;
+      case "strikethrough":
+        openMarker = "~~";
+        closeMarker = "~~";
+        break;
+      case "code":
+        openMarker = "`";
+        closeMarker = "`";
+        break;
+      case "pre": {
+        const lang = entity.language !== undefined && entity.language !== "" ? entity.language : "";
+        openMarker = `\`\`\`${lang}\n`;
+        closeMarker = "\n```";
+        break;
+      }
+      case "text_link":
+        if (entity.url === undefined) {
+          continue;
+        }
+        openMarker = "[";
+        closeMarker = `](${entity.url})`;
+        break;
+      case "spoiler":
+        openMarker = "<spoiler>";
+        closeMarker = "</spoiler>";
+        break;
+      default:
+        // All other entity types (mention, hashtag, url, etc.) are ignored.
+        continue;
+    }
+
+    events.push([entity.offset, false, openMarker]);
+    events.push([end, true, closeMarker]);
+  }
+
+  if (events.length === 0) {
+    return text;
+  }
+
+  // Sort by position; at the same position, close markers (true) come before
+  // open markers (false) so that adjacent annotations do not bleed into each other.
+  events.sort(([positionA, isCloseA], [positionB, isCloseB]) => {
+    if (positionA !== positionB) {
+      return positionA - positionB;
+    }
+    // Close (true=1) before open (false=0): sort descending on the boolean value.
+    return (isCloseB ? 1 : 0) - (isCloseA ? 1 : 0);
+  });
+
+  // Walk the text once, advancing by UTF-16 code units to match Telegram's offsets.
+  const totalUtf16 = [...text].reduce((sum, char) => sum + utf16Length(char.codePointAt(0) ?? 0), 0);
+  const resultParts: string[] = [];
+  let previousPythonIndex = 0;
+  let previousUtf16Offset = 0;
+
+  for (const [utf16Position, , marker] of events) {
+    const clampedPosition = Math.max(0, Math.min(utf16Position, totalUtf16));
+    const delta = clampedPosition - previousUtf16Offset;
+
+    let pythonIndex = previousPythonIndex;
+    let unitsWalked = 0;
+    while (unitsWalked < delta && pythonIndex < text.length) {
+      const codePoint = text.codePointAt(pythonIndex) ?? 0;
+      unitsWalked += utf16Length(codePoint);
+      // Advance by 2 for surrogate pairs (code points >= U+10000), 1 otherwise.
+      pythonIndex += codePoint >= 0x10000 ? 2 : 1;
+    }
+
+    resultParts.push(text.slice(previousPythonIndex, pythonIndex));
+    resultParts.push(marker);
+    previousPythonIndex = pythonIndex;
+    previousUtf16Offset = clampedPosition;
+  }
+
+  resultParts.push(text.slice(previousPythonIndex));
+  return resultParts.join("");
 }
 
 function isTelegramUpdate(value: unknown): value is TelegramUpdate {
@@ -260,6 +376,13 @@ export async function handleTelegramWebhook(
     return;
   }
 
+  const formattedText = message.text !== undefined
+    ? applyTelegramEntitiesToMarkdown(message.text, message.entities)
+    : undefined;
+  const formattedCaption = message.caption !== undefined
+    ? applyTelegramEntitiesToMarkdown(message.caption, message.caption_entities)
+    : undefined;
+
   const voiceOrAudio = message.voice ?? message.audio;
 
   if (voiceOrAudio !== undefined) {
@@ -269,7 +392,7 @@ export async function handleTelegramWebhook(
     console.log("[stavrobot] Telegram voice/audio message from chat:", chatId, "contentType:", audioContentType);
     // Fire-and-forget: Telegram requires a fast 200 response, so we don't await.
     void downloadVoiceAsBase64(config, fileId).then((audioBase64) => {
-      void enqueueMessage(message.text ?? message.caption, "telegram", String(chatId), audioBase64, audioContentType);
+      void enqueueMessage(formattedText ?? formattedCaption, "telegram", String(chatId), audioBase64, audioContentType);
     }).catch((error: unknown) => {
       console.error("[stavrobot] Error downloading Telegram voice/audio:", error);
     });
@@ -292,7 +415,7 @@ export async function handleTelegramWebhook(
         mimeType,
         size: buffer.length,
       };
-      void enqueueMessage(message.caption, "telegram", String(chatId), undefined, undefined, [attachment]);
+      void enqueueMessage(formattedCaption, "telegram", String(chatId), undefined, undefined, [attachment]);
     }).catch((error: unknown) => {
       console.error("[stavrobot] Error downloading Telegram photo:", error);
     });
@@ -314,17 +437,17 @@ export async function handleTelegramWebhook(
         mimeType,
         size: buffer.length,
       };
-      void enqueueMessage(message.caption, "telegram", String(chatId), undefined, undefined, [attachment]);
+      void enqueueMessage(formattedCaption, "telegram", String(chatId), undefined, undefined, [attachment]);
     }).catch((error: unknown) => {
       console.error("[stavrobot] Error downloading Telegram document:", error);
     });
     return;
   }
 
-  if (message.text !== undefined) {
+  if (formattedText !== undefined) {
     console.log("[stavrobot] Telegram text message from chat:", chatId);
     // Fire-and-forget: Telegram requires a fast 200 response, so we don't await.
-    void enqueueMessage(message.text, "telegram", String(chatId));
+    void enqueueMessage(formattedText, "telegram", String(chatId));
     return;
   }
 
