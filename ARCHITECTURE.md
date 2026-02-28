@@ -122,6 +122,7 @@ All UI pages are served as inline HTML string constants in their respective sour
 
 | URL | Source file | Description |
 |-----|-------------|-------------|
+| `/` | `src/home.ts` (`buildHtml`) | Dashboard: bot info, service status, message stats, nav links |
 | `/explorer` | `src/explorer.ts` (`EXPLORER_PAGE_HTML`) | Database table browser with pagination, sorting, schema view |
 | `/settings` | `src/settings.ts` (`SETTINGS_HUB_HTML`) | Hub page with links to sub-settings |
 | `/settings/allowlist` | `src/settings.ts` (`SETTINGS_PAGE_HTML`) | Manage Signal/Telegram/WhatsApp allowlists |
@@ -285,344 +286,175 @@ Stores conversation summaries created by background compaction. Scoped to an age
 | agent_id | INTEGER FK | Agent this compaction belongs to |
 | created_at | TIMESTAMPTZ | Timestamp |
 
-### agents
-
-Agents that can receive and process messages. Agent 1 is always the main agent; all other rows are subagents created by the main agent.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | SERIAL PRIMARY KEY | Auto-incrementing ID. Agent 1 is always the main agent |
-| name | TEXT | Short descriptive name |
-| system_prompt | TEXT | Subagent instructions. Empty for the main agent, whose prompt is built at runtime from files |
-| allowed_tools | TEXT[] | Tool whitelist. `["*"]` = all tools (main agent), `[]` = no tools, explicit list = only those tools |
-| created_at | TIMESTAMPTZ | Timestamp |
-
-The main agent row is upserted on every startup with `id = 1`, `name = "main"`, and `allowed_tools = ["*"]`.
-
-### interlocutors
-
-Contact records for everyone the bot can talk to, including the owner. Each row has a display name, an `owner` flag, an `enabled` flag, and a reference to the agent that handles their messages.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | SERIAL PRIMARY KEY | Auto-incrementing ID |
-| display_name | TEXT UNIQUE | Human-readable name used in send tools |
-| owner | BOOLEAN | True for the owner row; enforced unique by a partial index |
-| enabled | BOOLEAN | When false, inbound messages are dropped and outbound sends are rejected |
-| agent_id | INTEGER FK (nullable) | Agent that handles messages from this interlocutor. If null, messages are dropped |
-| created_at | TIMESTAMPTZ | Timestamp |
-
-A partial unique index (`one_owner`) on `(owner) WHERE owner = true` ensures at most one row can be the owner. The owner row is upserted from `[owner]` config on every startup with `agent_id = 1` (main agent).
-
-### interlocutor_identities
-
-Channel identities for each interlocutor. One interlocutor can have multiple identities (e.g., both Signal and Telegram).
-
-| Column | Type | Description |
-|--------|------|-------------|
-| id | SERIAL PRIMARY KEY | Auto-incrementing ID |
-| interlocutor_id | INTEGER FK | References interlocutors(id) ON DELETE CASCADE |
-| service | TEXT | Channel name matching the `source` field on requests (`"signal"`, `"telegram"`) |
-| identifier | TEXT (nullable) | Channel-native ID (phone number for Signal, chat ID for Telegram). Null indicates a soft-deleted identity |
-| created_at | TIMESTAMPTZ | Timestamp |
-
-A partial unique index on `(service, identifier) WHERE identifier IS NOT NULL` prevents the same active channel identity from being assigned to multiple interlocutors. Soft-deleted rows (identifier IS NULL) are excluded from the index so multiple soft-deleted rows per service are allowed.
-
 ### cron_entries
 
-Scheduled tasks managed by the agent. Either recurring (cron expression) or one-shot (fire_at datetime). A CHECK constraint enforces mutual exclusivity.
+Scheduled tasks managed by the agent via the `manage_cron` tool.
 
 | Column | Type | Description |
 |--------|------|-------------|
 | id | SERIAL PRIMARY KEY | Auto-incrementing ID |
-| cron_expression | TEXT | Cron expression (nullable) |
-| fire_at | TIMESTAMPTZ | One-shot fire time (nullable) |
-| note | TEXT | The message/instruction for this entry |
-| created_at | TIMESTAMPTZ | Timestamp |
+| cron_expression | TEXT (nullable) | Standard cron expression (null if one-shot) |
+| fire_at | TIMESTAMPTZ (nullable) | Absolute fire time for one-shot entries |
+| note | TEXT | Human-readable description |
+| last_fired_at | TIMESTAMPTZ (nullable) | When this entry last fired |
 
 ### pages
 
-Web pages created by the agent, served at `GET /pages/<path>`.
+LLM-created web pages served at `/pages/<path>`.
 
 | Column | Type | Description |
 |--------|------|-------------|
 | id | SERIAL PRIMARY KEY | Auto-incrementing ID |
-| path | TEXT UNIQUE | URL path |
-| mimetype | TEXT | MIME type |
-| data | BYTEA | Page content |
-| is_public | BOOLEAN | Whether auth is required |
-| queries | JSONB | Named SQL queries for dynamic data |
+| path | TEXT UNIQUE | URL path (no leading/trailing slashes) |
+| mimetype | TEXT | MIME type for the Content-Type header |
+| data | BYTEA | Page content (UTF-8 encoded) |
+| is_public | BOOLEAN | Whether auth is required to view |
+| queries | JSONB (nullable) | Named SQL queries: `{ queryName: "SELECT ..." }` |
 | created_at | TIMESTAMPTZ | Creation timestamp |
 | updated_at | TIMESTAMPTZ | Last update timestamp |
 
-## Agent tools
+### scratchpad
 
-The agent has access to these tools, conditionally enabled based on configuration:
+See above.
 
-**Always available:**
-- `execute_sql` — Run arbitrary SQL against PostgreSQL.
-- `manage_knowledge` — Upsert/delete entries in the memory or scratchpad stores.
-- `manage_interlocutors` — Create, update, delete, and list interlocutor contact records and their channel identities.
-- `manage_agents` — Create, update, delete, and list subagents.
-- `send_agent_message` — Send a message to another agent via the queue. Always available to all agents, including subagents, regardless of their tool whitelist.
-- `send_signal_message` — Send text or attachments via Signal. Accepts display names as recipients.
-- `manage_cron` — Create, update, delete, or list scheduled cron entries.
-- `run_python` — Execute Python code in the sandboxed python-runner.
-- `manage_pages` — Create, update, or delete web pages with optional named queries.
-- `manage_uploads` — Read or delete uploaded files.
-- `manage_files` — Write, read, list, or delete files in an ephemeral temp directory (`/tmp/stavrobot-temp/files/`). Supports utf-8 and base64 encodings. File paths can be passed as `attachmentPath` to `send_signal_message` or `send_telegram_message`.
-- `manage_plugins` — Install, update, remove, configure, list, or show plugins.
-- `run_plugin_tool` — Execute a plugin tool.
-- `search` — Full-text search across the database.
+### agents
 
-Subagents only see the tools in their `allowed_tools` whitelist plus `send_agent_message`. The main agent always sees the full tool set.
+Subagent definitions. Agent 1 is always the main agent, seeded on startup.
 
-**Conditionally available:**
-- `send_telegram_message` — Send text or attachments via Telegram. Accepts display names as recipients (requires `[telegram]` config).
-- `send_whatsapp_message` — Send text or attachments via WhatsApp. Accepts display names as recipients (requires `[whatsapp]` config).
-- `request_coding_task` — Send coding tasks to the coder agent (requires `[coder]` config).
+| Column | Type | Description |
+|--------|------|-------------|
+| id | SERIAL PRIMARY KEY | Auto-incrementing ID |
+| name | TEXT | Display name |
+| system_prompt | TEXT | Agent-specific system prompt |
+| allowed_tools | TEXT[] | Whitelist of tool names (empty = no tools except send_agent_message) |
+| created_at | TIMESTAMPTZ | Creation timestamp |
 
-Action-based tools (`manage_knowledge`, `manage_cron`, `manage_files`, `manage_pages`, `manage_uploads`, `manage_plugins`) support a `help` action that returns detailed documentation.
+### interlocutors
 
-Send tools (`send_signal_message`, `send_telegram_message`, `send_whatsapp_message`) resolve display names to channel identifiers via the `interlocutors` and `interlocutor_identities` tables. Both the soft gate (interlocutor must exist in the DB) and the hard gate (identifier must be in the allowlist) are enforced on outbound sends.
+Contact records. Each interlocutor can be assigned to an agent for message routing.
 
-## Conversation compaction
+| Column | Type | Description |
+|--------|------|-------------|
+| id | SERIAL PRIMARY KEY | Auto-incrementing ID |
+| display_name | TEXT UNIQUE | Human-readable name |
+| owner | BOOLEAN | True for the owner record (enforced unique via partial index) |
+| enabled | BOOLEAN | Whether this interlocutor can send messages |
+| agent_id | INTEGER FK (nullable) | Agent to route messages to (null = drop) |
+| created_at | TIMESTAMPTZ | Creation timestamp |
 
-When the in-memory message count exceeds 50, a background compaction is triggered:
+### interlocutor_identities
 
-1. Finds a safe cut point at a user message boundary (to avoid orphaning tool-result messages).
-2. Serializes the older messages into a text summary.
-3. Calls the LLM (same model) to produce a concise summary.
-4. Saves the summary to the `compactions` table with the boundary message ID and the agent ID.
-5. On the next prompt, reloads messages from the database: a synthetic user message with the summary, followed by the messages after the boundary.
+Maps external identities (phone numbers, chat IDs) to interlocutors.
 
-Compaction is per-agent: each agent's conversation compacts independently. A boolean flag prevents concurrent compaction runs. The compaction runs in a fire-and-forget async block.
+| Column | Type | Description |
+|--------|------|-------------|
+| id | SERIAL PRIMARY KEY | Auto-incrementing ID |
+| interlocutor_id | INTEGER FK | Parent interlocutor |
+| service | TEXT | `"signal"`, `"telegram"`, `"whatsapp"` |
+| identifier | TEXT (nullable) | Phone number or chat ID (nullable for soft-deletion) |
+| created_at | TIMESTAMPTZ | Timestamp |
 
 ## Plugin system
 
-### Plugin structure
+Plugins are Node.js or Python packages that expose tools to the LLM agent. They are managed by the plugin-runner container.
 
-A plugin is a directory containing:
-- `manifest.json` at the root: `{ name, description, config?, instructions?, init? }`.
-- Tool subdirectories, each with their own `manifest.json`: `{ name, description, entrypoint, async?, parameters }`.
-- Optional `config.json` for runtime configuration (not committed to git).
+### Plugin manifest (`plugin.json`)
 
-Plugin names must match `[a-z0-9-]+`.
+Each plugin directory contains a `plugin.json` with:
 
-### Plugin types
+```json
+{
+  "name": "plugin-name",
+  "description": "What this plugin does",
+  "tools": [
+    {
+      "name": "tool_name",
+      "description": "What this tool does",
+      "parameters": { /* JSON Schema */ },
+      "async": false
+    }
+  ]
+}
+```
 
-- **Git-installed:** Cloned from a git URL. Cannot be modified by the coder agent. Managed with `manage_plugins`.
-- **Editable (locally created):** Created via `manage_plugins (action: create)`. Can be modified by the coder agent via `request_coding_task`. Distinguished by the absence of a `.git` directory.
+### Plugin lifecycle
 
-### Plugin isolation
-
-Each plugin gets a dedicated Unix system user (`plug_<name>` with hyphens replaced by underscores). The plugin directory is `chown`ed to this user and `chmod 700`ed. This means:
-- Plugins cannot read each other's files or configuration.
-- Plugin tools run as their plugin's user.
-- The plugin-runner creates matching users in both the plugin-runner and coder containers.
+- **Install:** `POST /install` with `{ url }` — clones the git repo into `/plugins/<name>`, creates a Unix user `plug_<name>`, sets `chmod 700` on the directory.
+- **Update:** `POST /update` with `{ name }` — runs `git pull` in the plugin directory.
+- **Remove:** `POST /remove` with `{ name }` — deletes the directory and Unix user.
+- **Configure:** `POST /configure` with `{ name, config }` — writes `config.json` into the plugin directory (owned by the plugin user, `chmod 600`).
+- **Create:** `POST /create` with `{ name }` — creates an empty editable plugin directory.
 
 ### Tool execution
 
-Tools are executable scripts. The plugin-runner spawns them as subprocesses:
-- Working directory: the tool's subdirectory.
-- Parameters passed as JSON on stdin.
-- Output expected as JSON on stdout.
-- Environment: only `PATH`, `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`.
-- Sync tools: 30-second timeout, result returned inline.
-- Async tools: 5-minute timeout, result posted back via callback to `app:3001/chat`.
+`POST /bundles/:name/tools/:tool/run` with `{ params, taskId? }`. The plugin-runner:
+1. Reads the plugin manifest.
+2. Runs the tool's entry point as the plugin's Unix user.
+3. For sync tools: waits for completion and returns the result.
+4. For async tools: returns 202 immediately; posts result to `app:3001/chat` on completion.
 
-### Init scripts
+### Config isolation
 
-Declared in the plugin manifest. Run on both install and update. Can be sync (30s timeout, blocks the operation) or async (5min timeout, runs in background). Output is captured and returned to the agent.
-
-## Authentication
-
-### External HTTP auth
-
-All endpoints on port 3000 require HTTP Basic Auth by default. The password comes from `config.toml`. Exceptions are whitelisted in `isPublicRoute()`:
-- `POST /telegram/webhook` — Telegram needs to reach this without auth.
-- `GET /pages/*` — Routable without auth, but the handler enforces per-page auth based on `is_public`.
-- `GET /api/pages/*/queries/*` — Same per-page auth pattern.
-
-### LLM API auth
-
-Two modes:
-- **API key:** Static key from `config.toml`.
-- **OAuth (authFile):** For Claude Pro/Max subscriptions. Credentials stored in a JSON file. The `getApiKey()` function handles token refresh with exponential backoff (3 retries). A web-based login flow at `/providers/anthropic/login` handles the OAuth PKCE flow.
-
-### Plugin config auth
-
-The plugin-runner's `GET /bundles/:name/config` endpoint is protected by a Bearer token (the app password). This endpoint returns actual config values which may contain secrets. It is only called by the app's admin UI proxy, never exposed to the LLM agent.
-
-The LLM agent can write config via `configure_plugin` but can never read config values back. When reporting config status, only key presence/absence is reported, never values.
+Each plugin's `config.json` is owned by its Unix user and `chmod 600`. The plugin-runner reads it when executing tools (running as the plugin user). The main app never reads plugin config files directly. The LLM agent can write config via `configure_plugin` but cannot read it back — the tool only reports which keys are present or missing.
 
 ## Security model
 
-### Container isolation
+### Authentication layers
 
-- The app container has no code execution runtimes (no Python, no uv). All code execution happens in separate containers.
-- No shared filesystem mounts between the app and runner containers.
-- The Docker socket is never mounted into any container.
+1. **HTTP Basic Auth (port 3000):** All routes except the Telegram webhook and `/pages/*` require the password from `config.toml`. The password is checked on every request; there are no sessions or cookies.
+2. **Per-row auth (pages):** Pages and page queries check `is_public` in the handler. Private pages require Basic Auth even though the route prefix is whitelisted.
+3. **Internal server (port 3001):** No auth. Accessible only within the Docker network. Used by signal-bridge, plugin-runner, and coder for callbacks.
+4. **Telegram webhook:** Validated by `x-telegram-bot-api-secret-token` header (a random secret registered with Telegram at startup).
+5. **Plugin-runner config endpoint:** Requires `Authorization: Bearer <password>` (the app password). Only proxied from the authenticated main server.
+
+### LLM isolation
+
+- The LLM agent runs inside the app container but cannot read arbitrary files from the filesystem. All code execution happens in separate containers (python-runner, plugin-runner, coder).
 - No tool gives the LLM the ability to read arbitrary files from the app container.
+- The app container has no Python or other code execution runtimes installed.
+- Plugin `config.json` files may contain secrets. No API endpoint or tool ever returns config values to the LLM. The `configure_plugin` tool only reports which keys are present or missing.
+- The Docker socket is never mounted into any container.
 
-### Secret isolation
+### Secret isolation (coder)
 
-- The app's `entrypoint.sh` runs `chmod 600` on `config.toml` before starting the Node process.
-- The coder's `entrypoint.sh` runs `chmod 600` on `config.toml`, extracts only the model name into `/run/coder-env`, then starts the server. The LLM subprocess cannot read `config.toml`.
-- The plugin-runner reads the app password from `config.toml` at startup, then `chmod 600`s it.
-- Plugin `config.json` files may contain secrets. No API endpoint or tool returns config values to the LLM agent.
-
-### Inter-service communication
-
-- The internal server on port 3001 has no authentication. Security relies on Docker network isolation — only containers in the same Docker Compose network can reach it.
-- The signal-bridge, plugin-runner, and coder all post callbacks to `app:3001/chat`.
-
-### Input validation
-
-- Plugin names are validated against `[a-z0-9-]+` to prevent path traversal, shell injection, and username derivation issues.
-- Page queries are validated as read-only SQL (must start with SELECT or WITH, no multi-statement injection).
-- Upload file paths are validated to be within the uploads directory.
-- Telegram chat IDs and Signal phone numbers are checked against the allowlist in `allowlist.json`.
-
-### Two-layer access control for interlocutors
-
-Inbound and outbound messages to non-owner interlocutors are subject to two independent gates:
-
-- **Hard gate (allowlist):** The allowlist of permitted Signal phone numbers, Telegram chat IDs, and WhatsApp phone numbers, managed via the `/settings` web UI and stored in `allowlist.json` (path overridable via `ALLOWLIST_PATH` env var). Loaded and managed by `src/allowlist.ts`. This is the safety boundary the bot cannot override — the LLM agent has no access to this file. The owner's identities are auto-seeded from the `[owner]` config section on startup.
-- **Soft gate (interlocutor_identities table):** The bot-managed directory of known senders. The bot can add or remove entries via `manage_interlocutors`, but only within the hard gate boundary. The soft gate resolves to an `agent_id` via the interlocutor's `agent_id` column. If no agent is assigned, the message is dropped.
-
-Both gates apply in both directions:
-- **Inbound:** A message must first pass the allowlist (enforced by the app's message queue and Telegram webhook handler), then match an entry in `interlocutor_identities`. If either check fails, the message is dropped silently.
-- **Outbound:** When a send tool resolves a recipient, the resolved identifier must be in `interlocutor_identities` and in the allowlist. If either check fails, the tool returns an error.
-
-### Owner identity
-
-The owner's identity is defined in the `[owner]` config section and loaded into memory at startup (`isOwnerIdentity()` / `getOwnerInterlocutorId()`). The in-memory owner ID is the sole authoritative check for routing — it cannot be changed by the bot or via the database at runtime. The `owner = true` column in the `interlocutors` table is used only for upsert logic on startup and to enforce the one-owner constraint at the DB level.
-
-### Subagent prompt security
-
-The subagent base prompt (`agent-prompt.txt`) is deny-all by default. Each subagent's permissions are controlled by two mechanisms:
-
-- **Tool whitelist (`allowed_tools`):** Restricts which tools the subagent can call. The main agent sets this when creating the subagent.
-- **System prompt (`system_prompt`):** Appended to the base prompt. The main agent controls what information and capabilities each subagent has access to.
-
-The main agent is the sole authority over what each subagent can do. Subagents cannot modify their own configuration.
+The coder entrypoint (running as root) reads `config.toml`, extracts only the model name into `/run/coder-env` (chmod 600), then execs the Python server. The LLM subprocess (`claude -p`) cannot read `config.toml` directly. Claude credentials are copied per-task into the plugin directory and cleaned up after.
 
 ## Configuration
 
-Runtime configuration is loaded from `config.toml` (or the path in `CONFIG_PATH` env var). The file is gitignored; `config.example.toml` is the template.
+Runtime config is loaded from `config.toml` (path overridable via `CONFIG_PATH` env var). `config.toml` is gitignored; `config.example.toml` is the template.
 
-### Required fields
+Key config sections:
 
-- `provider` — LLM provider (e.g., `"anthropic"`).
-- `model` — Model name.
-- `publicHostname` — Public HTTPS URL (no trailing slash).
-- Either `apiKey` or `authFile` (mutually exclusive).
-- `[owner]` — Owner identity section (required).
+- `provider`, `model`: LLM provider and model name.
+- `apiKey` or `authFile`: Mutually exclusive. `apiKey` is a direct API key; `authFile` points to a JSON file with OAuth credentials.
+- `publicHostname`: The public URL of the app (e.g. `https://bot.example.com`). Required.
+- `password`: HTTP Basic Auth password. Optional; if absent, no auth is enforced.
+- `[owner]`: Owner identity (name, Signal number, Telegram chat ID, WhatsApp number).
+- `[signal]`, `[telegram]`, `[whatsapp]`: Optional messaging integrations.
+- `[stt]`: Optional speech-to-text config (provider, API key, model).
+- `[coder]`: Optional coder config (model name for Claude Code).
 
-### `[owner]` section
+PostgreSQL connection is configured via environment variables (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`), defaulting to `postgres:5432/stavrobot`.
 
-Defines the owner's identity. Used on startup to upsert the owner interlocutor record (with `agent_id = 1`, the main agent) and seed their channel identities into `interlocutor_identities`.
+## Conventions
 
-- `name` (required) — Display name for the owner.
-- `signal` (optional) — Owner's Signal phone number in international format.
-- `telegram` (optional) — Owner's Telegram chat ID.
-- `whatsapp` (optional) — Owner's WhatsApp phone number in E.164 format.
+### TypeScript
 
-### Optional fields
+- ESM (`"type": "module"`, `"module": "NodeNext"`). All local imports use `.js` extension.
+- `strict: true`. All functions have explicit return type annotations.
+- `import type` for type-only imports.
+- Named exports only; no default exports.
+- `unknown` instead of `any` for untyped data; narrow with type guards.
+- Interfaces for object shapes; `camelCase` for variables/functions; `PascalCase` for interfaces/types.
+- Standalone `async` functions, not classes, for application logic.
+- `console.log` with `[stavrobot]` prefix for tracing; `console.error` for errors.
+- Errors propagate; try/catch only at HTTP boundaries.
+- Double quotes, `const` by default, trailing commas, semicolons, 2-space indentation.
 
-- `password` — HTTP Basic Auth password for all endpoints.
-- `customPrompt` — Additional instructions appended to the base system prompt (owner conversations only).
-- `[stt]` — Speech-to-text (OpenAI API).
-- `[webSearch]` — Web search sub-agent.
-- `[webFetch]` — Web fetch sub-agent.
-- `[coder]` — Self-programming agent (Claude Code model alias).
-- `[telegram]` — Telegram bot integration. The allowlist is in `allowlist.json`, not here.
-- `[signal]` — Signal integration (read by signal-bridge, not the app). The allowlist is in `allowlist.json`, not here.
-- `[whatsapp]` — WhatsApp integration via Baileys. Session data is persisted to `./data/whatsapp`. The allowlist is in `allowlist.json`, not here.
+### Python
 
-## File structure
-
-```
-src/
-  index.ts              — HTTP server, routing, entry point. Two servers: external (3000) and internal (3001).
-  config.ts             — Loads config.toml and Postgres config from environment. Defines Config, OwnerConfig, and service config interfaces.
-  allowlist.ts          — Loads, validates, and persists the allowlist from allowlist.json (path overridable via ALLOWLIST_PATH env var). Provides isInAllowlist() and getOwnerIdentities(). Migrates legacy config.toml allowlist fields on first run.
-  database.ts           — PostgreSQL connection, schema initialization, CRUD for all tables. Owns agent and owner seeding, interlocutor and agent resolution.
-  agent.ts              — Agent creation, tool definitions, prompt handling, compaction.
-  queue.ts              — Sequential message processing queue with retry logic and agent routing.
-  interlocutors.ts      — manage_interlocutors tool implementation (contact records and channel identities).
-  agents.ts             — manage_agents tool implementation (create, update, delete, list subagents).
-  send-agent-message.ts — send_agent_message tool implementation (agent-to-agent messaging via the queue).
-  scheduler.ts          — Cron scheduler that fires entries and cleans up old uploads.
-  auth.ts               — API key resolution and OAuth token refresh.
-  login.ts              — OAuth PKCE login flow web UI.
-  telegram.ts           — Telegram webhook handling and markdown-to-HTML conversion.
-  telegram-api.ts       — Low-level Telegram sendMessage API call.
-  signal.ts             — Low-level Signal bridge send call.
-  whatsapp.ts           — WhatsApp integration via Baileys: connection management, inbound message handling, and send tool.
-  whatsapp-api.ts       — Low-level WhatsApp message send call via Baileys.
-  plugins.ts            — Plugin management web UI and proxy endpoints.
-  plugin-tools.ts       — Agent tools for plugin management and execution.
-  python.ts             — Agent tool for sandboxed Python execution.
-  stt.ts                — Speech-to-text via OpenAI API with audio format conversion.
-  pages.ts              — Agent tool for page management.
-  uploads.ts            — File upload handling and storage.
-  upload-tools.ts       — Agent tool for upload management.
-  files.ts              — Agent tool for ephemeral temp-directory file management (read/write/list/delete).
-  search.ts             — Agent tool for full-text search across the database.
-  toon.ts               — Serialises structured data to TOON format for LLM-readable output.
-  temp-dir.ts           — Shared constant for the ephemeral temp directory path.
-  explorer.ts           — Database explorer web UI and API.
-  settings.ts           — Settings web UI and allowlist management API endpoints (/settings, /api/settings/allowlist).
-  signal-captcha.ts     — Signal rate-limit captcha submission web UI and proxy to signal-bridge.
-
-plugin-runner/
-  src/index.ts      — Plugin runner server (manages, executes plugins).
-  Dockerfile        — Multi-stage build with uv, python3, git, build-essential.
-
-coder/
-  server.py         — Coder HTTP server (spawns claude -p).
-  entrypoint.sh     — Secret extraction and server startup.
-  system-prompt.txt — System prompt for the coder agent.
-  PLUGIN.md         — Plugin authoring guide (used by the coder agent).
-  Dockerfile        — Debian with uv, python3, git, Claude CLI.
-
-python-runner/
-  server.py         — Python execution server.
-  Dockerfile        — Python 3.13 with uv.
-
-signal-bridge/
-  bridge.py         — Signal-to-agent bridge.
-  markdown_to_signal.py — Markdown to Signal text style conversion.
-  Dockerfile        — Debian with signal-cli and python3.
-
-scripts/
-  pg-backup.sh      — Database backup with retention policy.
-
-client.py           — Python CLI client (standalone, no dependencies).
-system-prompt.txt   — Base system prompt for the main agent (owner conversations).
-agent-prompt.txt    — Base system prompt for subagents (deny-all by default).
-config.example.toml — Configuration template.
-entrypoint.sh       — App container entrypoint.
-```
-
-## Deployment
-
-- Single-user system. One person chats with it at a time.
-- Deployed via `docker compose up --build`.
-- `docker-compose.harbormaster.yml` is an override file for the Harbormaster deployment system, replacing `./data` paths with `{{ HM_DATA_DIR }}` and `./cache` with `{{ HM_CACHE_DIR }}`.
-- The app listens on port 3000 internally, mapped to 10567 externally.
-- Postgres credentials default to `stavrobot`/`stavrobot`/`stavrobot`, configurable via environment variables.
-
-## Key libraries
-
-- `@mariozechner/pi-ai` `0.55.3` — LLM abstraction (models, types, OAuth, completion).
-- `@mariozechner/pi-agent-core` `0.55.3` — Agent framework (tool loop, message management, subscriptions).
-- `pg` — PostgreSQL client.
-- `@iarna/toml` — TOML parser for config.
-- `busboy` — Multipart form data parsing for file uploads.
-- `cron-parser` — Cron expression parsing for the scheduler.
-- `marked` — Markdown parsing for Telegram HTML conversion.
-- `@toon-format/toon` — Serialises structured data (objects, arrays) to TOON format for LLM-readable output. Used in `toon.ts` via `encodeToToon()`.
-- `@whiskeysockets/baileys` — WhatsApp Web API client (runs in-process in the app container).
+- Statically typed function signatures (built-in types, not `typing` module).
+- `snake_case` for functions/variables; `PascalCase` for classes.
+- Docstrings on all functions.
+- Specific exception types in `except` clauses.
+- `if __name__ == "__main__":` entry point.
