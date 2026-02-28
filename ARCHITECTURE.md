@@ -185,7 +185,7 @@ Messages are processed sequentially through an in-memory queue (`queue.ts`). Onl
 8. Validates API key/OAuth credentials before entering the agent loop.
 9. Subscribes to agent events to persist messages to the database (scoped to the agent, with `sender_identity_id` or `sender_agent_id` on the inbound user message) as they complete.
 10. Calls `agent.prompt()` which runs the LLM with tool use in a loop until the agent stops.
-11. After completion, triggers background compaction if message count exceeds 50.
+11. After completion, triggers background compaction if message count exceeds 40.
 
 ### Outbound message delivery
 

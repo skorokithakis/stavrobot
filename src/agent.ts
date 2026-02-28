@@ -1426,7 +1426,7 @@ export async function handlePrompt(
         .join("")
     : "";
 
-  if (agent.state.messages.length > 50 && !compactionInProgress) {
+  if (agent.state.messages.length > 40 && !compactionInProgress) {
     compactionInProgress = true;
     // Snapshot the messages now so the background task works on a stable slice
     // and never touches agent.state.messages directly.
@@ -1452,7 +1452,7 @@ export async function handlePrompt(
         // is never stripped by the library's transformMessages. Landing on an assistant
         // message risks orphaning a toolResult that follows it, which the Anthropic API
         // rejects with a 400 error.
-        let cutIndex = currentMessages.length - 30;
+        let cutIndex = currentMessages.length - 20;
         while (cutIndex < currentMessages.length && currentMessages[cutIndex].role !== "user") {
           cutIndex++;
         }
