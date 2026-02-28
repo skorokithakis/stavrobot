@@ -13,8 +13,8 @@
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
-    "@mariozechner/pi-agent-core": "^0.53.0",
-    "@mariozechner/pi-ai": "^0.53.0",
+    "@mariozechner/pi-agent-core": "^0.55.3",
+    "@mariozechner/pi-ai": "^0.55.3",
     "@toon-format/toon": "^2.1.0",
     "@types/qrcode-terminal": "^0.12.2",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",

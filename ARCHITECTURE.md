@@ -616,8 +616,8 @@ entrypoint.sh       — App container entrypoint.
 
 ## Key libraries
 
-- `@mariozechner/pi-ai` `0.53.0` — LLM abstraction (models, types, OAuth, completion).
-- `@mariozechner/pi-agent-core` `0.53.0` — Agent framework (tool loop, message management, subscriptions).
+- `@mariozechner/pi-ai` `0.55.3` — LLM abstraction (models, types, OAuth, completion).
+- `@mariozechner/pi-agent-core` `0.55.3` — Agent framework (tool loop, message management, subscriptions).
 - `pg` — PostgreSQL client.
 - `@iarna/toml` — TOML parser for config.
 - `busboy` — Multipart form data parsing for file uploads.
