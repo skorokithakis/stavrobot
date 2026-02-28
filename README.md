@@ -33,6 +33,15 @@ A personal AI assistant with persistent memory, sandboxed code execution, and Si
 3. At minimum, set `authFile` (or `apiKey`) and `publicHostname`. Everything else is optional.
 4. Copy `env.example` to `.env` and set your timezone (`TZ`). Postgres credentials and other environment settings can also be overridden there. The defaults work out of the box with docker-compose.
 
+### Authentication
+
+The app supports two authentication modes: API key or OAuth.
+
+- **API key:** Set `apiKey` in `config.toml`. No login or logout needed.
+- **OAuth:** Set `authFile` in `config.toml` (a path where credentials will be stored). The login page below is for Anthropic; Pi supports other OAuth providers as well.
+  - **Login:** Visit `<your-hostname>/providers/anthropic/login` in a browser. Follow the OAuth flow, paste the callback code, and credentials are saved to the auth file. If auth expires while the bot is running, it sends a message with the login URL to you via your messaging platform.
+  - **Logout:** Delete the file at the `authFile` path. The bot will detect missing credentials on the next message and prompt you to log in again.
+
 ### Claude Code setup
 
 The `coder` container uses Claude Code with subscription auth (OAuth), separate from the main app's API key.
