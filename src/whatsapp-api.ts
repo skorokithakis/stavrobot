@@ -14,7 +14,9 @@ export function jidToE164(jid: string): string {
   if (!jid.endsWith("@s.whatsapp.net")) {
     throw new Error(`jidToE164 called with non-PN JID: ${jid}`);
   }
-  const number = jid.split("@")[0];
+  const raw = jid.split("@")[0];
+  // LID-resolved JIDs can include a device suffix (e.g. "306947899292:0"), strip it.
+  const number = raw.split(":")[0];
   return `+${number}`;
 }
 
