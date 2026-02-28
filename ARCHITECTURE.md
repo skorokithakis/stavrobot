@@ -4,7 +4,7 @@ This document describes the architecture of Stavrobot, a single-user personal AI
 
 ## System overview
 
-Stavrobot is an LLM-powered personal assistant that runs as a set of Docker containers. The owner interacts with it via a CLI client, Signal, or Telegram. The main agent can create subagents, each with their own conversation history, system prompt, and tool whitelist. Interlocutors are contact records that can be assigned to agents for inbound message routing. The LLM agent (Anthropic Claude) has access to a PostgreSQL database, a plugin system, sandboxed Python execution, web search/fetch, cron scheduling, text-to-speech, speech-to-text, and a self-programming subsystem that can create new tools at runtime.
+Stavrobot is an LLM-powered personal assistant that runs as a set of Docker containers. The owner interacts with it via a CLI client, Signal, Telegram, or WhatsApp. The main agent can create subagents, each with their own conversation history, system prompt, and tool whitelist. Interlocutors are contact records that can be assigned to agents for inbound message routing. The LLM agent (Anthropic Claude) has access to a PostgreSQL database, a plugin system, sandboxed Python execution, web search/fetch, cron scheduling, text-to-speech, speech-to-text, and a self-programming subsystem that can create new tools at runtime.
 
 All messages flow through a single `POST /chat` endpoint on the main app. The agent processes one message at a time via an in-memory queue.
 
@@ -14,7 +14,7 @@ Seven containers are defined in `docker-compose.yml`. The signal-bridge is behin
 
 ### app (port 3000 external, 3001 internal)
 
-The main TypeScript HTTP server. Built with a multi-stage Dockerfile: the build stage compiles TypeScript, the production stage copies only compiled JS and production dependencies. Runs on Node.js 22. Installs `faad` and `lame` for audio format conversion (STT pipeline).
+The main TypeScript HTTP server. Built with a multi-stage Dockerfile: the build stage compiles TypeScript, the production stage copies only compiled JS and production dependencies. Runs on Node.js 22. Installs `faad` and `lame` for audio format conversion (STT pipeline). WhatsApp integration runs in-process via the Baileys library (no separate container).
 
 **Two HTTP servers run in this container:**
 
@@ -81,7 +81,7 @@ All messages enter through `POST /chat` (either the external port 3000 with auth
 - `audioContentType` (string, optional): MIME type of the audio.
 - `attachments` (array, optional): Pre-saved file attachments with `storedPath`, `originalFilename`, `mimeType`, `size`.
 - `files` (array, optional): Raw file data as base64 with `data`, `filename`, `mimeType`. Used by the signal-bridge which cannot write to the app container's filesystem.
-- `source` (string, optional): Where the message came from (`"cli"`, `"signal"`, `"telegram"`, `"cron"`, `"coder"`, `"upload"`, `"plugin:name/tool"`).
+- `source` (string, optional): Where the message came from (`"cli"`, `"signal"`, `"telegram"`, `"whatsapp"`, `"cron"`, `"coder"`, `"upload"`, `"plugin:name/tool"`).
 - `sender` (string, optional): Identifier of the sender (phone number, chat ID, etc.).
 
 At least one of `message`, `audio`, `attachments`, or `files` must be present.
@@ -118,7 +118,7 @@ Messages are processed sequentially through an in-memory queue (`queue.ts`). Onl
 
 ### Outbound message delivery
 
-The agent does not directly reply to Signal or Telegram users. The system prompt instructs the agent that when `Source` is `"signal"` or `"telegram"`, the text response is never delivered — the agent must use `send_signal_message` or `send_telegram_message` tools to reach the user. For CLI source, the text response is returned in the HTTP response body.
+The agent does not directly reply to Signal, Telegram, or WhatsApp users. The system prompt instructs the agent that when `Source` is `"signal"`, `"telegram"`, or `"whatsapp"`, the text response is never delivered — the agent must use `send_signal_message`, `send_telegram_message`, or `send_whatsapp_message` tools to reach the user. For CLI source, the text response is returned in the HTTP response body.
 
 ### Telegram webhook flow
 
@@ -127,6 +127,14 @@ The agent does not directly reply to Signal or Telegram users. The system prompt
 3. Downloads voice notes, photos, or documents from the Telegram API.
 4. Enqueues the message with `source: "telegram"` and the chat ID as sender.
 5. The agent processes it and uses `send_telegram_message` to reply.
+
+### WhatsApp flow
+
+1. Baileys receives a WhatsApp message via its event system (runs in-process in the app container).
+2. Checks the sender against the allowlist; drops the message if not allowed.
+3. Downloads media attachments if present.
+4. Enqueues the message with `source: "whatsapp"` and the sender's E.164 phone number.
+5. The agent processes it and uses `send_whatsapp_message` to reply.
 
 ### Signal bridge flow
 
@@ -303,11 +311,12 @@ Subagents only see the tools in their `allowed_tools` whitelist plus `send_agent
 - `web_fetch` — Fetch a URL and process its content with an LLM (requires `[webFetch]` config).
 - `text_to_speech` — Convert text to speech via OpenAI TTS API (requires `[tts]` config).
 - `send_telegram_message` — Send text or attachments via Telegram. Accepts display names as recipients (requires `[telegram]` config).
+- `send_whatsapp_message` — Send text or attachments via WhatsApp. Accepts display names as recipients (requires `[whatsapp]` config).
 - `request_coding_task` — Send coding tasks to the coder agent (requires `[coder]` config).
 
 Action-based tools (`manage_knowledge`, `manage_cron`, `manage_files`, `manage_pages`, `manage_uploads`, `manage_plugins`) support a `help` action that returns detailed documentation.
 
-Send tools (`send_signal_message`, `send_telegram_message`) resolve display names to channel identifiers via the `interlocutors` and `interlocutor_identities` tables. Both the soft gate (interlocutor must exist in the DB) and the hard gate (identifier must be in the allowlist) are enforced on outbound sends.
+Send tools (`send_signal_message`, `send_telegram_message`, `send_whatsapp_message`) resolve display names to channel identifiers via the `interlocutors` and `interlocutor_identities` tables. Both the soft gate (interlocutor must exist in the DB) and the hard gate (identifier must be in the allowlist) are enforced on outbound sends.
 
 ## Conversation compaction
 
@@ -411,7 +420,7 @@ The LLM agent can write config via `configure_plugin` but can never read config 
 
 Inbound and outbound messages to non-owner interlocutors are subject to two independent gates:
 
-- **Hard gate (allowlist):** The allowlist of permitted Signal phone numbers and Telegram chat IDs, managed via the `/settings` web UI and stored in `allowlist.json` (path overridable via `ALLOWLIST_PATH` env var). Loaded and managed by `src/allowlist.ts`. This is the safety boundary the bot cannot override — the LLM agent has no access to this file. The owner's identities are auto-seeded from the `[owner]` config section on startup.
+- **Hard gate (allowlist):** The allowlist of permitted Signal phone numbers, Telegram chat IDs, and WhatsApp phone numbers, managed via the `/settings` web UI and stored in `allowlist.json` (path overridable via `ALLOWLIST_PATH` env var). Loaded and managed by `src/allowlist.ts`. This is the safety boundary the bot cannot override — the LLM agent has no access to this file. The owner's identities are auto-seeded from the `[owner]` config section on startup.
 - **Soft gate (interlocutor_identities table):** The bot-managed directory of known senders. The bot can add or remove entries via `manage_interlocutors`, but only within the hard gate boundary. The soft gate resolves to an `agent_id` via the interlocutor's `agent_id` column. If no agent is assigned, the message is dropped.
 
 Both gates apply in both directions:
@@ -462,6 +471,7 @@ Defines the owner's identity. Used on startup to upsert the owner interlocutor r
 - `[coder]` — Self-programming agent (Claude Code model alias).
 - `[telegram]` — Telegram bot integration. The allowlist is in `allowlist.json`, not here.
 - `[signal]` — Signal integration (read by signal-bridge, not the app). The allowlist is in `allowlist.json`, not here.
+- `[whatsapp]` — WhatsApp integration via Baileys. Session data is persisted to `./data/whatsapp`. The allowlist is in `allowlist.json`, not here.
 
 ## File structure
 
@@ -482,6 +492,8 @@ src/
   telegram.ts           — Telegram webhook handling and markdown-to-HTML conversion.
   telegram-api.ts       — Low-level Telegram sendMessage API call.
   signal.ts             — Low-level Signal bridge send call.
+  whatsapp.ts           — WhatsApp integration via Baileys: connection management, inbound message handling, and send tool.
+  whatsapp-api.ts       — Low-level WhatsApp message send call via Baileys.
   plugins.ts            — Plugin management web UI and proxy endpoints.
   plugin-tools.ts       — Agent tools for plugin management and execution.
   python.ts             — Agent tool for sandboxed Python execution.

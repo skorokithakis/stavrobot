@@ -26,6 +26,7 @@ import { convertMarkdownToTelegramHtml } from "./telegram.js";
 import { encodeToToon } from "./toon.js";
 import { sendSignalMessage } from "./signal.js";
 import { sendTelegramMessage } from "./telegram-api.js";
+import { getWhatsappSocket, e164ToJid, sendWhatsappTextMessage } from "./whatsapp-api.js";
 import { TEMP_ATTACHMENTS_DIR } from "./temp-dir.js";
 export { TEMP_ATTACHMENTS_DIR } from "./temp-dir.js";
 
@@ -701,6 +702,166 @@ export function createSendTelegramMessageTool(pool: pg.Pool, config: Config): Ag
   };
 }
 
+export function createSendWhatsappMessageTool(pool: pg.Pool, config: Config): AgentTool {
+  return {
+    name: "send_whatsapp_message",
+    label: "Send WhatsApp message",
+    description: "Send a message via WhatsApp to a display name or phone number in E.164 format. Can send text, a file attachment (image, audio, video, or any other file), or both.",
+    parameters: Type.Object({
+      recipient: Type.String({ description: "Display name of the recipient (e.g., \"Mom\") or phone number in E.164 format (e.g., \"+1234567890\")." }),
+      message: Type.Optional(Type.String({ description: "Text message to send." })),
+      attachmentPath: Type.Optional(Type.String({ description: "File path to an attachment under the temp directory (e.g., from manage_files write or text_to_speech). Images (jpg, jpeg, png, gif, webp), audio (mp3, ogg, oga, wav, m4a), video (mp4, mov, avi, mkv), and any other file type are supported." })),
+    }),
+    execute: async (
+      toolCallId: string,
+      params: unknown
+    ): Promise<AgentToolResult<{ message: string }>> => {
+      const raw = params as {
+        recipient: string;
+        message?: string;
+        attachmentPath?: string;
+      };
+
+      const recipientInput = raw.recipient;
+      const message = raw.message?.trim() || undefined;
+      const attachmentPath = raw.attachmentPath?.trim() || undefined;
+
+      console.log("[stavrobot] send_whatsapp_message called:", { recipient: recipientInput, hasAttachment: attachmentPath !== undefined });
+
+      if (message === undefined && attachmentPath === undefined) {
+        return {
+          content: [{ type: "text" as const, text: "Error: at least one of message or attachmentPath must be provided." }],
+          details: { message: "Error: at least one of message or attachmentPath must be provided." },
+        };
+      }
+
+      // Resolve display name to phone number, falling back to treating the input as a raw phone number.
+      const resolved = await resolveRecipient(pool, recipientInput, "whatsapp");
+      let recipient: string;
+      if (resolved !== null && !("disabled" in resolved)) {
+        recipient = resolved.identifier;
+      } else if (resolved !== null && "disabled" in resolved) {
+        const errorMessage = `Error: Interlocutor "${resolved.displayName}" is disabled.`;
+        console.warn("[stavrobot] send_whatsapp_message rejected:", errorMessage);
+        return {
+          content: [{ type: "text" as const, text: errorMessage }],
+          details: { message: errorMessage },
+        };
+      } else {
+        // If the input matches an interlocutor by name but they have no WhatsApp identity,
+        // give a specific error rather than falling through to the raw-ID path.
+        const interlocutor = await resolveInterlocutorByName(pool, recipientInput);
+        if (interlocutor !== null) {
+          const errorMessage = `Error: interlocutor '${recipientInput}' has no WhatsApp identity. Use manage_interlocutors to add one.`;
+          console.warn("[stavrobot] send_whatsapp_message rejected:", errorMessage);
+          return {
+            content: [{ type: "text" as const, text: errorMessage }],
+            details: { message: errorMessage },
+          };
+        }
+        // Soft gate: raw ID must exist in interlocutor_identities for an enabled interlocutor.
+        const identityCheck = await pool.query<{ identifier: string }>(
+          "SELECT ii.identifier FROM interlocutor_identities ii JOIN interlocutors i ON i.id = ii.interlocutor_id WHERE ii.service = 'whatsapp' AND ii.identifier = $1 AND i.enabled = true",
+          [recipientInput],
+        );
+        if (identityCheck.rows.length === 0) {
+          const errorMessage = `Error: unknown recipient '${recipientInput}'. No interlocutor found with that display name or phone number.`;
+          console.warn("[stavrobot] send_whatsapp_message rejected:", errorMessage);
+          return {
+            content: [{ type: "text" as const, text: errorMessage }],
+            details: { message: errorMessage },
+          };
+        }
+        recipient = recipientInput;
+      }
+
+      // Hard gate: recipient must be in the allowlist.
+      if (!isInAllowlist("whatsapp", recipient)) {
+        const errorMessage = `Error: recipient '${recipient}' is not in the WhatsApp allowlist.`;
+        console.warn("[stavrobot] send_whatsapp_message rejected:", errorMessage);
+        return {
+          content: [{ type: "text" as const, text: errorMessage }],
+          details: { message: errorMessage },
+        };
+      }
+
+      if (STAVROBOT_DEBUG) {
+        const preview = (message ?? "").slice(0, 200);
+        console.log(`[stavrobot] [debug] Sending: whatsapp - ${recipient} - ${preview}`);
+      }
+
+      if (attachmentPath !== undefined) {
+        const resolvedAttachmentPath = path.resolve(attachmentPath);
+        if (!resolvedAttachmentPath.startsWith(TEMP_ATTACHMENTS_DIR)) {
+          return {
+            content: [{ type: "text" as const, text: "Error: attachmentPath must be under the temporary attachments directory." }],
+            details: { message: "Error: attachmentPath must be under the temporary attachments directory." },
+          };
+        }
+
+        const socket = getWhatsappSocket();
+        if (socket === undefined) {
+          return {
+            content: [{ type: "text" as const, text: "Error: WhatsApp is not connected." }],
+            details: { message: "Error: WhatsApp is not connected." },
+          };
+        }
+
+        const extension = path.extname(resolvedAttachmentPath).toLowerCase();
+        const imageExtensions = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp"]);
+        const audioExtensions = new Set([".mp3", ".ogg", ".oga", ".wav", ".m4a"]);
+        const videoExtensions = new Set([".mp4", ".mov", ".avi", ".mkv"]);
+
+        console.log("[stavrobot] send_whatsapp_message attachment type detected:", { extension });
+
+        const fileBuffer = await fs.readFile(resolvedAttachmentPath);
+        const fileName = path.basename(resolvedAttachmentPath);
+        const caption = message;
+        const jid = e164ToJid(recipient);
+
+        // The path check above guarantees this is a temp file, so always delete it.
+        await fs.unlink(resolvedAttachmentPath);
+
+        if (imageExtensions.has(extension)) {
+          await socket.sendMessage(jid, { image: fileBuffer, caption });
+        } else if (audioExtensions.has(extension)) {
+          let mimetype: string;
+          if (extension === ".mp3") {
+            mimetype = "audio/mpeg";
+          } else if (extension === ".ogg" || extension === ".oga") {
+            mimetype = "audio/ogg";
+          } else if (extension === ".wav") {
+            mimetype = "audio/wav";
+          } else {
+            mimetype = "audio/mp4";
+          }
+          await socket.sendMessage(jid, { audio: fileBuffer, mimetype, ptt: true });
+        } else if (videoExtensions.has(extension)) {
+          await socket.sendMessage(jid, { video: fileBuffer, caption });
+        } else {
+          const mimetype = "application/octet-stream";
+          await socket.sendMessage(jid, { document: fileBuffer, fileName, mimetype });
+        }
+
+        console.log("[stavrobot] send_whatsapp_message attachment sent successfully.");
+        const successMessage = "Message sent successfully.";
+        return {
+          content: [{ type: "text" as const, text: successMessage }],
+          details: { message: successMessage },
+        };
+      }
+
+      await sendWhatsappTextMessage(recipient, message as string);
+
+      const successMessage = "Message sent successfully.";
+      return {
+        content: [{ type: "text" as const, text: successMessage }],
+        details: { message: successMessage },
+      };
+    },
+  };
+}
+
 const MANAGE_CRON_HELP_TEXT = `manage_cron: create, update, delete, or list scheduled cron entries.
 
 Actions:
@@ -877,6 +1038,9 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
   }
   if (config.telegram !== undefined) {
     tools.push(createSendTelegramMessageTool(pool, config));
+  }
+  if (config.whatsapp !== undefined) {
+    tools.push(createSendWhatsappMessageTool(pool, config));
   }
 
   const effectiveBasePrompt = (config.customPrompt !== undefined

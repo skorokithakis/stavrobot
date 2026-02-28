@@ -51,10 +51,13 @@ export interface TelegramConfig {
   allowedChatIds?: number[];
 }
 
+export interface WhatsappConfig {}
+
 export interface OwnerConfig {
   name: string;
   signal?: string;
   telegram?: string;
+  whatsapp?: string;
 }
 
 export interface Config {
@@ -75,6 +78,7 @@ export interface Config {
   coder?: CoderConfig;
   signal?: SignalConfig;
   telegram?: TelegramConfig;
+  whatsapp?: WhatsappConfig;
   owner: OwnerConfig;
 }
 

@@ -35,6 +35,7 @@ import {
   handlePutAllowlistRequest,
 } from "./settings.js";
 import { serveSignalCaptchaPage, handleSignalCaptchaSubmit } from "./signal-captcha.js";
+import { initializeWhatsApp } from "./whatsapp.js";
 
 function isPublicRoute(method: string, pathname: string): boolean {
   if (method === "POST" && pathname === "/telegram/webhook") {
@@ -425,6 +426,10 @@ async function main(): Promise<void> {
     if (process.env.STAVROBOT_DEBUG === "1") {
       console.log(`[stavrobot] [debug] Telegram webhook secret loaded: fingerprint=${telegramWebhookSecret.slice(0, 8)}..., bootTime=${new Date().toISOString()}`);
     }
+  }
+
+  if (config.whatsapp !== undefined) {
+    await initializeWhatsApp(config.whatsapp);
   }
 
   const server = http.createServer((request: http.IncomingMessage, response: http.ServerResponse): void => {

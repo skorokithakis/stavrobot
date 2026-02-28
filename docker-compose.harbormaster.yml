@@ -19,6 +19,7 @@ services:
     volumes:
       - {{ HM_DATA_DIR }}/main:/app/config
       - {{ HM_DATA_DIR }}/app:/app/data
+      - {{ HM_DATA_DIR }}/whatsapp:/app/data/whatsapp
   python-runner: {}
   plugin-runner:
     volumes:

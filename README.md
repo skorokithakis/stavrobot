@@ -2,7 +2,7 @@
 
 ![](misc/stavrobot.jpg)
 
-A personal AI assistant with persistent memory, sandboxed code execution, and Signal and Telegram integration.
+A personal AI assistant with persistent memory, sandboxed code execution, and Signal, Telegram, and WhatsApp integration.
 
 ## Features
 
@@ -11,6 +11,7 @@ A personal AI assistant with persistent memory, sandboxed code execution, and Si
 - **Plugins.** Install plugins and extend Stavrobot's capabilities by just giving it a git repo URL. Plugins are isolated from each other — each runs as a dedicated system user with no access to other plugins' files or configuration.
 - **Signal integration.** Two-way messaging via signal-cli, including voice note transcription (OpenAI STT).
 - **Telegram integration.** Two-way messaging via a Telegram bot webhook, including voice note transcription (OpenAI STT).
+- **WhatsApp integration.** Two-way messaging via the Baileys library (unofficial WhatsApp Web API), running in-process. Includes voice note transcription (OpenAI STT).
 - **Three-tier knowledge.** Tier 1 (memories): a self-managed memory store injected into the system prompt every turn — for things the agent needs constantly. Tier 2 (scratchpad): titled entries whose titles are always in context but whose bodies are loaded on demand — for important but less-frequently needed knowledge. Tier 3 (database): full read/write access to PostgreSQL via unrestricted SQL — the agent can create tables, query, and store anything.
 - **Subagents.** The main agent can create subagents with their own conversation context, system prompt, and restricted tool access. Useful for talking to outside people to complete tasks or arrange things, while having a buffer between the outside person and the main agent.
 - **Self-programming.** The agent can request a secondary coding agent to create new tools at runtime. Tools are executable scripts with a JSON manifest, discovered and invoked by the main agent.
@@ -19,7 +20,7 @@ A personal AI assistant with persistent memory, sandboxed code execution, and Si
 - **Web search and fetch.** Optional tools for searching the web and fetching/analyzing URLs via sub-agent LLM calls.
 - **Database explorer.** A web UI at `/explorer` for browsing PostgreSQL tables, viewing schemas, and paginating through rows.
 - **Plugin manager.** A web UI at `/plugins` for browsing installed plugins, installing new ones from git URLs, updating, deleting, and editing plugin configuration.
-- **Settings.** A web UI at `/settings` for managing Signal and Telegram allowlists.
+- **Settings.** A web UI at `/settings` for managing messaging allowlists (Signal, Telegram, and WhatsApp) and installed plugins.
 - **Apps.** The agent can create dynamic web apps. Apps are private (auth-required) by default, with an option to make individual pages public.
 - **Conversation compaction.** Auto-summarizes long conversation histories to stay within context limits.
 
@@ -61,6 +62,19 @@ Signal requires a **separate phone number** — not your personal one. A prepaid
 3. Set `[telegram].botToken` in your config.
 4. After first startup, add allowed chat IDs via the `/settings` web UI.
 5. The webhook is registered automatically when the app starts.
+
+### WhatsApp setup
+
+WhatsApp uses [Baileys](https://github.com/WhiskeySockets/Baileys), an unofficial WhatsApp Web library that links as a companion device (like WhatsApp Web). No separate phone number is needed — it links to your existing WhatsApp account.
+
+**Risk:** Baileys uses an unofficial API. WhatsApp may ban accounts that use it. Use at your own risk.
+
+1. Add a `[whatsapp]` section to your `config.toml` (see `config.example.toml` for the format).
+2. Start the containers: `docker compose up --build`
+3. A QR code will appear in the app logs (`docker compose logs -f app`).
+4. Open WhatsApp on your phone, go to **Linked devices**, and scan the QR code.
+5. The session persists across restarts in `./data/whatsapp`.
+6. Add allowed phone numbers via the `/settings` web UI.
 
 ### Running
 
@@ -116,7 +130,7 @@ tell it explicitly what information to put where.
 
 ## Talking to other people
 
-Stavrobot can message people on your behalf over Signal or Telegram. Need to schedule a
+Stavrobot can message people on your behalf over Signal, Telegram, or WhatsApp. Need to schedule a
 dinner with a friend? Tell the bot to find a time that works for both of you, and it
 will message them, negotiate a date, and put it on your calendar. Want to arrange an
 appointment, coordinate a group outing, or ask someone a question while you're busy?
@@ -126,23 +140,20 @@ The bot spins up a dedicated subagent for each conversation, with its own instru
 and context, so it can handle back-and-forth with the other person without cluttering
 your main chat. When the task is done, it disables the contact and reports back to you.
 
-To keep things safe, messaging is controlled by two layers:
+To keep things safe, messaging requires two things before the bot can talk to someone:
 
-**Allowlist (you control this).** You decide who the bot is allowed to contact by adding
-phone numbers or chat IDs via the `/settings` web UI. The list is stored in
-`allowlist.json` and is not accessible to the LLM agent. The bot cannot modify this list
-or message anyone not on it, no matter what.
+1. **You add them to the allowlist.** Go to `/settings` and add their phone number
+   (Signal or WhatsApp) or chat ID (Telegram). This is a one-time step per person. The
+   bot cannot modify this list or message anyone not on it, no matter what.
+2. **The bot creates a contact record.** When you ask the bot to message someone on the
+   allowlist, it creates a contact record and spins up a dedicated subagent for the
+   conversation. When the task is done, it disables the contact, which blocks messaging
+   in both directions until you ask the bot to re-enable it.
 
-**Contact records (the bot controls these).** Within the people you've approved, the bot
-manages its own contact list in the database. It creates a contact when it needs to talk
-to someone, and disables it when the conversation is done. A disabled contact blocks all
-messaging in both directions, so the bot can't accidentally keep chatting with someone
-after a task is finished. Re-enabling a contact later picks up where things left off.
-
-A typical flow looks like this: you add your friend's phone number to the allowlist via
-`/settings` once, then tell the bot "find a time for dinner with Alex next week". The bot
-creates a contact record for Alex, spins up a subagent, messages Alex on Signal, goes
-back and forth to find a date, and reports the result to you.
+A typical flow: you add your friend's phone number to the allowlist via `/settings` once,
+then tell the bot "find a time for dinner with Alex next week". The bot creates a contact
+record for Alex, spins up a subagent, messages Alex on Signal, goes back and forth to
+find a date, and reports the result to you.
 
 ## Skills
 
@@ -178,7 +189,7 @@ See [PLUGIN.md](coder/PLUGIN.md) for everything you need to know to create a Sta
 
 ## Architecture
 
-Four Docker containers: `app` (TypeScript server, exposes `POST /chat` on port 3000 and handles Telegram webhooks at `POST /telegram/webhook`), `postgres` (PostgreSQL 17 for persistent state), `plugin-runner` (Node.js server — lists, inspects, and executes plugins, both locally created and git-installed), and `coder` (Claude Code headless agent for creating and modifying editable plugins). The main agent can create subagents, each with their own conversation history, system prompt, and tool whitelist. Interlocutors are contact records assigned to agents for inbound message routing.
+Four Docker containers: `app` (TypeScript server, exposes `POST /chat` on port 3000, handles Telegram webhooks at `POST /telegram/webhook`, and runs WhatsApp in-process via Baileys), `postgres` (PostgreSQL 17 for persistent state), `plugin-runner` (Node.js server — lists, inspects, and executes plugins, both locally created and git-installed), and `coder` (Claude Code headless agent for creating and modifying editable plugins). The main agent can create subagents, each with their own conversation history, system prompt, and tool whitelist. Interlocutors are contact records assigned to agents for inbound message routing.
 
 ## License
 

@@ -6,6 +6,7 @@ import { AuthError } from "./auth.js";
 import { isInAllowlist } from "./allowlist.js";
 import { sendSignalMessage } from "./signal.js";
 import { sendTelegramMessage } from "./telegram-api.js";
+import { sendWhatsappTextMessage } from "./whatsapp-api.js";
 import type { FileAttachment } from "./uploads.js";
 import { getMainAgentId, isOwnerIdentity, resolveInterlocutor, loadAgent } from "./database.js";
 
@@ -14,7 +15,7 @@ const RETRY_DELAY_MS = 30_000;
 
 // Sources that require allowlist + interlocutor lookup before routing.
 // All other external sources route directly to the main agent.
-const GATED_SOURCES: string[] = ["signal", "telegram"];
+const GATED_SOURCES: string[] = ["signal", "telegram", "whatsapp"];
 
 export interface RoutingResult {
   agentId: number;
@@ -206,6 +207,12 @@ async function processQueue(): Promise<void> {
             await sendTelegramMessage(queueConfig!.telegram!.botToken, entry.sender, loginMessage);
           } catch (sendError) {
             console.error(`[stavrobot] Failed to send Telegram login notification: ${sendError instanceof Error ? sendError.message : String(sendError)}`);
+          }
+        } else if (entry.source === "whatsapp" && entry.sender !== undefined) {
+          try {
+            await sendWhatsappTextMessage(entry.sender, loginMessage);
+          } catch (sendError) {
+            console.error(`[stavrobot] Failed to send WhatsApp login notification: ${sendError instanceof Error ? sendError.message : String(sendError)}`);
           }
         }
         entry.resolve(loginMessage);

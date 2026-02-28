@@ -81,9 +81,34 @@ export async function handlePutAllowlistRequest(
     return;
   }
 
+  if (!Array.isArray(obj.whatsapp) || !obj.whatsapp.every((item) => typeof item === "string")) {
+    response.writeHead(400, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: "'whatsapp' must be an array of non-empty strings" }));
+    return;
+  }
+
+  const trimmedWhatsapp = (obj.whatsapp as string[]).map((item) => item.replace(/[\u200B-\u200F\u2028-\u202F\u2060-\u206F\uFEFF]/g, "").trim());
+  if (trimmedWhatsapp.some((item) => item.length === 0)) {
+    response.writeHead(400, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: "'whatsapp' must be an array of non-empty strings" }));
+    return;
+  }
+
+  const invalidWhatsapp = trimmedWhatsapp.find((item) => !e164Pattern.test(item));
+  if (invalidWhatsapp !== undefined) {
+    response.writeHead(400, { "Content-Type": "application/json" });
+    response.end(
+      JSON.stringify({
+        error: `Invalid WhatsApp number "${invalidWhatsapp}": must be in E.164 format (e.g. +1234567890).`,
+      }),
+    );
+    return;
+  }
+
   const submitted: Allowlist = {
     signal: [...new Set(trimmedSignal)],
     telegram: [...new Set(obj.telegram as number[])],
+    whatsapp: [...new Set(trimmedWhatsapp)],
   };
 
   // Ensure owner identities are always present even if the UI omitted them.
@@ -96,6 +121,11 @@ export async function handlePutAllowlistRequest(
   for (const ownerTelegram of ownerIdentities.telegram) {
     if (!submitted.telegram.includes(ownerTelegram)) {
       submitted.telegram.push(ownerTelegram);
+    }
+  }
+  for (const ownerWhatsapp of ownerIdentities.whatsapp) {
+    if (!submitted.whatsapp.includes(ownerWhatsapp)) {
+      submitted.whatsapp.push(ownerWhatsapp);
     }
   }
 
@@ -244,14 +274,25 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
       </div>
     </div>
 
+    <div class="section">
+      <h2>WhatsApp allowlist</h2>
+      <ul class="entry-list" id="whatsapp-list"></ul>
+      <div class="add-row">
+        <input type="text" id="whatsapp-input" placeholder="+1234567890" />
+        <button class="btn" onclick="addWhatsappEntry()">Add</button>
+      </div>
+    </div>
+
     <span id="status"></span>
   </div>
 
   <script>
     let signalEntries = [];
     let telegramEntries = [];
+    let whatsappEntries = [];
     let ownerSignal = [];
     let ownerTelegram = [];
+    let ownerWhatsapp = [];
 
     function escapeHtml(text) {
       const div = document.createElement("div");
@@ -295,6 +336,24 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
       }).join("");
     }
 
+    function renderWhatsappList() {
+      const list = document.getElementById("whatsapp-list");
+      if (whatsappEntries.length === 0) {
+        list.innerHTML = '<li style="color:#888;font-size:13px;">No entries.</li>';
+        return;
+      }
+      list.innerHTML = whatsappEntries.map((entry, index) => {
+        const isOwner = ownerWhatsapp.includes(entry);
+        return \`<li>
+          <span class="entry-value">\${escapeHtml(entry)}</span>
+          \${isOwner
+            ? '<span class="owner-label">(owner)</span>'
+            : \`<button class="btn btn-danger" onclick="removeWhatsappEntry(\${index})">Delete</button>\`
+          }
+        </li>\`;
+      }).join("");
+    }
+
     function removeSignalEntry(index) {
       signalEntries.splice(index, 1);
       renderSignalList();
@@ -304,6 +363,12 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
     function removeTelegramEntry(index) {
       telegramEntries.splice(index, 1);
       renderTelegramList();
+      saveAllowlist();
+    }
+
+    function removeWhatsappEntry(index) {
+      whatsappEntries.splice(index, 1);
+      renderWhatsappList();
       saveAllowlist();
     }
 
@@ -346,6 +411,25 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
       saveAllowlist();
     }
 
+    function addWhatsappEntry() {
+      const input = document.getElementById("whatsapp-input");
+      const value = input.value.replace(/[\\u200B-\\u200F\\u2028-\\u202F\\u2060-\\u206F\\uFEFF]/g, "").trim();
+      if (!value) return;
+      if (!/^\\+[1-9]\\d{1,14}$/.test(value)) {
+        setStatus("Invalid number: must be in E.164 format (e.g. +1234567890).", true);
+        return;
+      }
+      if (whatsappEntries.includes(value)) {
+        setStatus("That number is already in the list.", true);
+        return;
+      }
+      whatsappEntries.push(value);
+      input.value = "";
+      renderWhatsappList();
+      setStatus("", false);
+      saveAllowlist();
+    }
+
     function setStatus(text, isError) {
       const el = document.getElementById("status");
       el.textContent = text;
@@ -364,14 +448,17 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
         const data = await response.json();
         signalEntries = data.allowlist.signal.slice();
         telegramEntries = data.allowlist.telegram.slice();
+        whatsappEntries = data.allowlist.whatsapp.slice();
         ownerSignal = data.ownerIdentities.signal.slice();
         ownerTelegram = data.ownerIdentities.telegram.slice();
+        ownerWhatsapp = data.ownerIdentities.whatsapp.slice();
 
         document.getElementById("loading").style.display = "none";
         document.getElementById("content").style.display = "";
 
         renderSignalList();
         renderTelegramList();
+        renderWhatsappList();
       } catch (error) {
         document.getElementById("loading").style.display = "none";
         document.getElementById("content").style.display = "";
@@ -384,16 +471,19 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
         const response = await fetch("/api/settings/allowlist", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ signal: signalEntries, telegram: telegramEntries }),
+          body: JSON.stringify({ signal: signalEntries, telegram: telegramEntries, whatsapp: whatsappEntries }),
         });
         const data = await response.json();
         if (response.ok) {
           signalEntries = data.allowlist.signal.slice();
           telegramEntries = data.allowlist.telegram.slice();
+          whatsappEntries = data.allowlist.whatsapp.slice();
           ownerSignal = data.ownerIdentities.signal.slice();
           ownerTelegram = data.ownerIdentities.telegram.slice();
+          ownerWhatsapp = data.ownerIdentities.whatsapp.slice();
           renderSignalList();
           renderTelegramList();
+          renderWhatsappList();
           setStatus("", false);
         } else {
           setStatus(data.error || "Failed to save.", true);
@@ -409,6 +499,10 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
 
     document.getElementById("telegram-input").addEventListener("keydown", (event) => {
       if (event.key === "Enter") addTelegramEntry();
+    });
+
+    document.getElementById("whatsapp-input").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") addWhatsappEntry();
     });
 
     loadAllowlistData();
