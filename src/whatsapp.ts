@@ -11,7 +11,7 @@ import type { WhatsappConfig } from "./config.js";
 import { isInAllowlist } from "./allowlist.js";
 import { enqueueMessage } from "./queue.js";
 import { saveAttachment, type FileAttachment } from "./uploads.js";
-import { setWhatsappSocket, jidToE164, e164ToJid } from "./whatsapp-api.js";
+import { setWhatsappSocket, getWhatsappSocket, jidToE164, e164ToJid } from "./whatsapp-api.js";
 
 interface SilentLogger {
   level: string;
@@ -146,12 +146,28 @@ async function processInboundMessage(waMessage: WAMessage): Promise<void> {
     return;
   }
 
-  if (!remoteJid.endsWith("@s.whatsapp.net")) {
-    console.log("[stavrobot] WhatsApp ignoring non-individual JID:", remoteJid);
+  let effectiveJid = remoteJid;
+  if (remoteJid.endsWith("@lid")) {
+    const socket = getWhatsappSocket();
+    if (socket === undefined) {
+      console.log("[stavrobot] WhatsApp could not resolve LID JID, dropping:", remoteJid);
+      return;
+    }
+    const resolvedJid = await socket.signalRepository.lidMapping.getPNForLID(remoteJid);
+    if (resolvedJid === null) {
+      console.log("[stavrobot] WhatsApp could not resolve LID JID, dropping:", remoteJid);
+      return;
+    }
+    console.log("[stavrobot] WhatsApp resolved LID to PN:", remoteJid, "->", resolvedJid);
+    effectiveJid = resolvedJid;
+  }
+
+  if (!effectiveJid.endsWith("@s.whatsapp.net")) {
+    console.log("[stavrobot] WhatsApp ignoring non-individual JID:", effectiveJid);
     return;
   }
 
-  const phoneNumber = jidToE164(remoteJid);
+  const phoneNumber = jidToE164(effectiveJid);
 
   if (!isInAllowlist("whatsapp", phoneNumber)) {
     console.log("[stavrobot] WhatsApp message from disallowed number:", phoneNumber);

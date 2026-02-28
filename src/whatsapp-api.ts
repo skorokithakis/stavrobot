@@ -11,6 +11,9 @@ export function getWhatsappSocket(): WASocket | undefined {
 }
 
 export function jidToE164(jid: string): string {
+  if (!jid.endsWith("@s.whatsapp.net")) {
+    throw new Error(`jidToE164 called with non-PN JID: ${jid}`);
+  }
   const number = jid.split("@")[0];
   return `+${number}`;
 }
