@@ -132,6 +132,7 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Database explorer</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -174,6 +175,9 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
     }
     .table-name { font-weight: 500; }
     .row-count { color: #999; font-size: 13px; }
+    #mobile-topbar {
+      display: none;
+    }
     #main {
       flex: 1;
       display: flex;
@@ -284,15 +288,133 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
     }
     .null-value { color: #aaa; font-style: italic; }
     .json-value { font-family: monospace; font-size: 12px; }
+    #row-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: rgba(0, 0, 0, 0.45);
+      align-items: flex-end;
+      justify-content: center;
+    }
+    #row-modal.open {
+      display: flex;
+    }
+    #row-modal-card {
+      background: #fff;
+      width: 100%;
+      max-height: 80vh;
+      overflow-y: auto;
+      border-radius: 12px 12px 0 0;
+      padding: 16px;
+    }
+    #row-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    #row-modal-title {
+      font-size: 15px;
+      font-weight: 600;
+    }
+    #row-modal-close {
+      background: none;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      color: #666;
+      line-height: 1;
+      padding: 4px;
+    }
+    .modal-field {
+      padding: 10px 0;
+      border-bottom: 1px solid #eee;
+    }
+    .modal-field:last-child {
+      border-bottom: none;
+    }
+    .modal-field-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      margin-bottom: 4px;
+    }
+    .modal-field-value {
+      font-size: 13px;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+    @media (max-width: 768px) {
+      body {
+        flex-direction: column;
+      }
+      #sidebar {
+        display: none;
+      }
+      #mobile-topbar {
+        display: flex;
+        align-items: center;
+        background: #fff;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+        padding: 10px 12px;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      #mobile-topbar label {
+        font-size: 13px;
+        font-weight: 600;
+        color: #666;
+        white-space: nowrap;
+      }
+      #mobile-table-select {
+        flex: 1;
+        font-size: 14px;
+        padding: 6px 8px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        background: #f8f9fa;
+        color: #1a1a1a;
+      }
+      #content {
+        overflow-x: auto;
+      }
+      th, td {
+        padding: 8px;
+      }
+      #header {
+        padding: 12px 16px;
+      }
+      #pagination {
+        padding: 10px 16px;
+      }
+    }
   </style>
 </head>
 <body>
+  <div id="mobile-topbar">
+    <label for="mobile-table-select">Table</label>
+    <select id="mobile-table-select" onchange="selectTable(this.value)">
+      <option value="">Select a table...</option>
+    </select>
+  </div>
   <div id="sidebar">
     <h2>Tables</h2>
     <div id="table-list"></div>
   </div>
   <div id="main">
     <div id="empty">Select a table to view its contents</div>
+  </div>
+  <div id="row-modal" onclick="handleModalBackdropClick(event)">
+    <div id="row-modal-card">
+      <div id="row-modal-header">
+        <span id="row-modal-title">Row detail</span>
+        <button id="row-modal-close" onclick="closeRowModal()">&#x2715;</button>
+      </div>
+      <div id="row-modal-fields"></div>
+    </div>
   </div>
 
   <script>
@@ -301,12 +423,17 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
     let currentOffset = 0;
     let currentOrderBy = null;
     let currentOrderDirection = "asc";
+    let currentColumns = [];
 
     async function loadTables() {
       const response = await fetch("/api/explorer/tables");
       const tables = await response.json();
       const list = document.getElementById("table-list");
       list.innerHTML = "";
+
+      const mobileSelect = document.getElementById("mobile-table-select");
+      mobileSelect.innerHTML = '<option value="">Select a table...</option>';
+
       for (const table of tables) {
         const item = document.createElement("div");
         item.className = "table-item";
@@ -316,6 +443,11 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
         \`;
         item.onclick = () => selectTable(table.name);
         list.appendChild(item);
+
+        const option = document.createElement("option");
+        option.value = table.name;
+        option.textContent = \`\${table.name} (\${table.rowCount})\`;
+        mobileSelect.appendChild(option);
       }
 
       // If there's a table parameter in the URL, select that table.
@@ -324,12 +456,14 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
       if (tableParam) {
         const tableExists = tables.some(t => t.name === tableParam);
         if (tableExists) {
+          mobileSelect.value = tableParam;
           selectTable(tableParam);
         }
       }
     }
 
     async function selectTable(tableName) {
+      if (!tableName) return;
       currentTable = tableName;
       currentOffset = 0;
       currentOrderBy = null;
@@ -344,6 +478,10 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
         const name = item.querySelector(".table-name").textContent;
         item.classList.toggle("selected", name === tableName);
       });
+
+      // Keep the mobile dropdown in sync with the sidebar selection.
+      const mobileSelect = document.getElementById("mobile-table-select");
+      mobileSelect.value = tableName;
 
       await loadTableData();
     }
@@ -374,6 +512,8 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
 
       const schema = await schemaResponse.json();
       const data = await rowsResponse.json();
+
+      currentColumns = data.columns;
 
       const main = document.getElementById("main");
       main.innerHTML = \`
@@ -422,9 +562,16 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
       }).join("");
 
       const bodyEl = document.getElementById("table-body");
-      bodyEl.innerHTML = data.rows.map(row => \`
-        <tr onclick="toggleRowExpand(this)">\${row.map(cell => \`<td>\${formatCell(cell)}</td>\`).join("")}</tr>
+      bodyEl.innerHTML = data.rows.map((row, rowIndex) => \`
+        <tr onclick="handleRowClick(this, \${rowIndex})">\${row.map(cell => \`<td>\${formatCell(cell)}</td>\`).join("")}</tr>
       \`).join("");
+
+      // Store row data on each tr element so the modal can access it without re-fetching.
+      const rows = data.rows;
+      const trEls = bodyEl.querySelectorAll("tr");
+      trEls.forEach((tr, i) => {
+        tr._rowData = rows[i];
+      });
 
       const start = currentOffset + 1;
       const end = currentOffset + data.rows.length;
@@ -445,8 +592,38 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
       loadTableData();
     }
 
+    function handleRowClick(row, rowIndex) {
+      if (window.innerWidth <= 768) {
+        openRowModal(row._rowData);
+      } else {
+        toggleRowExpand(row);
+      }
+    }
+
     function toggleRowExpand(row) {
       row.classList.toggle("expanded");
+    }
+
+    function openRowModal(rowData) {
+      const fieldsEl = document.getElementById("row-modal-fields");
+      fieldsEl.innerHTML = currentColumns.map((col, i) => \`
+        <div class="modal-field">
+          <div class="modal-field-label">\${escapeHtml(col)}</div>
+          <div class="modal-field-value">\${formatCell(rowData[i])}</div>
+        </div>
+      \`).join("");
+      document.getElementById("row-modal").classList.add("open");
+    }
+
+    function closeRowModal() {
+      document.getElementById("row-modal").classList.remove("open");
+    }
+
+    function handleModalBackdropClick(event) {
+      // Only close when clicking the backdrop itself, not the card inside it.
+      if (event.target === document.getElementById("row-modal")) {
+        closeRowModal();
+      }
     }
 
     function escapeHtml(text) {
