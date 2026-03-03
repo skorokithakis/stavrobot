@@ -35,7 +35,7 @@ export function createSendAgentMessageTool(pool: pg.Pool, getCurrentAgentId: () 
         };
       }
 
-      void enqueueMessage(message, "agent", String(senderAgentId), undefined, undefined, undefined, agentId);
+      void enqueueMessage(message, "agent", String(senderAgentId), undefined, agentId);
 
       const resultMessage = `Message sent to agent ${agentId}.`;
       log.info(`[stavrobot] ${resultMessage}`);

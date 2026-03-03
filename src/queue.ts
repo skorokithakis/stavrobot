@@ -30,8 +30,6 @@ interface QueueEntry {
   message: string | undefined;
   source: string | undefined;
   sender: string | undefined;
-  audio: string | undefined;
-  audioContentType: string | undefined;
   attachments: FileAttachment[] | undefined;
   targetAgentId: number | undefined;
   retries: number;
@@ -188,7 +186,7 @@ async function processQueue(): Promise<void> {
         entry.resolve("");
         continue;
       }
-      const response = await handlePrompt(queueAgent!, queuePool!, entry.message, queueConfig!, routing, entry.source, entry.audio, entry.audioContentType, entry.attachments);
+      const response = await handlePrompt(queueAgent!, queuePool!, entry.message, queueConfig!, routing, entry.source, entry.attachments);
       entry.resolve(response);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -236,13 +234,11 @@ export function enqueueMessage(
   message: string | undefined,
   source?: string,
   sender?: string,
-  audio?: string,
-  audioContentType?: string,
   attachments?: FileAttachment[],
   targetAgentId?: number,
 ): Promise<string> {
   return new Promise<string>((resolve, reject) => {
-    queue.push({ message, source, sender, audio, audioContentType, attachments, targetAgentId, retries: 0, resolve, reject });
+    queue.push({ message, source, sender, attachments, targetAgentId, retries: 0, resolve, reject });
     if (!processing) {
       void processQueue();
     }

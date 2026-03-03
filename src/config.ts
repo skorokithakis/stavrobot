@@ -14,12 +14,6 @@ export interface PostgresConfig {
   password: string;
 }
 
-export interface SttConfig {
-  provider: string;
-  apiKey: string;
-  model: string;
-}
-
 export interface CoderConfig {
   model: string;
 }
@@ -54,7 +48,6 @@ export interface Config {
   compactionPrompt: string;
   baseAgentPrompt: string;
   customPrompt?: string;
-  stt?: SttConfig;
   coder?: CoderConfig;
   signal?: SignalConfig;
   telegram?: TelegramConfig;

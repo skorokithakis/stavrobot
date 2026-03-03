@@ -6,9 +6,9 @@ A personal AI assistant with persistent memory, sandboxed code execution, and Si
 
 ## Features
 
-- **Signal integration.** Two-way messaging via signal-cli, including voice note transcription (OpenAI STT).
-- **Telegram integration.** Two-way messaging via a Telegram bot webhook, including voice note transcription (OpenAI STT).
-- **WhatsApp integration.** Two-way messaging via the Baileys library (unofficial WhatsApp Web API), running in-process. Includes voice note transcription (OpenAI STT).
+- **Signal integration.** Two-way messaging via signal-cli. Voice notes arrive as file attachments and can be transcribed by a plugin.
+- **Telegram integration.** Two-way messaging via a Telegram bot webhook. Voice notes arrive as file attachments and can be transcribed by a plugin.
+- **WhatsApp integration.** Two-way messaging via the Baileys library (unofficial WhatsApp Web API), running in-process. Voice notes arrive as file attachments and can be transcribed by a plugin.
 - **Three-tier knowledge.** Tier 1 (memories): a self-managed memory store injected into the system prompt every turn — for things the agent needs constantly. Tier 2 (scratchpad): titled entries whose titles are always in context but whose bodies are loaded on demand — for important but less-frequently needed knowledge. Tier 3 (database): full read/write access to PostgreSQL via unrestricted SQL — the agent can create tables, query, and store anything.
 - **Security.** The bot runs in isolated containers with no access to the host system. Code execution is sandboxed with no access to secrets. Signal and Telegram allowlists restrict who can interact with the agent. You can run it on your personal PC with no fear. Plugins have a permission system so you can give the agent access to e.g. read your email but not delete or send any.
 - **Low token usage.** Various optimizations have been made to be light on token usage. We even use [TOON](https://github.com/toon-format/toon) internally.

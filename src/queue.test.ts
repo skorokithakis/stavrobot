@@ -128,7 +128,7 @@ describe("message routing", () => {
 
   it("routes upload messages to the owner conversation", async () => {
     const attachment = { storedPath: "/tmp/upload-abc.jpg", originalFilename: "photo.jpg", mimeType: "image/jpeg", size: 1024 };
-    await enqueueMessage(undefined, "upload", undefined, undefined, undefined, [attachment]);
+    await enqueueMessage(undefined, "upload", undefined, [attachment]);
 
     expect(mockHandlePrompt).toHaveBeenCalledOnce();
     const routingArg = mockHandlePrompt.mock.calls[0][4] as RoutingResult;
@@ -233,7 +233,7 @@ describe("message routing", () => {
   it("routes agent-to-agent messages to the target agent", async () => {
     mockResolveInterlocutor.mockResolvedValue(null);
 
-    await enqueueMessage("hello from agent 1", "agent", "1", undefined, undefined, undefined, 2);
+    await enqueueMessage("hello from agent 1", "agent", "1", undefined, 2);
 
     expect(mockHandlePrompt).toHaveBeenCalledOnce();
     const routingArg = mockHandlePrompt.mock.calls[0][4] as RoutingResult;

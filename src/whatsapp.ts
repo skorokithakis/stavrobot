@@ -241,7 +241,7 @@ async function processInboundMessage(waMessage: WAMessage): Promise<void> {
         mimeType,
         size: (buffer as Buffer).length,
       };
-      void enqueueMessage(caption, "whatsapp", phoneNumber, undefined, undefined, [attachment]);
+      void enqueueMessage(caption, "whatsapp", phoneNumber, [attachment]);
     }).catch((error: unknown) => {
       log.error("[stavrobot] Error downloading WhatsApp image:", error);
     });
@@ -251,11 +251,21 @@ async function processInboundMessage(waMessage: WAMessage): Promise<void> {
   // Audio / voice note message.
   if (messageContent.audioMessage !== undefined && messageContent.audioMessage !== null) {
     // WhatsApp voice notes are OGG Opus; regular audio may have a different mime type.
-    const audioContentType = messageContent.audioMessage.mimetype ?? "audio/ogg; codecs=opus";
-    log.debug("[stavrobot] WhatsApp audio message from:", phoneNumber, "contentType:", audioContentType);
-    void downloadMediaMessage(waMessage, "buffer", {}).then((buffer) => {
-      const audioBase64 = (buffer as Buffer).toString("base64");
-      void enqueueMessage(undefined, "whatsapp", phoneNumber, audioBase64, audioContentType);
+    // Strip MIME parameters (e.g. "audio/ogg; codecs=opus") to get a clean extension.
+    const rawMimeType = messageContent.audioMessage.mimetype ?? "audio/ogg; codecs=opus";
+    const mimeType = rawMimeType.split(";")[0].trim();
+    const extension = mimeType.split("/")[1] ?? "ogg";
+    log.debug("[stavrobot] WhatsApp audio message from:", phoneNumber, "mimeType:", mimeType);
+    void downloadMediaMessage(waMessage, "buffer", {}).then(async (buffer) => {
+      const filename = `voice-note-${Date.now()}.${extension}`;
+      const { storedPath } = await saveAttachment(buffer as Buffer, filename, mimeType);
+      const attachment: FileAttachment = {
+        storedPath,
+        originalFilename: filename,
+        mimeType,
+        size: (buffer as Buffer).length,
+      };
+      void enqueueMessage(undefined, "whatsapp", phoneNumber, [attachment]);
     }).catch((error: unknown) => {
       log.error("[stavrobot] Error downloading WhatsApp audio:", error);
     });
@@ -276,7 +286,7 @@ async function processInboundMessage(waMessage: WAMessage): Promise<void> {
         mimeType,
         size: (buffer as Buffer).length,
       };
-      void enqueueMessage(caption, "whatsapp", phoneNumber, undefined, undefined, [attachment]);
+      void enqueueMessage(caption, "whatsapp", phoneNumber, [attachment]);
     }).catch((error: unknown) => {
       log.error("[stavrobot] Error downloading WhatsApp document:", error);
     });
@@ -297,7 +307,7 @@ async function processInboundMessage(waMessage: WAMessage): Promise<void> {
         mimeType,
         size: (buffer as Buffer).length,
       };
-      void enqueueMessage(caption, "whatsapp", phoneNumber, undefined, undefined, [attachment]);
+      void enqueueMessage(caption, "whatsapp", phoneNumber, [attachment]);
     }).catch((error: unknown) => {
       log.error("[stavrobot] Error downloading WhatsApp video:", error);
     });

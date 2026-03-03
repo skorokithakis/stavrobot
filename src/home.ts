@@ -38,7 +38,6 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
     { name: "Signal", enabled: config.signal !== undefined },
     { name: "Telegram", enabled: config.telegram !== undefined },
     { name: "WhatsApp", enabled: config.whatsapp !== undefined },
-    { name: "STT", enabled: config.stt !== undefined },
     { name: "Coder", enabled: config.coder !== undefined },
   ];
 

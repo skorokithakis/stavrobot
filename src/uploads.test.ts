@@ -197,7 +197,7 @@ describe("handleUploadRequest", () => {
 
     const mockEnqueue = vi.mocked(enqueueMessage);
     expect(mockEnqueue).toHaveBeenCalledOnce();
-    const attachments = mockEnqueue.mock.calls[0][5];
+    const attachments = mockEnqueue.mock.calls[0][3];
     // The attachment must contain the original filename, not the random stored name.
     expect(Array.isArray(attachments)).toBe(true);
     expect(attachments![0].originalFilename).toBe("original.txt");

@@ -98,7 +98,6 @@ async function handleChatRequest(
     }
 
     const message = "message" in parsedBody && typeof parsedBody.message === "string" ? parsedBody.message : undefined;
-    const audio = "audio" in parsedBody && typeof parsedBody.audio === "string" ? parsedBody.audio : undefined;
 
     let attachments: FileAttachment[] | undefined;
     if ("attachments" in parsedBody && Array.isArray(parsedBody.attachments)) {
@@ -156,15 +155,13 @@ async function handleChatRequest(
         ? [...(attachments ?? []), ...savedFromFiles]
         : undefined;
 
-    if (message === undefined && audio === undefined && combinedAttachments === undefined) {
+    if (message === undefined && combinedAttachments === undefined) {
       response.writeHead(400, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({ error: "At least one of 'message', 'audio', 'attachments', or 'files' must be present" }));
+      response.end(JSON.stringify({ error: "At least one of 'message', 'attachments', or 'files' must be present" }));
       return;
     }
 
-    const audioContentType = "audioContentType" in parsedBody && typeof parsedBody.audioContentType === "string" ? parsedBody.audioContentType : undefined;
-
-    const assistantResponse = await enqueueMessage(message, source, sender, audio, audioContentType, combinedAttachments);
+    const assistantResponse = await enqueueMessage(message, source, sender, combinedAttachments);
 
     response.writeHead(200, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ response: assistantResponse }));

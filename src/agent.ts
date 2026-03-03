@@ -6,7 +6,6 @@ import { Agent, type AgentTool, type AgentToolResult, type AgentMessage } from "
 import type { Config } from "./config.js";
 import { isInAllowlist } from "./allowlist.js";
 import type { FileAttachment } from "./uploads.js";
-import { transcribeAudio } from "./stt.js";
 import { getApiKey } from "./auth.js";
 import { executeSql, loadMessages, saveMessage, saveCompaction, loadLatestCompaction, loadAllMemories, upsertMemory, deleteMemory, upsertScratchpad, deleteScratchpad, createCronEntry, updateCronEntry, deleteCronEntry, listCronEntries, loadAllScratchpadTitles, resolveRecipient, resolveInterlocutorByName, getMainAgentId, loadAgent, type Memory } from "./database.js";
 import type { RoutingResult } from "./queue.js";
@@ -1182,8 +1181,6 @@ export async function handlePrompt(
   config: Config,
   routing: RoutingResult,
   source?: string,
-  audio?: string,
-  audioContentType?: string,
   attachments?: FileAttachment[]
 ): Promise<string> {
   const { agentId, senderIdentityId, senderAgentId, senderLabel, isMainAgent } = routing;
@@ -1287,18 +1284,6 @@ export async function handlePrompt(
   const savePromises: Promise<void>[] = [];
 
   let resolvedMessage = userMessage;
-
-  if (audio !== undefined) {
-    if (config.stt !== undefined) {
-      const audioBuffer = Buffer.from(audio, "base64");
-      const resolvedContentType = audioContentType ?? "audio/ogg";
-      const transcription = await transcribeAudio(audioBuffer, config.stt, resolvedContentType);
-      const voiceNote = `[Voice note transcript]: ${transcription}`;
-      resolvedMessage = resolvedMessage !== undefined ? `${resolvedMessage}\n${voiceNote}` : voiceNote;
-    } else {
-      log.warn("[stavrobot] Audio received but [stt] is not configured; ignoring audio.");
-    }
-  }
 
   const imageContents: ImageContent[] = [];
 

@@ -98,20 +98,16 @@ def start_signal_cli(account: str) -> subprocess.Popen:
     return process
 
 
-def send_agent_request(message_text: str | None, source_number: str, audio: str | None = None, audio_content_type: str | None = None, files: list[dict] | None = None) -> str:
+def send_agent_request(message_text: str | None, source_number: str, files: list[dict] | None = None) -> str:
     """Send a message to the agent API and return the response.
 
-    At least one of message_text, audio, or files must be provided.
+    At least one of message_text or files must be provided.
     """
-    log(f"send_agent_request: sending to agent API (message length={len(message_text) if message_text else 0}, audio={'yes' if audio else 'no'}, audio_content_type={audio_content_type!r}, files={len(files) if files else 0}, sender={source_number})")
+    log(f"send_agent_request: sending to agent API (message length={len(message_text) if message_text else 0}, files={len(files) if files else 0}, sender={source_number})")
     connection = http.client.HTTPConnection("app", 3001, timeout=60)
     payload: dict = {"source": "signal", "sender": source_number}
     if message_text is not None:
         payload["message"] = message_text
-    if audio is not None:
-        payload["audio"] = audio
-        if audio_content_type is not None:
-            payload["audioContentType"] = audio_content_type
     if files is not None:
         payload["files"] = files
     body = json.dumps(payload)
@@ -469,43 +465,6 @@ def process_signal_event(
             message_text = convert_signal_to_markdown(message_text, text_styles)
             log(f"Converted Signal formatting to Markdown: {message_text!r}")
 
-    # Check for audio attachments and forward them to the agent API as base64.
-    audio_b64: str | None = None
-    audio_content_type: str | None = None
-    attachments = data_message.get("attachments", [])
-    log(f"Attachments field in dataMessage: {attachments!r}")
-    if isinstance(attachments, list):
-        log(f"Processing {len(attachments)} attachment(s)")
-        for index, attachment in enumerate(attachments):
-            if not isinstance(attachment, dict):
-                log(f"Attachment {index}: skipping, not a dict: {attachment!r}")
-                continue
-            content_type = attachment.get("contentType", "")
-            log(f"Attachment {index}: contentType={content_type!r}, keys={list(attachment.keys())}")
-            if not isinstance(content_type, str) or not content_type.startswith("audio/"):
-                log(f"Attachment {index}: skipping, not an audio type")
-                continue
-            attachment_id = attachment.get("id")
-            if not isinstance(attachment_id, str):
-                log(f"Attachment {index}: skipping, id is not a string: {attachment_id!r}")
-                continue
-            file_path = f"/root/.local/share/signal-cli/attachments/{attachment_id}"
-            if not os.path.isfile(file_path):
-                log(f"Attachment {index}: file not found at {file_path}, skipping")
-                continue
-            file_size = os.path.getsize(file_path)
-            log(f"Reading voice note: {file_path} ({file_size} bytes)")
-            try:
-                with open(file_path, "rb") as audio_file:
-                    audio_b64 = base64.b64encode(audio_file.read()).decode("ascii")
-            except OSError as error:
-                log(f"Error reading voice note {file_path}: {error}")
-                continue
-            audio_content_type = content_type
-            log(f"Attachment {index}: base64-encoded {file_size} bytes for forwarding, content_type={content_type!r}")
-            # Only forward the first audio attachment.
-            break
-
     # Map of MIME type prefixes/exact types to file extensions for deriving filenames
     # when signal-cli does not provide one.
     mime_to_extension: dict[str, str] = {
@@ -516,56 +475,66 @@ def process_signal_event(
         "application/pdf": ".pdf",
     }
 
-    # Collect non-audio attachments to forward via the 'files' field.
+    # Collect all attachments (including audio) to forward via the 'files' field.
+    # Audio is no longer handled separately; it follows the same path as any other file.
+    attachments = data_message.get("attachments", [])
+    log(f"Attachments field in dataMessage: {attachments!r}")
     file_attachments: list[dict] = []
     if isinstance(attachments, list):
+        log(f"Processing {len(attachments)} attachment(s)")
         for index, attachment in enumerate(attachments):
             if not isinstance(attachment, dict):
+                log(f"Attachment {index}: skipping, not a dict: {attachment!r}")
                 continue
             content_type = attachment.get("contentType", "")
-            if not isinstance(content_type, str) or content_type.startswith("audio/"):
-                # Audio is already handled above; skip stickers, contacts, etc. silently
-                # only if we can't identify the type. Audio is explicitly skipped here.
+            if not isinstance(content_type, str):
+                log(f"Attachment {index}: skipping, contentType is not a string: {content_type!r}")
                 continue
             attachment_id = attachment.get("id")
             if not isinstance(attachment_id, str):
-                log(f"Non-audio attachment {index}: skipping, id is not a string: {attachment_id!r}")
+                log(f"Attachment {index}: skipping, id is not a string: {attachment_id!r}")
                 continue
             file_path = f"/root/.local/share/signal-cli/attachments/{attachment_id}"
             if not os.path.isfile(file_path):
-                log(f"Non-audio attachment {index}: file not found at {file_path}, skipping")
+                log(f"Attachment {index}: file not found at {file_path}, skipping")
                 continue
-            # Derive a filename: use the one signal-cli provides when available,
-            # otherwise fall back to <id>.<extension> based on the content type.
+            # Derive a filename: use the one signal-cli provides when available.
+            # For audio, derive the extension from the MIME type (e.g. audio/aac -> voice-note.aac).
+            # For other types, fall back to <id>.<extension> based on the content type.
             original_filename: str | None = attachment.get("filename")
             if not isinstance(original_filename, str) or not original_filename:
-                extension = mime_to_extension.get(content_type, "")
-                original_filename = f"{attachment_id}{extension}"
+                if content_type.startswith("audio/"):
+                    base_type = content_type.split(";")[0].strip()
+                    extension = base_type.split("/")[1] if "/" in base_type else "bin"
+                    original_filename = f"voice-note.{extension}"
+                else:
+                    extension = mime_to_extension.get(content_type, "")
+                    original_filename = f"{attachment_id}{extension}"
             file_size = os.path.getsize(file_path)
-            log(f"Non-audio attachment {index}: reading {file_path} ({file_size} bytes), content_type={content_type!r}, filename={original_filename!r}")
+            log(f"Attachment {index}: reading {file_path} ({file_size} bytes), content_type={content_type!r}, filename={original_filename!r}")
             try:
                 with open(file_path, "rb") as attachment_file:
                     file_data_b64 = base64.b64encode(attachment_file.read()).decode("ascii")
             except OSError as error:
-                log(f"Non-audio attachment {index}: error reading {file_path}: {error}")
+                log(f"Attachment {index}: error reading {file_path}: {error}")
                 continue
             file_attachments.append({
                 "data": file_data_b64,
                 "filename": original_filename,
                 "mimeType": content_type,
             })
-            log(f"Non-audio attachment {index}: base64-encoded {file_size} bytes for forwarding")
+            log(f"Attachment {index}: base64-encoded {file_size} bytes for forwarding")
 
-    if not message_text and audio_b64 is None and not file_attachments:
-        log(f"No message text, audio, or file attachments, skipping (source={source_number})")
+    if not message_text and not file_attachments:
+        log(f"No message text or file attachments, skipping (source={source_number})")
         return
 
-    log(f"Received message from {source_number}: {message_text!r} (audio={'yes' if audio_b64 else 'no'}, audio_content_type={audio_content_type!r}, file_attachments={len(file_attachments)})")
+    log(f"Received message from {source_number}: {message_text!r} (file_attachments={len(file_attachments)})")
 
     # The bridge does not reply directly on Signal. The agent uses the
     # send_signal_message tool to send replies, which hits our /send endpoint.
     try:
-        agent_response = send_agent_request(message_text, source_number, audio_b64, audio_content_type, file_attachments if file_attachments else None)
+        agent_response = send_agent_request(message_text, source_number, file_attachments if file_attachments else None)
         log(f"Agent response: {agent_response}")
     except (OSError, RuntimeError, json.JSONDecodeError, KeyError, TypeError) as error:
         log(f"Error processing message: {error}")

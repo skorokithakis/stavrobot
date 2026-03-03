@@ -78,7 +78,7 @@ describe("send_agent_message", () => {
     const getCurrentAgentId = vi.fn().mockReturnValue(3);
     const tool = createSendAgentMessageTool(pool, getCurrentAgentId);
     await tool.execute("call-1", { agent_id: 2, message: "task for you" });
-    expect(mockEnqueueMessage).toHaveBeenCalledWith("task for you", "agent", "3", undefined, undefined, undefined, 2);
+    expect(mockEnqueueMessage).toHaveBeenCalledWith("task for you", "agent", "3", undefined, 2);
   });
 
   it("uses the getCurrentAgentId callback to determine the sender", async () => {
@@ -95,6 +95,6 @@ describe("send_agent_message", () => {
     const tool = createSendAgentMessageTool(pool, getCurrentAgentId);
     await tool.execute("call-1", { agent_id: 5, message: "ping" });
     expect(getCurrentAgentId).toHaveBeenCalled();
-    expect(mockEnqueueMessage).toHaveBeenCalledWith("ping", "agent", "7", undefined, undefined, undefined, 5);
+    expect(mockEnqueueMessage).toHaveBeenCalledWith("ping", "agent", "7", undefined, 5);
   });
 });

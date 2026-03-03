@@ -336,10 +336,6 @@ async function downloadTelegramFile(config: TelegramConfig, fileId: string): Pro
   return buffer;
 }
 
-async function downloadVoiceAsBase64(config: TelegramConfig, fileId: string): Promise<string> {
-  const buffer = await downloadTelegramFile(config, fileId);
-  return buffer.toString("base64");
-}
 
 export async function handleTelegramWebhook(
   body: unknown,
@@ -386,11 +382,19 @@ export async function handleTelegramWebhook(
   if (voiceOrAudio !== undefined) {
     const fileId = voiceOrAudio.file_id;
     // Telegram voice notes are always OGG Opus; fall back to that if mime_type is absent.
-    const audioContentType = voiceOrAudio.mime_type ?? "audio/ogg";
-    log.debug("[stavrobot] Telegram voice/audio message from chat:", chatId, "contentType:", audioContentType);
+    const mimeType = voiceOrAudio.mime_type ?? "audio/ogg";
+    log.debug("[stavrobot] Telegram voice/audio message from chat:", chatId, "mimeType:", mimeType);
     // Fire-and-forget: Telegram requires a fast 200 response, so we don't await.
-    void downloadVoiceAsBase64(config, fileId).then((audioBase64) => {
-      void enqueueMessage(formattedText ?? formattedCaption, "telegram", String(chatId), audioBase64, audioContentType);
+    void downloadTelegramFile(config, fileId).then(async (buffer) => {
+      const filename = `voice-${fileId}.ogg`;
+      const { storedPath } = await saveAttachment(buffer, filename, mimeType);
+      const attachment: FileAttachment = {
+        storedPath,
+        originalFilename: filename,
+        mimeType,
+        size: buffer.length,
+      };
+      void enqueueMessage(formattedText ?? formattedCaption, "telegram", String(chatId), [attachment]);
     }).catch((error: unknown) => {
       log.error("[stavrobot] Error downloading Telegram voice/audio:", error);
     });
@@ -413,7 +417,7 @@ export async function handleTelegramWebhook(
         mimeType,
         size: buffer.length,
       };
-      void enqueueMessage(formattedCaption, "telegram", String(chatId), undefined, undefined, [attachment]);
+      void enqueueMessage(formattedCaption, "telegram", String(chatId), [attachment]);
     }).catch((error: unknown) => {
       log.error("[stavrobot] Error downloading Telegram photo:", error);
     });
@@ -435,7 +439,7 @@ export async function handleTelegramWebhook(
         mimeType,
         size: buffer.length,
       };
-      void enqueueMessage(formattedCaption, "telegram", String(chatId), undefined, undefined, [attachment]);
+      void enqueueMessage(formattedCaption, "telegram", String(chatId), [attachment]);
     }).catch((error: unknown) => {
       log.error("[stavrobot] Error downloading Telegram document:", error);
     });

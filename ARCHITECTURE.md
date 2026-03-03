@@ -4,7 +4,7 @@ This document describes the architecture of Stavrobot, a single-user personal AI
 
 ## System overview
 
-Stavrobot is an LLM-powered personal assistant that runs as a set of Docker containers. The owner interacts with it via a CLI client, Signal, Telegram, or WhatsApp. The main agent can create subagents, each with their own conversation history, system prompt, and tool whitelist. Interlocutors are contact records that can be assigned to agents for inbound message routing. The LLM agent (Anthropic Claude) has access to a PostgreSQL database, a plugin system, sandboxed Python execution, cron scheduling, speech-to-text, and a self-programming subsystem that can create new tools at runtime.
+Stavrobot is an LLM-powered personal assistant that runs as a set of Docker containers. The owner interacts with it via a CLI client, Signal, Telegram, or WhatsApp. The main agent can create subagents, each with their own conversation history, system prompt, and tool whitelist. Interlocutors are contact records that can be assigned to agents for inbound message routing. The LLM agent (Anthropic Claude) has access to a PostgreSQL database, a plugin system, sandboxed Python execution, cron scheduling, and a self-programming subsystem that can create new tools at runtime.
 
 All messages flow through a single `POST /chat` endpoint on the main app. The agent processes one message at a time via an in-memory queue.
 
@@ -14,7 +14,7 @@ Seven containers are defined in `docker-compose.yml`. The signal-bridge is behin
 
 ### app (port 3000 external, 3001 internal)
 
-The main TypeScript HTTP server. Built with a multi-stage Dockerfile: the build stage compiles TypeScript, the production stage copies only compiled JS and production dependencies. Runs on Node.js 22. Installs `faad` and `lame` for audio format conversion (STT pipeline). WhatsApp integration runs in-process via the Baileys library (no separate container).
+The main TypeScript HTTP server. Built with a multi-stage Dockerfile: the build stage compiles TypeScript, the production stage copies only compiled JS and production dependencies. Runs on Node.js 22. WhatsApp integration runs in-process via the Baileys library (no separate container).
 
 **Two HTTP servers run in this container:**
 
@@ -148,14 +148,12 @@ The `pages` table stores HTML (or any MIME type) content created by the LLM agen
 All messages enter through `POST /chat` (either the external port 3000 with auth, or the internal port 3001 without auth). The request body is JSON with these fields:
 
 - `message` (string, optional): Text message.
-- `audio` (string, optional): Base64-encoded audio data.
-- `audioContentType` (string, optional): MIME type of the audio.
 - `attachments` (array, optional): Pre-saved file attachments with `storedPath`, `originalFilename`, `mimeType`, `size`.
-- `files` (array, optional): Raw file data as base64 with `data`, `filename`, `mimeType`. Used by the signal-bridge which cannot write to the app container's filesystem.
+- `files` (array, optional): Raw file data as base64 with `data`, `filename`, `mimeType`. Used by the signal-bridge which cannot write to the app container's filesystem. Audio files are sent through this field like any other file.
 - `source` (string, optional): Where the message came from (`"cli"`, `"signal"`, `"telegram"`, `"whatsapp"`, `"cron"`, `"coder"`, `"upload"`, `"plugin:name/tool"`).
 - `sender` (string, optional): Identifier of the sender (phone number, chat ID, etc.).
 
-At least one of `message`, `audio`, `attachments`, or `files` must be present.
+At least one of `message`, `attachments`, or `files` must be present.
 
 **Routing:** After the request is accepted, the queue resolves which agent the message belongs to:
 
@@ -179,12 +177,11 @@ Messages are processed sequentially through an in-memory queue (`queue.ts`). Onl
    - **Main agent:** base prompt (`system-prompt.txt`) + custom prompt (from config) + public hostname/timezone suffix + plugin list + memories (full content) + scratchpad titles.
    - **Subagent:** base subagent prompt (`agent-prompt.txt`) + public hostname/timezone suffix + plugin list (only if the agent's tool whitelist includes plugin tools) + the agent's `system_prompt` field from the database.
 4. Filters the tool list for subagents based on their `allowed_tools` whitelist. `send_agent_message` is always included regardless of the whitelist. The main agent always gets the full tool set.
-5. Transcribes audio via OpenAI STT if present.
-6. Reads image attachments into base64 for vision.
-7. Formats the user message with metadata: `Time`, `Source`, `Sender`, `Text`. The sender label is `"owner"` for the owner and the interlocutor's `display_name` for external senders.
-8. Validates API key/OAuth credentials before entering the agent loop.
-9. Subscribes to agent events to persist messages to the database (scoped to the agent, with `sender_identity_id` or `sender_agent_id` on the inbound user message) as they complete.
-10. Calls `agent.prompt()` which runs the LLM with tool use in a loop until the agent stops.
+5. Processes file attachments: appends a notification with the file path and metadata to the user message. Reads image attachments into base64 for vision.
+6. Formats the user message with metadata: `Time`, `Source`, `Sender`, `Text`. The sender label is `"owner"` for the owner and the interlocutor's `display_name` for external senders.
+7. Validates API key/OAuth credentials before entering the agent loop.
+8. Subscribes to agent events to persist messages to the database (scoped to the agent, with `sender_identity_id` or `sender_agent_id` on the inbound user message) as they complete.
+9. Calls `agent.prompt()` which runs the LLM with tool use in a loop until the agent stops.
 11. After completion, triggers background compaction if message count exceeds 40.
 
 ### Outbound message delivery
@@ -437,7 +434,6 @@ Key config sections:
 - `password`: HTTP Basic Auth password. Optional; if absent, no auth is enforced.
 - `[owner]`: Owner identity (name, Signal number, Telegram chat ID, WhatsApp number).
 - `[signal]`, `[telegram]`, `[whatsapp]`: Optional messaging integrations.
-- `[stt]`: Optional speech-to-text config (provider, API key, model).
 - `[coder]`: Optional coder config (model name for Claude Code).
 
 PostgreSQL connection is configured via environment variables (`PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`), defaulting to `postgres:5432/stavrobot`.

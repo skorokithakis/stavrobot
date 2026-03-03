@@ -137,7 +137,7 @@ export async function handleUploadRequest(
     log.debug("[stavrobot] File uploaded:", storedFilename, "size:", fileSize, "bytes");
 
     // Fire-and-forget: return the HTTP response immediately without waiting for the agent.
-    void enqueueMessage(undefined, "upload", undefined, undefined, undefined, [attachment]);
+    void enqueueMessage(undefined, "upload", undefined, [attachment]);
 
     response.writeHead(200, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ message: "File uploaded successfully", filename: storedFilename }));
