@@ -175,8 +175,8 @@ Messages are processed sequentially through an in-memory queue (`queue.ts`). Onl
 2. If a background compaction just finished for this agent, clears the compaction flag (the reload above already picks up the compacted state).
 3. Builds the system prompt, which differs by agent type:
    - **Main agent:** base prompt (`system-prompt.txt`) + custom prompt (from config) + public hostname/timezone suffix + plugin list + memories (full content) + scratchpad titles.
-   - **Subagent:** base subagent prompt (`agent-prompt.txt`) + public hostname/timezone suffix + plugin list (only if the agent's tool whitelist includes plugin tools) + the agent's `system_prompt` field from the database.
-4. Filters the tool list for subagents based on their `allowed_tools` whitelist. `send_agent_message` is always included regardless of the whitelist. The main agent always gets the full tool set.
+   - **Subagent:** base subagent prompt (`agent-prompt.txt`) + public hostname/timezone suffix + plugin list with tool names (filtered to the agent's `allowed_plugins`) + the agent's `system_prompt` field from the database.
+4. Filters the tool list for subagents. Core tools are restricted to a hard allowlist and controlled by `allowed_tools`. Plugin access is controlled separately by `allowed_plugins` — `run_plugin_tool` is implicitly included when `allowed_plugins` is non-empty. `send_agent_message` is always included. The main agent always gets the full tool set.
 5. Processes file attachments: appends a notification with the file path and metadata to the user message. Reads image attachments into base64 for vision.
 6. Formats the user message with metadata: `Time`, `Source`, `Sender`, `Text`. The sender label is `"owner"` for the owner and the interlocutor's `display_name` for external senders.
 7. Validates API key/OAuth credentials before entering the agent loop.
@@ -324,6 +324,7 @@ Subagent definitions. Agent 1 is always the main agent, seeded on startup.
 | name | TEXT | Display name |
 | system_prompt | TEXT | Agent-specific system prompt |
 | allowed_tools | TEXT[] | Whitelist of tool names (empty = no tools except send_agent_message) |
+| allowed_plugins | TEXT[] | Whitelist of plugin access (empty = no plugins, ["*"] = all) |
 | created_at | TIMESTAMPTZ | Creation timestamp |
 
 ### interlocutors

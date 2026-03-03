@@ -92,6 +92,8 @@ export async function initializeAgentsSchema(pool: pg.Pool): Promise<void> {
     )
   `);
 
+  await pool.query(`ALTER TABLE agents ADD COLUMN IF NOT EXISTS allowed_plugins TEXT[] NOT NULL DEFAULT '{}'`);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS interlocutors (
       id SERIAL PRIMARY KEY,
@@ -180,9 +182,9 @@ export async function seedOwner(pool: pg.Pool, ownerConfig: OwnerConfig): Promis
   // Seed the main agent (agent 1) first. Its system prompt is built at runtime from
   // files, so we store an empty string here and never read it back from the DB.
   const agentResult = await pool.query<{ id: number }>(
-    `INSERT INTO agents (id, name, system_prompt, allowed_tools)
-     VALUES (1, 'main', '', '{*}')
-     ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name
+    `INSERT INTO agents (id, name, system_prompt, allowed_tools, allowed_plugins)
+     VALUES (1, 'main', '', '{*}', '{*}')
+     ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, allowed_plugins = '{*}'
      RETURNING id`,
   );
   const seededMainAgentId = agentResult.rows[0].id;
@@ -259,6 +261,7 @@ export interface Agent {
   name: string;
   systemPrompt: string;
   allowedTools: string[];
+  allowedPlugins: string[];
   createdAt: Date;
 }
 
@@ -268,9 +271,10 @@ export async function loadAgent(pool: pg.Pool, agentId: number): Promise<Agent |
     name: string;
     system_prompt: string;
     allowed_tools: string[];
+    allowed_plugins: string[];
     created_at: Date;
   }>(
-    "SELECT id, name, system_prompt, allowed_tools, created_at FROM agents WHERE id = $1",
+    "SELECT id, name, system_prompt, allowed_tools, allowed_plugins, created_at FROM agents WHERE id = $1",
     [agentId],
   );
   if (result.rows.length === 0) {
@@ -282,6 +286,7 @@ export async function loadAgent(pool: pg.Pool, agentId: number): Promise<Agent |
     name: row.name,
     systemPrompt: row.system_prompt,
     allowedTools: row.allowed_tools,
+    allowedPlugins: row.allowed_plugins,
     createdAt: row.created_at,
   };
 }
@@ -291,10 +296,11 @@ export async function createAgent(
   name: string,
   systemPrompt: string,
   allowedTools: string[],
+  allowedPlugins: string[],
 ): Promise<number> {
   const result = await pool.query<{ id: number }>(
-    "INSERT INTO agents (name, system_prompt, allowed_tools) VALUES ($1, $2, $3) RETURNING id",
-    [name, systemPrompt, allowedTools],
+    "INSERT INTO agents (name, system_prompt, allowed_tools, allowed_plugins) VALUES ($1, $2, $3, $4) RETURNING id",
+    [name, systemPrompt, allowedTools, allowedPlugins],
   );
   const newId = result.rows[0].id;
   log.info(`[stavrobot] Agent created: id=${newId}, name=${name}`);
@@ -304,7 +310,7 @@ export async function createAgent(
 export async function updateAgent(
   pool: pg.Pool,
   agentId: number,
-  fields: { name?: string; systemPrompt?: string; allowedTools?: string[] },
+  fields: { name?: string; systemPrompt?: string; allowedTools?: string[]; allowedPlugins?: string[] },
 ): Promise<void> {
   const setClauses: string[] = [];
   const values: unknown[] = [];
@@ -321,6 +327,10 @@ export async function updateAgent(
   if (fields.allowedTools !== undefined) {
     setClauses.push(`allowed_tools = $${paramIndex++}`);
     values.push(fields.allowedTools);
+  }
+  if (fields.allowedPlugins !== undefined) {
+    setClauses.push(`allowed_plugins = $${paramIndex++}`);
+    values.push(fields.allowedPlugins);
   }
 
   if (setClauses.length === 0) {
@@ -341,15 +351,17 @@ export async function listAgents(pool: pg.Pool): Promise<Agent[]> {
     name: string;
     system_prompt: string;
     allowed_tools: string[];
+    allowed_plugins: string[];
     created_at: Date;
   }>(
-    "SELECT id, name, system_prompt, allowed_tools, created_at FROM agents ORDER BY id",
+    "SELECT id, name, system_prompt, allowed_tools, allowed_plugins, created_at FROM agents ORDER BY id",
   );
   return result.rows.map((row) => ({
     id: row.id,
     name: row.name,
     systemPrompt: row.system_prompt,
     allowedTools: row.allowed_tools,
+    allowedPlugins: row.allowed_plugins,
     createdAt: row.created_at,
   }));
 }

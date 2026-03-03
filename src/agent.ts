@@ -1079,8 +1079,13 @@ const PLUGIN_RUNNER_BASE_URL = "http://plugin-runner:3003";
  * (e.g. "manage_interlocutors.list") restrict the tool to only the named
  * action. Multiple dotted entries for the same tool combine. A bare name
  * takes precedence over any dotted entries for the same tool.
+ *
+ * `run_plugin_tool` is controlled exclusively by `allowedPlugins`, not by
+ * `allowedTools`. If `allowedPlugins` is empty, `run_plugin_tool` is excluded.
+ * If it contains `"*"`, `run_plugin_tool` is included as-is. Otherwise,
+ * `run_plugin_tool` is included with its execute wrapped to enforce access.
  */
-export function filterToolsForSubagent(tools: AgentTool[], allowedTools: string[]): AgentTool[] {
+export function filterToolsForSubagent(tools: AgentTool[], allowedTools: string[], allowedPlugins: string[]): AgentTool[] {
   // Always include send_agent_message regardless of the whitelist.
   const fullyAllowed = new Set<string>(["send_agent_message"]);
   const actionMap = new Map<string, Set<string>>();
@@ -1088,7 +1093,10 @@ export function filterToolsForSubagent(tools: AgentTool[], allowedTools: string[
   for (const entry of allowedTools) {
     const dotIndex = entry.indexOf(".");
     if (dotIndex === -1) {
-      fullyAllowed.add(entry);
+      // run_plugin_tool is controlled by allowedPlugins, not allowedTools.
+      if (entry !== "run_plugin_tool") {
+        fullyAllowed.add(entry);
+      }
     } else {
       const toolName = entry.slice(0, dotIndex);
       const action = entry.slice(dotIndex + 1);
@@ -1102,6 +1110,51 @@ export function filterToolsForSubagent(tools: AgentTool[], allowedTools: string[
   const result: AgentTool[] = [];
 
   for (const tool of tools) {
+    if (tool.name === "run_plugin_tool") {
+      // run_plugin_tool is handled separately based on allowedPlugins.
+      if (allowedPlugins.length === 0) {
+        // No plugin access: exclude run_plugin_tool entirely.
+        continue;
+      }
+      if (allowedPlugins.includes("*")) {
+        // Wildcard: include as-is, all plugins allowed.
+        result.push(tool);
+      } else {
+        // Specific plugins: wrap execute to enforce per-plugin/tool access.
+        const pluginAccessMap = buildPluginAccessMap(allowedPlugins);
+        const originalExecute = tool.execute;
+        const wrappedTool: AgentTool = {
+          ...tool,
+          execute: async (toolCallId, params, signal, onUpdate) => {
+            const raw = params as Record<string, unknown>;
+            const pluginName = typeof raw["plugin"] === "string" ? raw["plugin"] : undefined;
+            const toolName = typeof raw["tool"] === "string" ? raw["tool"] : undefined;
+            if (pluginName === undefined || toolName === undefined) {
+              return originalExecute(toolCallId, params, signal, onUpdate);
+            }
+            const access = pluginAccessMap.get(pluginName);
+            if (access === undefined) {
+              const errorMessage = `Plugin '${pluginName}' (tool '${toolName}') is not in this agent's allowed plugins.`;
+              return {
+                content: [{ type: "text" as const, text: errorMessage }],
+                details: { message: errorMessage },
+              };
+            }
+            if (access !== "*" && !access.has(toolName)) {
+              const errorMessage = `Plugin '${pluginName}' (tool '${toolName}') is not in this agent's allowed plugins.`;
+              return {
+                content: [{ type: "text" as const, text: errorMessage }],
+                details: { message: errorMessage },
+              };
+            }
+            return originalExecute(toolCallId, params, signal, onUpdate);
+          },
+        };
+        result.push(wrappedTool);
+      }
+      continue;
+    }
+
     if (fullyAllowed.has(tool.name)) {
       // Bare name entry: include as-is, all actions allowed.
       result.push(tool);
@@ -1141,6 +1194,34 @@ export function filterToolsForSubagent(tools: AgentTool[], allowedTools: string[
   return result;
 }
 
+/**
+ * Parses an allowedPlugins array into a map of pluginName -> Set<toolName> | "*".
+ * A bare plugin name (e.g. "weather") maps to "*" (all tools allowed).
+ * A dotted entry (e.g. "weather.get_forecast") maps to a set of allowed tool names.
+ * Multiple dotted entries for the same plugin are combined into one set.
+ */
+function buildPluginAccessMap(allowedPlugins: string[]): Map<string, Set<string> | "*"> {
+  const map = new Map<string, Set<string> | "*">();
+  for (const entry of allowedPlugins) {
+    const dotIndex = entry.indexOf(".");
+    if (dotIndex === -1) {
+      // Bare plugin name: all tools in this plugin are allowed.
+      map.set(entry, "*");
+    } else {
+      const pluginName = entry.slice(0, dotIndex);
+      const toolName = entry.slice(dotIndex + 1);
+      // A bare entry for the same plugin takes precedence over dotted entries.
+      if (map.get(pluginName) !== "*") {
+        if (!map.has(pluginName)) {
+          map.set(pluginName, new Set());
+        }
+        (map.get(pluginName) as Set<string>).add(toolName);
+      }
+    }
+  }
+  return map;
+}
+
 interface PluginSummary {
   name: string;
   description: string;
@@ -1148,30 +1229,99 @@ interface PluginSummary {
   permissions: string[];
 }
 
-async function fetchPluginListSection(): Promise<string | undefined> {
+interface PluginEntry {
+  name: string;
+  description: string;
+}
+
+interface PluginManifestTool {
+  name: string;
+  [key: string]: unknown;
+}
+
+interface PluginManifest {
+  tools?: PluginManifestTool[];
+  permissions?: string[];
+  [key: string]: unknown;
+}
+
+async function fetchPluginList(): Promise<PluginEntry[] | undefined> {
   try {
     const response = await fetch(`${PLUGIN_RUNNER_BASE_URL}/bundles`);
     if (!response.ok) {
-      log.warn(`[stavrobot] fetchPluginListSection: plugin runner returned ${response.status}`);
+      log.warn(`[stavrobot] fetchPluginList: plugin runner returned ${response.status}`);
       return undefined;
     }
     const data = await response.json() as { plugins: PluginSummary[] };
     // Skip plugins with an empty permissions array — they are soft-disabled.
     // Guard against missing permissions (e.g., during rolling deploys) by treating it as visible.
     const visiblePlugins = data.plugins.filter((plugin) => !Array.isArray(plugin.permissions) || plugin.permissions.length > 0);
-    if (visiblePlugins.length === 0) {
-      return undefined;
-    }
-    const lines = ["Available plugins:"];
-    for (const plugin of visiblePlugins) {
-      lines.push(`- ${plugin.name}: ${plugin.description}`);
-    }
-    log.debug(`[stavrobot] fetchPluginListSection: injecting ${visiblePlugins.length} plugin(s) into system prompt`);
-    return lines.join("\n");
+    return visiblePlugins.map((plugin) => ({ name: plugin.name, description: plugin.description }));
   } catch (error) {
-    log.warn("[stavrobot] fetchPluginListSection: failed to fetch plugin list:", error instanceof Error ? error.message : String(error));
+    log.warn("[stavrobot] fetchPluginList: failed to fetch plugin list:", error instanceof Error ? error.message : String(error));
     return undefined;
   }
+}
+
+/**
+ * Fetches the manifest for each plugin and returns a map of plugin name to the
+ * list of tool names the agent is allowed to use. The `accessMap` controls which
+ * tools are visible: a "*" entry means all tools in the manifest are included,
+ * while a Set entry restricts to only those tool names. Fetches are done in
+ * parallel; failures for individual plugins are logged and skipped.
+ */
+async function fetchPluginDetails(
+  pluginNames: string[],
+  accessMap: Map<string, Set<string> | "*">,
+): Promise<Map<string, string[]>> {
+  const results = await Promise.all(
+    pluginNames.map(async (name): Promise<[string, string[]] | null> => {
+      try {
+        const response = await fetch(`${PLUGIN_RUNNER_BASE_URL}/bundles/${name}`);
+        if (!response.ok) {
+          log.warn(`[stavrobot] fetchPluginDetails: plugin runner returned ${response.status} for plugin "${name}"`);
+          return null;
+        }
+        const manifest = await response.json() as PluginManifest;
+        const allTools = manifest.tools ?? [];
+        const access = accessMap.get(name);
+        let visibleTools: string[];
+        if (access === "*") {
+          visibleTools = allTools.map((tool) => tool.name);
+        } else if (access instanceof Set) {
+          // Only include tools the agent has explicit access to.
+          visibleTools = allTools.map((tool) => tool.name).filter((toolName) => (access as Set<string>).has(toolName));
+        } else {
+          visibleTools = [];
+        }
+        return [name, visibleTools];
+      } catch (error) {
+        log.warn(`[stavrobot] fetchPluginDetails: failed to fetch manifest for plugin "${name}":`, error instanceof Error ? error.message : String(error));
+        return null;
+      }
+    }),
+  );
+  const map = new Map<string, string[]>();
+  for (const result of results) {
+    if (result !== null) {
+      map.set(result[0], result[1]);
+    }
+  }
+  return map;
+}
+
+export function formatPluginListSection(plugins: PluginEntry[], toolDetails?: Map<string, string[]>): string {
+  const lines = ["Available plugins:"];
+  for (const plugin of plugins) {
+    lines.push(`- ${plugin.name}: ${plugin.description}`);
+    if (toolDetails !== undefined) {
+      const tools = toolDetails.get(plugin.name);
+      if (tools !== undefined && tools.length > 0) {
+        lines.push(`  Tools: ${tools.join(", ")}`);
+      }
+    }
+  }
+  return lines.join("\n");
 }
 
 export async function handlePrompt(
@@ -1207,7 +1357,7 @@ export async function handlePrompt(
   agent.replaceMessages(conversationMessages);
   log.debug(`[stavrobot] Loaded ${conversationMessages.length} messages for agent ${agentId}.`);
 
-  const pluginListSection = await fetchPluginListSection();
+  const allPlugins = await fetchPluginList();
 
   // Load the subagent's DB row once here so it can be used for both system
   // prompt assembly and tool filtering without a second DB round-trip.
@@ -1222,6 +1372,10 @@ export async function handlePrompt(
     const effectiveBasePrompt = (config.customPrompt !== undefined
       ? `${config.baseSystemPrompt}\n\n${config.customPrompt}`
       : config.baseSystemPrompt) + buildPromptSuffix(config.publicHostname);
+
+    const visiblePlugins = allPlugins !== undefined && allPlugins.length > 0 ? allPlugins : undefined;
+    const pluginListSection = visiblePlugins !== undefined ? formatPluginListSection(visiblePlugins) : undefined;
+    log.debug(`[stavrobot] fetchPluginList: injecting ${visiblePlugins?.length ?? 0} plugin(s) into system prompt`);
 
     const promptWithPlugins = pluginListSection !== undefined
       ? `${effectiveBasePrompt}\n\n${pluginListSection}`
@@ -1261,16 +1415,37 @@ export async function handlePrompt(
     }
   } else {
     const agentSystemPrompt = subagentRow?.systemPrompt ?? "";
-    const subagentAllowedTools = subagentRow?.allowedTools ?? [];
+    const subagentAllowedPlugins = subagentRow?.allowedPlugins ?? [];
 
     const basePrompt = config.baseAgentPrompt + buildPromptSuffix(config.publicHostname);
 
-    // Only inject the plugin list if the agent has plugin-related tools in its
-    // whitelist. Injecting it for agents that cannot use plugins would be noise.
-    const hasPluginTools = subagentAllowedTools.includes("*") ||
-      subagentAllowedTools.includes("run_plugin_tool") ||
-      subagentAllowedTools.includes("manage_plugins");
-    const promptWithPlugins = pluginListSection !== undefined && hasPluginTools
+    // Only inject the plugin list if the agent has plugin access. Injecting it
+    // for agents with no plugin access would be noise.
+    let pluginListSection: string | undefined;
+    if (subagentAllowedPlugins.length > 0 && allPlugins !== undefined && allPlugins.length > 0) {
+      let pluginsToShow: PluginEntry[];
+      let accessMap: Map<string, Set<string> | "*">;
+      if (subagentAllowedPlugins.includes("*")) {
+        pluginsToShow = allPlugins;
+        // Wildcard access: all tools in every plugin are visible.
+        accessMap = new Map(allPlugins.map((plugin) => [plugin.name, "*"]));
+      } else {
+        accessMap = buildPluginAccessMap(subagentAllowedPlugins);
+        // Filter to only the plugins the agent has access to. A dotted entry
+        // like "weather.get_forecast" still grants access to the "weather" plugin
+        // listing, so we extract the plugin name from both bare and dotted entries.
+        const accessiblePluginNames = new Set(accessMap.keys());
+        pluginsToShow = allPlugins.filter((plugin) => accessiblePluginNames.has(plugin.name));
+      }
+      if (pluginsToShow.length > 0) {
+        const pluginNames = pluginsToShow.map((plugin) => plugin.name);
+        const toolDetails = await fetchPluginDetails(pluginNames, accessMap);
+        pluginListSection = formatPluginListSection(pluginsToShow, toolDetails);
+        log.debug(`[stavrobot] fetchPluginList: injecting ${pluginsToShow.length} plugin(s) into subagent system prompt`);
+      }
+    }
+
+    const promptWithPlugins = pluginListSection !== undefined
       ? `${basePrompt}\n\n${pluginListSection}`
       : basePrompt;
 
@@ -1317,9 +1492,10 @@ export async function handlePrompt(
   const fullTools = agent.state.tools;
   if (!isMainAgent) {
     const allowedTools = subagentRow?.allowedTools ?? [];
+    const allowedPlugins = subagentRow?.allowedPlugins ?? [];
     // A wildcard means all tools are allowed (should only be agent 1 in practice).
     if (!allowedTools.includes("*")) {
-      const filteredTools = filterToolsForSubagent(fullTools, allowedTools);
+      const filteredTools = filterToolsForSubagent(fullTools, allowedTools, allowedPlugins);
       agent.setTools(filteredTools);
     }
   }

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { AgentMessage, AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
-import { serializeMessagesForSummary, filterToolsForSubagent } from "./agent.js";
+import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection } from "./agent.js";
 
 // Helper to build a minimal assistant message without filling in all required
 // fields that the serializer never reads (api, provider, model, usage).
@@ -192,32 +192,32 @@ function makeTool(name: string): AgentTool {
 describe("filterToolsForSubagent", () => {
   it("excludes tools not in the allowed list", () => {
     const tools = [makeTool("execute_sql"), makeTool("manage_cron"), makeTool("send_agent_message")];
-    const result = filterToolsForSubagent(tools, ["execute_sql"]);
+    const result = filterToolsForSubagent(tools, ["execute_sql"], []);
     expect(result.map((t) => t.name)).toEqual(["execute_sql", "send_agent_message"]);
   });
 
   it("always includes send_agent_message even when not listed", () => {
     const tools = [makeTool("execute_sql"), makeTool("send_agent_message")];
-    const result = filterToolsForSubagent(tools, ["execute_sql"]);
+    const result = filterToolsForSubagent(tools, ["execute_sql"], []);
     expect(result.map((t) => t.name)).toContain("send_agent_message");
   });
 
   it("includes send_agent_message only once when explicitly listed", () => {
     const tools = [makeTool("execute_sql"), makeTool("send_agent_message")];
-    const result = filterToolsForSubagent(tools, ["execute_sql", "send_agent_message"]);
+    const result = filterToolsForSubagent(tools, ["execute_sql", "send_agent_message"], []);
     const names = result.map((t) => t.name);
     expect(names.filter((n) => n === "send_agent_message")).toHaveLength(1);
   });
 
   it("includes a tool as-is when a bare name is given", async () => {
     const tool = makeTool("manage_interlocutors");
-    const result = filterToolsForSubagent([tool], ["manage_interlocutors"]);
+    const result = filterToolsForSubagent([tool], ["manage_interlocutors"], []);
     expect(result[0]).toBe(tool);
   });
 
   it("wraps execute for dotted entries and allows the listed action", async () => {
     const tool = makeTool("manage_interlocutors");
-    const result = filterToolsForSubagent([tool], ["manage_interlocutors.list"]);
+    const result = filterToolsForSubagent([tool], ["manage_interlocutors.list"], []);
     const wrapped = result.find((t) => t.name === "manage_interlocutors");
     expect(wrapped).toBeDefined();
     // The wrapped tool should not be the original object.
@@ -229,7 +229,7 @@ describe("filterToolsForSubagent", () => {
 
   it("wraps execute and rejects a disallowed action", async () => {
     const tool = makeTool("manage_interlocutors");
-    const result = filterToolsForSubagent([tool], ["manage_interlocutors.list"]);
+    const result = filterToolsForSubagent([tool], ["manage_interlocutors.list"], []);
     const wrapped = result.find((t) => t.name === "manage_interlocutors");
     const response = await wrapped!.execute("id1", { action: "create" }) as AgentToolResult<{ message: string }>;
     expect(response.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("not allowed") });
@@ -239,7 +239,7 @@ describe("filterToolsForSubagent", () => {
 
   it("combines multiple dotted entries for the same tool", async () => {
     const tool = makeTool("manage_interlocutors");
-    const result = filterToolsForSubagent([tool], ["manage_interlocutors.list", "manage_interlocutors.create"]);
+    const result = filterToolsForSubagent([tool], ["manage_interlocutors.list", "manage_interlocutors.create"], []);
     const wrapped = result.find((t) => t.name === "manage_interlocutors");
     // Both allowed actions should pass through.
     await wrapped!.execute("id1", { action: "list" });
@@ -253,7 +253,7 @@ describe("filterToolsForSubagent", () => {
   it("bare name takes precedence over dotted entries for the same tool", async () => {
     const tool = makeTool("manage_interlocutors");
     // Both a bare name and a dotted entry are present.
-    const result = filterToolsForSubagent([tool], ["manage_interlocutors", "manage_interlocutors.list"]);
+    const result = filterToolsForSubagent([tool], ["manage_interlocutors", "manage_interlocutors.list"], []);
     const included = result.find((t) => t.name === "manage_interlocutors");
     // The bare name wins: the original tool object is returned unchanged.
     expect(included).toBe(tool);
@@ -261,7 +261,7 @@ describe("filterToolsForSubagent", () => {
 
   it("rejects calls with no action param when tool is action-scoped", async () => {
     const tool = makeTool("some_tool");
-    const result = filterToolsForSubagent([tool], ["some_tool.list"]);
+    const result = filterToolsForSubagent([tool], ["some_tool.list"], []);
     const wrapped = result.find((t) => t.name === "some_tool");
     // No action field in params: should be rejected, not delegated.
     const response = await wrapped!.execute("id1", { query: "SELECT 1" }) as AgentToolResult<{ message: string }>;
@@ -273,7 +273,7 @@ describe("filterToolsForSubagent", () => {
 
   it("rejects calls with action: undefined when tool is action-scoped", async () => {
     const tool = makeTool("some_tool");
-    const result = filterToolsForSubagent([tool], ["some_tool.list"]);
+    const result = filterToolsForSubagent([tool], ["some_tool.list"], []);
     const wrapped = result.find((t) => t.name === "some_tool");
     // Explicit action: undefined should also be rejected.
     const response = await wrapped!.execute("id1", { action: undefined }) as AgentToolResult<{ message: string }>;
@@ -285,20 +285,20 @@ describe("filterToolsForSubagent", () => {
 
   it("returns empty list (except send_agent_message) when allowed list is empty", () => {
     const tools = [makeTool("execute_sql"), makeTool("manage_cron")];
-    const result = filterToolsForSubagent(tools, []);
+    const result = filterToolsForSubagent(tools, [], []);
     // send_agent_message is not in the tools array, so nothing is returned.
     expect(result).toHaveLength(0);
   });
 
   it("includes send_agent_message from tools when allowed list is empty", () => {
     const tools = [makeTool("execute_sql"), makeTool("send_agent_message")];
-    const result = filterToolsForSubagent(tools, []);
+    const result = filterToolsForSubagent(tools, [], []);
     expect(result.map((t) => t.name)).toEqual(["send_agent_message"]);
   });
 
   it("error message lists allowed actions sorted alphabetically", async () => {
     const tool = makeTool("manage_interlocutors");
-    const result = filterToolsForSubagent([tool], ["manage_interlocutors.update", "manage_interlocutors.list"]);
+    const result = filterToolsForSubagent([tool], ["manage_interlocutors.update", "manage_interlocutors.list"], []);
     const wrapped = result.find((t) => t.name === "manage_interlocutors");
     const response = await wrapped!.execute("id1", { action: "delete" }) as AgentToolResult<{ message: string }>;
     const text = (response.content[0] as { type: string; text: string }).text;
@@ -307,15 +307,165 @@ describe("filterToolsForSubagent", () => {
 
   it("wrapped tool description includes restriction notice with sorted actions", () => {
     const tool = makeTool("manage_interlocutors");
-    const result = filterToolsForSubagent([tool], ["manage_interlocutors.update", "manage_interlocutors.list"]);
+    const result = filterToolsForSubagent([tool], ["manage_interlocutors.update", "manage_interlocutors.list"], []);
     const wrapped = result.find((t) => t.name === "manage_interlocutors");
     expect(wrapped!.description).toBe("Tool manage_interlocutors (Restricted to actions: list, update.)");
   });
 
   it("unwrapped tool (bare name entry) has its original description unchanged", () => {
     const tool = makeTool("manage_interlocutors");
-    const result = filterToolsForSubagent([tool], ["manage_interlocutors"]);
+    const result = filterToolsForSubagent([tool], ["manage_interlocutors"], []);
     const included = result.find((t) => t.name === "manage_interlocutors");
     expect(included!.description).toBe("Tool manage_interlocutors");
+  });
+
+  // run_plugin_tool enforcement via allowedPlugins
+
+  it("excludes run_plugin_tool when allowedPlugins is empty", () => {
+    const tools = [makeTool("run_plugin_tool"), makeTool("send_agent_message")];
+    const result = filterToolsForSubagent(tools, [], []);
+    expect(result.map((t) => t.name)).not.toContain("run_plugin_tool");
+  });
+
+  it("excludes run_plugin_tool even when it appears in allowedTools (allowedPlugins is empty)", () => {
+    const tools = [makeTool("run_plugin_tool"), makeTool("send_agent_message")];
+    const result = filterToolsForSubagent(tools, ["run_plugin_tool"], []);
+    expect(result.map((t) => t.name)).not.toContain("run_plugin_tool");
+  });
+
+  it("includes run_plugin_tool as-is when allowedPlugins is ['*']", () => {
+    const tool = makeTool("run_plugin_tool");
+    const result = filterToolsForSubagent([tool], [], ["*"]);
+    const included = result.find((t) => t.name === "run_plugin_tool");
+    expect(included).toBe(tool);
+  });
+
+  it("includes run_plugin_tool (wrapped) when allowedPlugins has specific entries", () => {
+    const tool = makeTool("run_plugin_tool");
+    const result = filterToolsForSubagent([tool], [], ["weather"]);
+    const included = result.find((t) => t.name === "run_plugin_tool");
+    expect(included).toBeDefined();
+    expect(included).not.toBe(tool);
+  });
+
+  it("wrapped run_plugin_tool allows access to a fully-allowed plugin", async () => {
+    const tool = makeTool("run_plugin_tool");
+    const result = filterToolsForSubagent([tool], [], ["weather"]);
+    const wrapped = result.find((t) => t.name === "run_plugin_tool")!;
+    await wrapped.execute("id1", { plugin: "weather", tool: "get_forecast" });
+    expect(tool.execute).toHaveBeenCalled();
+  });
+
+  it("wrapped run_plugin_tool allows access to a specific tool in a plugin", async () => {
+    const tool = makeTool("run_plugin_tool");
+    const result = filterToolsForSubagent([tool], [], ["weather.get_forecast"]);
+    const wrapped = result.find((t) => t.name === "run_plugin_tool")!;
+    await wrapped.execute("id1", { plugin: "weather", tool: "get_forecast" });
+    expect(tool.execute).toHaveBeenCalled();
+  });
+
+  it("wrapped run_plugin_tool rejects a disallowed plugin", async () => {
+    const tool = makeTool("run_plugin_tool");
+    const result = filterToolsForSubagent([tool], [], ["weather"]);
+    const wrapped = result.find((t) => t.name === "run_plugin_tool")!;
+    const response = await wrapped.execute("id1", { plugin: "calendar", tool: "list_events" }) as AgentToolResult<{ message: string }>;
+    const text = (response.content[0] as { type: string; text: string }).text;
+    expect(text).toContain("calendar");
+    expect(text).toContain("list_events");
+    expect(text).toContain("not in this agent's allowed plugins");
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+
+  it("wrapped run_plugin_tool rejects a disallowed tool within an allowed plugin", async () => {
+    const tool = makeTool("run_plugin_tool");
+    const result = filterToolsForSubagent([tool], [], ["weather.get_forecast"]);
+    const wrapped = result.find((t) => t.name === "run_plugin_tool")!;
+    const response = await wrapped.execute("id1", { plugin: "weather", tool: "set_location" }) as AgentToolResult<{ message: string }>;
+    const text = (response.content[0] as { type: string; text: string }).text;
+    expect(text).toContain("weather");
+    expect(text).toContain("set_location");
+    expect(text).toContain("not in this agent's allowed plugins");
+    expect(tool.execute).not.toHaveBeenCalled();
+  });
+
+  it("wrapped run_plugin_tool allows multiple specific tools in the same plugin", async () => {
+    const tool = makeTool("run_plugin_tool");
+    const result = filterToolsForSubagent([tool], [], ["weather.get_forecast", "weather.get_current"]);
+    const wrapped = result.find((t) => t.name === "run_plugin_tool")!;
+    await wrapped.execute("id1", { plugin: "weather", tool: "get_forecast" });
+    await wrapped.execute("id2", { plugin: "weather", tool: "get_current" });
+    expect(tool.execute).toHaveBeenCalledTimes(2);
+    const response = await wrapped.execute("id3", { plugin: "weather", tool: "set_location" }) as AgentToolResult<{ message: string }>;
+    const text = (response.content[0] as { type: string; text: string }).text;
+    expect(text).toContain("not in this agent's allowed plugins");
+  });
+
+  it("bare plugin name takes precedence over dotted entries for the same plugin", async () => {
+    const tool = makeTool("run_plugin_tool");
+    // "weather" (bare) should allow all tools, even though "weather.get_forecast" is also listed.
+    const result = filterToolsForSubagent([tool], [], ["weather", "weather.get_forecast"]);
+    const wrapped = result.find((t) => t.name === "run_plugin_tool")!;
+    await wrapped.execute("id1", { plugin: "weather", tool: "any_tool" });
+    expect(tool.execute).toHaveBeenCalled();
+  });
+
+  it("wrapped run_plugin_tool passes through when plugin/tool params are missing", async () => {
+    const tool = makeTool("run_plugin_tool");
+    const result = filterToolsForSubagent([tool], [], ["weather"]);
+    const wrapped = result.find((t) => t.name === "run_plugin_tool")!;
+    // Missing params: delegate to original (let it handle the error).
+    await wrapped.execute("id1", { plugin: "weather" });
+    expect(tool.execute).toHaveBeenCalled();
+  });
+});
+
+describe("formatPluginListSection", () => {
+  it("formats a list of plugins without tool details", () => {
+    const plugins = [
+      { name: "hackernews", description: "Hacker News integration" },
+      { name: "weather", description: "Weather forecasts" },
+    ];
+    const result = formatPluginListSection(plugins);
+    expect(result).toBe(
+      "Available plugins:\n- hackernews: Hacker News integration\n- weather: Weather forecasts",
+    );
+  });
+
+  it("includes tool names when toolDetails is provided", () => {
+    const plugins = [{ name: "hackernews", description: "Hacker News integration" }];
+    const toolDetails = new Map([["hackernews", ["get_front_page", "get_comments"]]]);
+    const result = formatPluginListSection(plugins, toolDetails);
+    expect(result).toBe(
+      "Available plugins:\n- hackernews: Hacker News integration\n  Tools: get_front_page, get_comments",
+    );
+  });
+
+  it("omits the Tools line when the plugin has no tools in toolDetails", () => {
+    const plugins = [{ name: "hackernews", description: "Hacker News integration" }];
+    const toolDetails = new Map([["hackernews", [] as string[]]]);
+    const result = formatPluginListSection(plugins, toolDetails);
+    expect(result).toBe("Available plugins:\n- hackernews: Hacker News integration");
+  });
+
+  it("omits the Tools line when the plugin is absent from toolDetails", () => {
+    const plugins = [{ name: "hackernews", description: "Hacker News integration" }];
+    const toolDetails = new Map<string, string[]>();
+    const result = formatPluginListSection(plugins, toolDetails);
+    expect(result).toBe("Available plugins:\n- hackernews: Hacker News integration");
+  });
+
+  it("formats multiple plugins with mixed tool detail availability", () => {
+    const plugins = [
+      { name: "hackernews", description: "Hacker News integration" },
+      { name: "weather", description: "Weather forecasts" },
+    ];
+    const toolDetails = new Map([
+      ["hackernews", ["get_front_page", "get_comments"]],
+      ["weather", [] as string[]],
+    ]);
+    const result = formatPluginListSection(plugins, toolDetails);
+    expect(result).toBe(
+      "Available plugins:\n- hackernews: Hacker News integration\n  Tools: get_front_page, get_comments\n- weather: Weather forecasts",
+    );
   });
 });
