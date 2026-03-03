@@ -212,7 +212,12 @@ const PLUGINS_PAGE_HTML = `<!DOCTYPE html>
       box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
       border-radius: 8px;
       padding: 16px;
+      border-left: 4px solid #15803d;
+      transition: border-color 0.15s ease;
     }
+    .plugin-card.perm-all { border-left-color: #15803d; }
+    .plugin-card.perm-selected { border-left-color: #d97706; }
+    .plugin-card.perm-disabled { border-left-color: #dc2626; }
     .plugin-card.collapsed {
       cursor: pointer;
     }
@@ -544,7 +549,7 @@ const PLUGINS_PAGE_HTML = `<!DOCTYPE html>
         ? \`<button class="btn" onclick="updatePlugin('\${escapeHtml(plugin.name)}')">Update</button>\`
         : "";
 
-      card.className = "plugin-card collapsed";
+      card.className = "plugin-card collapsed perm-" + permissionsMode;
       card.innerHTML = \`
         <div class="plugin-header">
           <span class="plugin-name">\${escapeHtml(plugin.name)}</span>
@@ -705,6 +710,9 @@ const PLUGINS_PAGE_HTML = `<!DOCTYPE html>
       const data = await response.json();
       if (response.ok) {
         showCardMessage(name, data.message || "Permissions saved.", false);
+        const card = document.getElementById("card-" + name);
+        card.classList.remove("perm-all", "perm-selected", "perm-disabled");
+        card.classList.add("perm-" + select.value);
       } else {
         showCardMessage(name, data.error || data.message || "Failed to save permissions.", true);
       }
