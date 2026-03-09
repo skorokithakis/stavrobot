@@ -1,8 +1,20 @@
 import http from "http";
+import { Readable } from "stream";
 import { describe, it, expect, vi } from "vitest";
-import { handlePageQueryRequest, handleTelegramWebhookRequest, checkBasicAuth } from "./index.js";
+import { handlePageQueryRequest, handleTelegramWebhookRequest, checkBasicAuth, readRequestBody, handleChatRequest } from "./index.js";
 import type { Pool, QueryResult } from "pg";
 import type { TelegramConfig } from "./config.js";
+
+// Mock queue and uploads so handleChatRequest tests don't need real infrastructure.
+vi.mock("./queue.js", () => ({
+  enqueueMessage: vi.fn().mockResolvedValue("ok"),
+  initializeQueue: vi.fn(),
+}));
+
+vi.mock("./uploads.js", () => ({
+  handleUploadRequest: vi.fn(),
+  saveAttachment: vi.fn().mockResolvedValue({ storedPath: "/tmp/upload-test.txt", storedFilename: "upload-test.txt" }),
+}));
 
 // Minimal mock of http.IncomingMessage with only the fields the handler reads.
 function makeMockRequest(headers: Record<string, string> = {}): http.IncomingMessage {
@@ -187,5 +199,83 @@ describe("handleTelegramWebhookRequest secret verification", () => {
     );
 
     expect(response.statusCode).toBe(404);
+  });
+});
+
+// Helper to build a readable stream from a buffer, usable as IncomingMessage.
+function makeBodyRequest(body: Buffer, headers: Record<string, string> = {}): http.IncomingMessage {
+  const readable = Readable.from([body]);
+  return Object.assign(readable, {
+    headers: { "content-type": "application/json", ...headers },
+    method: "POST",
+    url: "/chat",
+  }) as unknown as http.IncomingMessage;
+}
+
+describe("readRequestBody size limit", () => {
+  it("returns the body when it is within the limit", async () => {
+    const body = Buffer.from(JSON.stringify({ message: "hello" }));
+    const request = makeBodyRequest(body);
+    const result = await readRequestBody(request, 1024);
+    expect(result).toBe(JSON.stringify({ message: "hello" }));
+  });
+
+  it("throws 'Request body too large' when the body exceeds maxBytes", async () => {
+    const body = Buffer.alloc(1025, "x");
+    const request = makeBodyRequest(body);
+    await expect(readRequestBody(request, 1024)).rejects.toThrow("Request body too large");
+  });
+});
+
+describe("handleChatRequest body size limit", () => {
+  it("returns 413 when the request body exceeds 1 MB", async () => {
+    const oversized = Buffer.alloc(1 * 1024 * 1024 + 1, "x");
+    const request = makeBodyRequest(oversized);
+    const response = makeMockResponse();
+
+    await handleChatRequest(request, response as unknown as http.ServerResponse);
+
+    expect(response.statusCode).toBe(413);
+    const parsed = JSON.parse(response.body ?? "{}") as { error: string };
+    expect(parsed.error).toBe("Request body too large");
+  });
+});
+
+describe("handleChatRequest base64 file handling", () => {
+  it("saves a small base64 file and returns 200", async () => {
+    const { saveAttachment: mockSaveAttachment } = await import("./uploads.js");
+    const saveMock = vi.mocked(mockSaveAttachment);
+    saveMock.mockClear();
+
+    const smallBase64 = Buffer.from("hello world").toString("base64");
+    const payload = JSON.stringify({
+      message: "test",
+      files: [{ data: smallBase64, filename: "small.txt", mimeType: "text/plain" }],
+    });
+
+    const request = makeBodyRequest(Buffer.from(payload));
+    const response = makeMockResponse();
+
+    await handleChatRequest(request, response as unknown as http.ServerResponse);
+
+    expect(response.statusCode).toBe(200);
+    expect(saveMock).toHaveBeenCalledOnce();
+  });
+
+  it("returns 413 when a base64 file payload exceeds the 1 MB body limit", async () => {
+    // A base64 payload for a 10 MB+ file is ~14 MB, which exceeds the 1 MB body
+    // limit. The body limit fires before the per-file 10 MB check is reached.
+    const oversizedBase64 = Buffer.alloc(10 * 1024 * 1024 + 1, "a").toString("base64");
+    const payload = JSON.stringify({
+      message: "hello",
+      files: [{ data: oversizedBase64, filename: "big.bin", mimeType: "application/octet-stream" }],
+    });
+
+    const request = makeBodyRequest(Buffer.from(payload));
+    const response = makeMockResponse();
+
+    await handleChatRequest(request, response as unknown as http.ServerResponse);
+
+    expect(response.statusCode).toBe(413);
   });
 });

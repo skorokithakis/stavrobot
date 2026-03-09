@@ -134,7 +134,8 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Database explorer</title>
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.3.2/dist/purify.min.js" integrity="sha384-8hAfZQ5Oqos5HLTHfR0sLvvwpcVI4fGhV+0Dj/HCcpkKaacivQs82XHmvLOnAhXn" crossorigin="anonymous"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -662,7 +663,7 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
       if (typeof value === "object") {
         return '<span class="json-value">' + escapeHtml(JSON.stringify(value)) + '</span>';
       }
-      return marked.parse(String(value));
+      return DOMPurify.sanitize(marked.parse(String(value)));
     }
 
     document.addEventListener("keydown", function(event) {

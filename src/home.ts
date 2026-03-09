@@ -62,7 +62,8 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Stavrobot</title>
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.3.2/dist/purify.min.js" integrity="sha384-8hAfZQ5Oqos5HLTHfR0sLvvwpcVI4fGhV+0Dj/HCcpkKaacivQs82XHmvLOnAhXn" crossorigin="anonymous"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; overflow: hidden; }
@@ -535,7 +536,7 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
 
           hideThinking();
           if (typeof marked !== "undefined" && typeof marked.parse === "function") {
-            const html = marked.parse(responseText);
+            const html = DOMPurify.sanitize(marked.parse(responseText));
             appendMessage("agent", html, true, null);
           } else {
             appendMessage("agent", responseText, false, null);

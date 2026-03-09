@@ -161,6 +161,25 @@ describe("handleUploadRequest", () => {
     expect(parsed.filename).toMatch(/^upload-.+\.txt$/);
   });
 
+  it("returns 413 when the uploaded file exceeds 10 MB", async () => {
+    const boundary = "largeboundary";
+    // Build a file that is just over 10 MB.
+    const oversizedData = Buffer.alloc(10 * 1024 * 1024 + 1, "x");
+    const body = buildMultipartBody(
+      boundary,
+      [],
+      { fieldname: "file", filename: "big.bin", contentType: "application/octet-stream", data: oversizedData },
+    );
+    const request = makeMultipartRequest(boundary, body);
+    const response = makeMockResponse();
+
+    await handleUploadRequest(request, response as unknown as http.ServerResponse);
+
+    expect(response.statusCode).toBe(413);
+    const parsed = JSON.parse(response.body ?? "{}") as { error: string };
+    expect(parsed.error).toMatch(/too large/i);
+  });
+
   it("uses the original filename when the filename field appears after the file part", async () => {
     // Build the multipart body with the file part first and the filename field
     // after, to exercise the race condition where busboy hasn't parsed the

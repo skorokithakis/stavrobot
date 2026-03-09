@@ -37,7 +37,7 @@ export async function handleUploadRequest(
   response: http.ServerResponse,
 ): Promise<void> {
   try {
-    const bb = busboy({ headers: request.headers });
+    const bb = busboy({ headers: request.headers, limits: { fileSize: 10 * 1024 * 1024 } });
 
     let originalFilename: string | undefined;
     let storedFilename: string | undefined;
@@ -45,6 +45,7 @@ export async function handleUploadRequest(
     let mimeType: string | undefined;
     let fileSize = 0;
     let fileFieldSeen = false;
+    let fileTruncated = false;
 
     const fileWritePromise = new Promise<void>((resolve, reject) => {
       // Both conditions must be true before resolving: the file write must be
@@ -77,7 +78,20 @@ export async function handleUploadRequest(
           chunks.push(chunk);
         });
 
+        fileStream.on("limit", () => {
+          fileTruncated = true;
+          log.warn("[stavrobot] Upload rejected: file exceeds 10 MB limit");
+        });
+
         fileStream.on("end", () => {
+          if (fileTruncated) {
+            // Discard the truncated data and signal completion so the caller
+            // can return a 413 response.
+            writeFinished = true;
+            maybeResolve();
+            return;
+          }
+
           const data = Buffer.concat(chunks);
           const effectiveMimeType = mimeType ?? "application/octet-stream";
 
@@ -117,6 +131,12 @@ export async function handleUploadRequest(
     request.pipe(bb);
 
     await fileWritePromise;
+
+    if (fileTruncated) {
+      response.writeHead(413, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: "File too large (max 10 MB)" }));
+      return;
+    }
 
     if (!fileFieldSeen || storedFilename === undefined || storedPath === undefined) {
       response.writeHead(400, { "Content-Type": "application/json" });

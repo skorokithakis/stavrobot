@@ -39,6 +39,13 @@ import { initializeWhatsApp } from "./whatsapp.js";
 import { serveHomePage } from "./home.js";
 import { log } from "./log.js";
 
+const CSP_HEADER_VALUE =
+  "default-src 'self'; " +
+  "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; " +
+  "style-src 'self' 'unsafe-inline'; " +
+  "img-src 'self' data:; " +
+  "connect-src 'self'";
+
 function isPublicRoute(method: string, pathname: string): boolean {
   if (method === "POST" && pathname === "/telegram/webhook") {
     return true;
@@ -67,15 +74,24 @@ export function checkBasicAuth(request: http.IncomingMessage, password: string):
   return providedPassword === password;
 }
 
-async function readRequestBody(request: http.IncomingMessage): Promise<string> {
+export async function readRequestBody(
+  request: http.IncomingMessage,
+  maxBytes: number = 1 * 1024 * 1024,
+): Promise<string> {
   const chunks: Buffer[] = [];
+  let totalBytes = 0;
   for await (const chunk of request) {
-    chunks.push(chunk);
+    totalBytes += (chunk as Buffer).length;
+    if (totalBytes > maxBytes) {
+      request.destroy();
+      throw new Error("Request body too large");
+    }
+    chunks.push(chunk as Buffer);
   }
   return Buffer.concat(chunks).toString("utf-8");
 }
 
-async function handleChatRequest(
+export async function handleChatRequest(
   request: http.IncomingMessage,
   response: http.ServerResponse
 ): Promise<void> {
@@ -140,6 +156,10 @@ async function handleChatRequest(
       log.debug("[stavrobot] Received", rawFiles.length, "file(s) via 'files' field");
       for (const rawFile of rawFiles) {
         const buffer = Buffer.from(rawFile.data, "base64");
+        if (buffer.length > 10 * 1024 * 1024) {
+          log.warn("[stavrobot] Skipping file", rawFile.filename, "— decoded size", buffer.length, "exceeds 10 MB limit");
+          continue;
+        }
         const { storedPath } = await saveAttachment(buffer, rawFile.filename, rawFile.mimeType);
         savedFromFiles.push({
           storedPath,
@@ -166,6 +186,11 @@ async function handleChatRequest(
     response.writeHead(200, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ response: assistantResponse }));
   } catch (error) {
+    if (error instanceof Error && error.message === "Request body too large") {
+      response.writeHead(413, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: "Request body too large" }));
+      return;
+    }
     log.error("[stavrobot] Error handling request:", error);
     const errorMessage = error instanceof Error ? error.message : String(error);
     response.writeHead(500, { "Content-Type": "application/json" });
@@ -227,6 +252,13 @@ export async function handleTelegramWebhookRequest(
 
     void handleTelegramWebhook(parsedBody, telegramConfig);
   } catch (error) {
+    if (error instanceof Error && error.message === "Request body too large") {
+      if (!response.headersSent) {
+        response.writeHead(413, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ error: "Request body too large" }));
+      }
+      return;
+    }
     log.error("[stavrobot] Error handling Telegram webhook request:", error);
     if (!response.headersSent) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -422,6 +454,8 @@ async function main(): Promise<void> {
   const server = http.createServer((request: http.IncomingMessage, response: http.ServerResponse): void => {
     const url = new URL(request.url || "/", `http://${request.headers.host}`);
     const pathname = url.pathname;
+
+    response.setHeader("Content-Security-Policy", CSP_HEADER_VALUE);
 
     if (config.password !== undefined && !isPublicRoute(request.method ?? "", pathname)) {
       if (!checkBasicAuth(request, config.password)) {
