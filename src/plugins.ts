@@ -1,5 +1,6 @@
 import http from "http";
 import { log } from "./log.js";
+import { getBaseStyles } from "./theme.js";
 
 const PLUGIN_RUNNER_BASE_URL = "http://plugin-runner:3003";
 
@@ -134,26 +135,12 @@ const PLUGINS_PAGE_HTML = `<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Plugins</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: #f8f9fa;
-      color: #1a1a1a;
-      padding: 24px;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
-    @media (max-width: 480px) {
-      body { padding: 12px; }
-    }
-    h1 {
-      font-size: 22px;
-      font-weight: 600;
-      margin-bottom: 20px;
-    }
+    ${getBaseStyles()}
+    body { padding: 24px; }
+    h1 { margin-bottom: 20px; }
     .install-form {
-      background: #fff;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+      background: var(--color-surface);
+      box-shadow: 0 1px 3px var(--color-shadow), 0 1px 2px var(--color-shadow-secondary);
       border-radius: 8px;
       padding: 16px;
       margin-bottom: 24px;
@@ -167,57 +154,54 @@ const PLUGINS_PAGE_HTML = `<!DOCTYPE html>
       min-width: 0;
       width: 100%;
       padding: 8px 10px;
-      border: 1px solid #ddd;
+      border: 1px solid var(--color-border);
       border-radius: 6px;
       font-size: 14px;
       transition: all 0.15s ease;
-    }
-    .install-form input[type="text"]:focus {
-      outline: none;
-      border-color: #d97706;
-      box-shadow: 0 0 0 3px rgba(217,119,6,0.1);
+      background: var(--color-surface);
+      color: var(--color-text);
     }
     .install-form button {
       padding: 8px 16px;
-      background: #d97706;
+      background: var(--color-accent);
       color: #fff;
       border: none;
       border-radius: 6px;
       font-size: 14px;
       cursor: pointer;
       white-space: nowrap;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+      box-shadow: 0 1px 2px var(--color-shadow);
       transition: all 0.15s ease;
       width: 100%;
     }
     @media (min-width: 481px) {
       .install-form button { width: auto; }
     }
-    .install-form button:hover:not(:disabled) { background: #b45309; box-shadow: 0 2px 4px rgba(0,0,0,0.15); transform: translateY(-1px); }
+    .install-form button:hover:not(:disabled) { background: var(--color-accent-hover); box-shadow: 0 2px 4px var(--color-shadow); transform: translateY(-1px); }
     .install-form button:disabled { opacity: 0.5; cursor: default; }
     #install-message {
       width: 100%;
       font-size: 13px;
       margin-top: 4px;
     }
-    #install-message.success { color: #15803d; }
-    #install-message.error { color: #dc2626; }
+    #install-message.success { color: var(--color-success); }
+    #install-message.error { color: var(--color-error); }
     #plugin-list {
       display: flex;
       flex-direction: column;
       gap: 16px;
     }
     .plugin-card {
-      background: #fff;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+      background: var(--color-surface);
+      box-shadow: 0 1px 3px var(--color-shadow), 0 1px 2px var(--color-shadow-secondary);
       border-radius: 8px;
       padding: 16px;
-      border-left: 4px solid #15803d;
+      border-left: 4px solid var(--color-success);
       transition: border-color 0.15s ease;
     }
-    .plugin-card.perm-all { border-left-color: #15803d; }
-    .plugin-card.perm-selected { border-left-color: #d97706; }
-    .plugin-card.perm-disabled { border-left-color: #dc2626; }
+    .plugin-card.perm-all { border-left-color: var(--color-success); }
+    .plugin-card.perm-selected { border-left-color: var(--color-accent); }
+    .plugin-card.perm-disabled { border-left-color: var(--color-error); }
     .plugin-card.collapsed {
       cursor: pointer;
     }
@@ -231,7 +215,7 @@ const PLUGINS_PAGE_HTML = `<!DOCTYPE html>
     .plugin-header .chevron {
       margin-left: auto;
       font-size: 10px;
-      color: #888;
+      color: var(--color-text-muted);
       transition: transform 0.2s ease;
       /* Rotated 90deg when expanded so it points down; default points right. */
       transform: rotate(0deg);
@@ -253,13 +237,13 @@ const PLUGINS_PAGE_HTML = `<!DOCTYPE html>
       font-size: 11px;
       padding: 2px 7px;
       border-radius: 10px;
-      background: #f0f0f0;
-      color: #666;
-      border: 1px solid #ddd;
+      background: var(--color-border-light);
+      color: var(--color-text-secondary);
+      border: 1px solid var(--color-border);
     }
     .plugin-description {
       font-size: 14px;
-      color: #444;
+      color: var(--color-text-secondary);
       margin-bottom: 12px;
     }
     .tools-section {
@@ -268,7 +252,7 @@ const PLUGINS_PAGE_HTML = `<!DOCTYPE html>
     .tools-section h3 {
       font-size: 12px;
       font-weight: 600;
-      color: #888;
+      color: var(--color-text-muted);
       text-transform: uppercase;
       letter-spacing: 0.5px;
       margin-bottom: 6px;
@@ -276,11 +260,11 @@ const PLUGINS_PAGE_HTML = `<!DOCTYPE html>
     .tool-item {
       font-size: 13px;
       padding: 4px 0;
-      border-bottom: 1px solid #f0f0f0;
+      border-bottom: 1px solid var(--color-border-light);
     }
     .tool-item:last-child { border-bottom: none; }
     .tool-name { font-weight: 500; }
-    .tool-description { color: #666; margin-left: 6px; }
+    .tool-description { color: var(--color-text-secondary); margin-left: 6px; }
     @media (max-width: 480px) {
       .tool-description { display: block; margin-left: 0; margin-top: 2px; }
     }
@@ -290,7 +274,7 @@ const PLUGINS_PAGE_HTML = `<!DOCTYPE html>
     .permissions-section h3 {
       font-size: 12px;
       font-weight: 600;
-      color: #888;
+      color: var(--color-text-muted);
       text-transform: uppercase;
       letter-spacing: 0.5px;
       margin-bottom: 8px;
@@ -300,16 +284,12 @@ const PLUGINS_PAGE_HTML = `<!DOCTYPE html>
     }
     .permissions-mode select {
       padding: 6px 8px;
-      border: 1px solid #ddd;
+      border: 1px solid var(--color-border);
       border-radius: 6px;
       font-size: 13px;
-      background: #fff;
+      background: var(--color-surface);
+      color: var(--color-text);
       transition: all 0.15s ease;
-    }
-    .permissions-mode select:focus {
-      outline: none;
-      border-color: #d97706;
-      box-shadow: 0 0 0 3px rgba(217,119,6,0.1);
     }
     .permissions-tools {
       margin-bottom: 8px;
@@ -330,7 +310,7 @@ const PLUGINS_PAGE_HTML = `<!DOCTYPE html>
     .config-section h3 {
       font-size: 12px;
       font-weight: 600;
-      color: #888;
+      color: var(--color-text-muted);
       text-transform: uppercase;
       letter-spacing: 0.5px;
       margin-bottom: 8px;
@@ -342,25 +322,22 @@ const PLUGINS_PAGE_HTML = `<!DOCTYPE html>
       display: block;
       font-size: 12px;
       font-weight: 500;
-      color: #555;
+      color: var(--color-text-secondary);
       margin-bottom: 3px;
     }
     .config-field label .required-mark {
-      color: #dc2626;
+      color: var(--color-error);
       margin-left: 2px;
     }
     .config-field input[type="text"] {
       width: 100%;
       padding: 6px 8px;
-      border: 1px solid #ddd;
+      border: 1px solid var(--color-border);
       border-radius: 6px;
       font-size: 13px;
       transition: all 0.15s ease;
-    }
-    .config-field input[type="text"]:focus {
-      outline: none;
-      border-color: #d97706;
-      box-shadow: 0 0 0 3px rgba(217,119,6,0.1);
+      background: var(--color-surface);
+      color: var(--color-text);
     }
     .actions {
       display: flex;
@@ -374,35 +351,36 @@ const PLUGINS_PAGE_HTML = `<!DOCTYPE html>
     }
     .btn {
       padding: 6px 14px;
-      border: 1px solid #ddd;
+      border: 1px solid var(--color-border);
       border-radius: 6px;
       font-size: 13px;
       cursor: pointer;
-      background: #fff;
+      background: var(--color-surface);
+      color: var(--color-text);
       transition: all 0.15s ease;
     }
-    .btn:hover:not(:disabled) { background: #f8f9fa; }
+    .btn:hover:not(:disabled) { background: var(--color-bg); }
     .btn:disabled { opacity: 0.5; cursor: default; }
     .btn-primary {
-      background: #d97706;
+      background: var(--color-accent);
       color: #fff;
-      border-color: #d97706;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+      border-color: var(--color-accent);
+      box-shadow: 0 1px 2px var(--color-shadow);
     }
-    .btn-primary:hover:not(:disabled) { background: #b45309; border-color: #b45309; box-shadow: 0 2px 4px rgba(0,0,0,0.15); transform: translateY(-1px); }
+    .btn-primary:hover:not(:disabled) { background: var(--color-accent-hover); border-color: var(--color-accent-hover); box-shadow: 0 2px 4px var(--color-shadow); transform: translateY(-1px); }
     .btn-danger {
-      color: #dc2626;
-      border-color: #fca5a5;
+      color: var(--color-error);
+      border-color: var(--color-error-border);
     }
-    .btn-danger:hover:not(:disabled) { background: #fef2f2; }
+    .btn-danger:hover:not(:disabled) { background: var(--color-error-bg); }
     .card-message {
       font-size: 13px;
       margin-top: 8px;
     }
-    .card-message.success { color: #15803d; }
-    .card-message.error { color: #dc2626; }
+    .card-message.success { color: var(--color-success); }
+    .card-message.error { color: var(--color-error); }
     #loading {
-      color: #888;
+      color: var(--color-text-muted);
       font-size: 14px;
       padding: 24px 0;
     }

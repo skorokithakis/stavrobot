@@ -2,6 +2,7 @@ import http from "http";
 import type pg from "pg";
 import type { Config } from "./config.js";
 import { log } from "./log.js";
+import { getBaseStyles } from "./theme.js";
 
 const startTime = Date.now();
 
@@ -65,43 +66,18 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.3.2/dist/purify.min.js" integrity="sha384-8hAfZQ5Oqos5HLTHfR0sLvvwpcVI4fGhV+0Dj/HCcpkKaacivQs82XHmvLOnAhXn" crossorigin="anonymous"></script>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    ${getBaseStyles()}
     html, body { height: 100%; overflow: hidden; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: #f8f9fa;
-      color: #1a1a1a;
       padding: 24px;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
       display: flex;
       flex-direction: column;
     }
-    @media (max-width: 480px) {
-      body { padding: 12px; }
-    }
-    h1 {
-      font-size: 22px;
-      font-weight: 600;
-      margin-bottom: 24px;
-      flex-shrink: 0;
-    }
-    h2 {
-      font-size: 16px;
-      font-weight: 600;
-      margin-bottom: 12px;
-    }
-    .section {
-      background: #fff;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 20px;
-    }
+    h1 { flex-shrink: 0; }
     .section a {
       display: block;
       font-size: 15px;
-      color: #d97706;
+      color: var(--color-accent);
       text-decoration: none;
       padding: 4px 0;
     }
@@ -113,14 +89,14 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
       justify-content: space-between;
       align-items: center;
       padding: 6px 0;
-      border-bottom: 1px solid #f0f0f0;
+      border-bottom: 1px solid var(--color-border-light);
       font-size: 14px;
     }
     .stat-row:last-child { border-bottom: none; }
-    .stat-label { color: #555; }
+    .stat-label { color: var(--color-text-secondary); }
     .stat-value { font-weight: 500; }
-    .enabled { color: #15803d; }
-    .disabled { color: #9ca3af; }
+    .enabled { color: var(--color-success); }
+    .disabled { color: var(--color-text-disabled); }
 
     /* Page layout */
     .page-layout {
@@ -163,8 +139,8 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
 
     /* Chat panel */
     .chat-panel {
-      background: #fff;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+      background: var(--color-surface);
+      box-shadow: 0 1px 3px var(--color-shadow), 0 1px 2px var(--color-shadow-secondary);
       border-radius: 8px;
       display: flex;
       flex-direction: column;
@@ -173,7 +149,7 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
     }
     .chat-panel-header {
       padding: 16px;
-      border-bottom: 1px solid #f0f0f0;
+      border-bottom: 1px solid var(--color-border-light);
       flex-shrink: 0;
     }
     .chat-messages {
@@ -200,7 +176,7 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
     .chat-message-sender {
       font-size: 11px;
       font-weight: 600;
-      color: #888;
+      color: var(--color-text-muted);
       margin-bottom: 4px;
       text-transform: uppercase;
       letter-spacing: 0.04em;
@@ -213,18 +189,18 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
       word-break: break-word;
     }
     .chat-message.user .chat-message-bubble {
-      background: #fef3c7;
-      color: #1a1a1a;
+      background: var(--color-user-bubble);
+      color: var(--color-text);
       border-bottom-right-radius: 4px;
     }
     .chat-message.agent .chat-message-bubble {
-      background: #f3f4f6;
-      color: #1a1a1a;
+      background: var(--color-agent-bubble);
+      color: var(--color-text);
       border-bottom-left-radius: 4px;
     }
     .chat-message.error .chat-message-bubble {
-      background: #fee2e2;
-      color: #991b1b;
+      background: var(--color-error-bg);
+      color: var(--color-error);
     }
     /* Markdown content inside agent bubbles */
     .chat-message-bubble p { margin-bottom: 8px; }
@@ -233,7 +209,7 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
     .chat-message-bubble ol { margin: 8px 0 8px 20px; }
     .chat-message-bubble li { margin-bottom: 4px; }
     .chat-message-bubble pre {
-      background: #f5f5f5;
+      background: var(--color-code-bg);
       border-radius: 6px;
       padding: 10px 12px;
       overflow-x: auto;
@@ -244,7 +220,7 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
     .chat-message-bubble code {
       font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
       font-size: 13px;
-      background: #f5f5f5;
+      background: var(--color-code-bg);
       padding: 1px 4px;
       border-radius: 3px;
     }
@@ -253,10 +229,10 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
       padding: 0;
     }
     .chat-message-bubble blockquote {
-      border-left: 3px solid #d97706;
+      border-left: 3px solid var(--color-accent);
       margin: 8px 0;
       padding-left: 12px;
-      color: #555;
+      color: var(--color-text-secondary);
     }
     .chat-message-bubble h1,
     .chat-message-bubble h2,
@@ -266,7 +242,7 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
       margin: 10px 0 6px;
     }
     .chat-message-bubble a {
-      color: #d97706;
+      color: var(--color-accent);
       text-decoration: underline;
     }
 
@@ -276,17 +252,17 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
       align-items: center;
       gap: 6px;
       padding: 10px 14px;
-      background: #f3f4f6;
+      background: var(--color-agent-bubble);
       border-radius: 12px;
       border-bottom-left-radius: 4px;
       font-size: 13px;
-      color: #888;
+      color: var(--color-text-muted);
       align-self: flex-start;
     }
     .thinking-dot {
       width: 6px;
       height: 6px;
-      background: #d97706;
+      background: var(--color-accent);
       border-radius: 50%;
       animation: thinking-pulse 1.2s ease-in-out infinite;
     }
@@ -300,7 +276,7 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
     /* Chat input area */
     .chat-input-area {
       padding: 12px 16px;
-      border-top: 1px solid #f0f0f0;
+      border-top: 1px solid var(--color-border-light);
       display: flex;
       gap: 8px;
       align-items: flex-end;
@@ -308,7 +284,7 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
     }
     .chat-textarea {
       flex: 1;
-      border: 1px solid #e5e7eb;
+      border: 1px solid var(--color-border);
       border-radius: 8px;
       padding: 8px 12px;
       font-family: inherit;
@@ -320,16 +296,18 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
       overflow-y: auto;
       outline: none;
       transition: border-color 0.15s;
+      background: var(--color-surface);
+      color: var(--color-text);
     }
     .chat-textarea:focus {
-      border-color: #d97706;
+      border-color: var(--color-accent);
     }
     .chat-textarea:disabled {
-      background: #f9fafb;
-      color: #9ca3af;
+      background: var(--color-input-disabled-bg);
+      color: var(--color-text-disabled);
     }
     .chat-send-btn {
-      background: #d97706;
+      background: var(--color-accent);
       color: #fff;
       border: none;
       border-radius: 8px;
@@ -344,11 +322,11 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
       flex-shrink: 0;
     }
     .chat-send-btn:hover:not(:disabled) {
-      background: #b45309;
+      background: var(--color-accent-hover);
     }
     .chat-send-btn:disabled {
-      background: #e5e7eb;
-      color: #9ca3af;
+      background: var(--color-btn-disabled-bg);
+      color: var(--color-text-disabled);
       cursor: not-allowed;
     }
   </style>

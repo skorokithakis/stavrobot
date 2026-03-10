@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import type { Config } from "./config.js";
 import { log } from "./log.js";
+import { getBaseStyles } from "./theme.js";
 
 const CLIENT_ID = atob("OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl");
 const AUTHORIZATION_URL = "https://claude.ai/oauth/authorize";
@@ -16,21 +17,15 @@ const LOGIN_PAGE_HTML = `<!DOCTYPE html>
   <meta charset="UTF-8">
   <title>Log in with Anthropic</title>
   <style>
+    ${getBaseStyles()}
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       max-width: 440px;
       margin: 80px auto;
       padding: 0 24px;
-      color: #1a1a1a;
       line-height: 1.5;
     }
-    h1 {
-      font-size: 1.5em;
-      font-weight: 600;
-      margin-bottom: 24px;
-    }
-    p { color: #666; margin-bottom: 16px; }
-    a { color: #d97706; text-decoration: none; font-weight: 500; }
+    p { color: var(--color-text-secondary); margin-bottom: 16px; }
+    a { color: var(--color-accent); text-decoration: none; font-weight: 500; }
     a:hover { text-decoration: underline; }
     input {
       width: 100%;
@@ -38,22 +33,23 @@ const LOGIN_PAGE_HTML = `<!DOCTYPE html>
       padding: 12px;
       margin: 8px 0 16px;
       font-size: 1em;
-      border: 1px solid #ccc;
+      border: 1px solid var(--color-border);
       border-radius: 6px;
+      background: var(--color-surface);
+      color: var(--color-text);
     }
-    input:focus { outline: none; border-color: #d97706; }
     button {
       padding: 12px 24px;
       font-size: 1em;
       cursor: pointer;
-      background: #d97706;
+      background: var(--color-accent);
       color: #fff;
       border: none;
       border-radius: 6px;
       font-weight: 500;
     }
-    button:hover { background: #b45309; }
-    #status { margin-top: 20px; color: #666; }
+    button:hover { background: var(--color-accent-hover); }
+    #status { margin-top: 20px; color: var(--color-text-secondary); }
   </style>
 </head>
 <body>

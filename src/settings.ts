@@ -3,6 +3,7 @@ import type { Config } from "./config.js";
 import { getAllowlist, saveAllowlist, getOwnerIdentities } from "./allowlist.js";
 import type { Allowlist } from "./allowlist.js";
 import { log } from "./log.js";
+import { getBaseStyles } from "./theme.js";
 
 async function readRequestBody(request: http.IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
@@ -176,35 +177,8 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Settings</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: #f8f9fa;
-      color: #1a1a1a;
-      padding: 24px;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
-    @media (max-width: 480px) {
-      body { padding: 12px; }
-    }
-    h1 {
-      font-size: 22px;
-      font-weight: 600;
-      margin-bottom: 24px;
-    }
-    h2 {
-      font-size: 16px;
-      font-weight: 600;
-      margin-bottom: 12px;
-    }
-    .section {
-      background: #fff;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 20px;
-    }
+    ${getBaseStyles()}
+    body { padding: 24px; }
     .entry-list {
       list-style: none;
       margin-bottom: 12px;
@@ -214,19 +188,19 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
       align-items: center;
       gap: 8px;
       padding: 6px 0;
-      border-bottom: 1px solid #f0f0f0;
+      border-bottom: 1px solid var(--color-border-light);
       font-size: 14px;
     }
     .entry-list li:last-child { border-bottom: none; }
     .entry-value { flex: 1; }
     .owner-label {
       font-size: 12px;
-      color: #888;
+      color: var(--color-text-muted);
       font-style: italic;
     }
     .note-text {
       font-size: 13px;
-      color: #888;
+      color: var(--color-text-muted);
     }
     .add-row {
       display: flex;
@@ -238,51 +212,49 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
       flex: 1;
       min-width: 0;
       padding: 7px 10px;
-      border: 1px solid #ddd;
+      border: 1px solid var(--color-border);
       border-radius: 6px;
       font-size: 14px;
       transition: all 0.15s ease;
-    }
-    .add-row input[type="text"]:focus {
-      outline: none;
-      border-color: #d97706;
-      box-shadow: 0 0 0 3px rgba(217,119,6,0.1);
+      background: var(--color-surface);
+      color: var(--color-text);
     }
     .btn {
       padding: 7px 14px;
-      border: 1px solid #ddd;
+      border: 1px solid var(--color-border);
       border-radius: 6px;
       font-size: 13px;
       cursor: pointer;
-      background: #fff;
+      background: var(--color-surface);
       transition: all 0.15s ease;
       white-space: nowrap;
+      color: var(--color-text);
     }
-    .btn:hover:not(:disabled) { background: #f8f9fa; }
+    .btn:hover:not(:disabled) { background: var(--color-bg); }
     .btn:disabled { opacity: 0.5; cursor: default; }
     .btn-primary {
-      background: #d97706;
+      background: var(--color-accent);
       color: #fff;
-      border-color: #d97706;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+      border-color: var(--color-accent);
+      box-shadow: 0 1px 2px var(--color-shadow);
     }
-    .btn-primary:hover:not(:disabled) { background: #b45309; border-color: #b45309; box-shadow: 0 2px 4px rgba(0,0,0,0.15); transform: translateY(-1px); }
+    .btn-primary:hover:not(:disabled) { background: var(--color-accent-hover); border-color: var(--color-accent-hover); box-shadow: 0 2px 4px var(--color-shadow); transform: translateY(-1px); }
     .btn-danger {
-      color: #dc2626;
-      border-color: #fca5a5;
+      color: var(--color-error);
+      border-color: var(--color-error-border);
       padding: 4px 10px;
       font-size: 12px;
     }
-    .btn-danger:hover:not(:disabled) { background: #fef2f2; }
+    .btn-danger:hover:not(:disabled) { background: var(--color-error-bg); }
     #status {
       font-size: 13px;
       margin-top: 8px;
       display: block;
     }
-    #status.success { color: #15803d; }
-    #status.error { color: #dc2626; }
+    #status.success { color: var(--color-success); }
+    #status.error { color: var(--color-error); }
     #loading {
-      color: #888;
+      color: var(--color-text-muted);
       font-size: 14px;
     }
   </style>
@@ -344,7 +316,7 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
     function renderSignalList() {
       const list = document.getElementById("signal-list");
       if (signalEntries.length === 0) {
-        list.innerHTML = '<li style="color:#888;font-size:13px;">No entries.</li>';
+        list.innerHTML = '<li style="color:var(--color-text-muted);font-size:13px;">No entries.</li>';
         return;
       }
       list.innerHTML = signalEntries.map((entry, index) => {
@@ -364,7 +336,7 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
     function renderTelegramList() {
       const list = document.getElementById("telegram-list");
       if (telegramEntries.length === 0) {
-        list.innerHTML = '<li style="color:#888;font-size:13px;">No entries.</li>';
+        list.innerHTML = '<li style="color:var(--color-text-muted);font-size:13px;">No entries.</li>';
         return;
       }
       list.innerHTML = telegramEntries.map((entry, index) => {
@@ -385,7 +357,7 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
     function renderWhatsappList() {
       const list = document.getElementById("whatsapp-list");
       if (whatsappEntries.length === 0) {
-        list.innerHTML = '<li style="color:#888;font-size:13px;">No entries.</li>';
+        list.innerHTML = '<li style="color:var(--color-text-muted);font-size:13px;">No entries.</li>';
         return;
       }
       list.innerHTML = whatsappEntries.map((entry, index) => {
@@ -635,34 +607,12 @@ const SETTINGS_HUB_HTML = `<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Settings</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: #f8f9fa;
-      color: #1a1a1a;
-      padding: 24px;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
-    @media (max-width: 480px) {
-      body { padding: 12px; }
-    }
-    h1 {
-      font-size: 22px;
-      font-weight: 600;
-      margin-bottom: 24px;
-    }
-    .section {
-      background: #fff;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 20px;
-    }
+    ${getBaseStyles()}
+    body { padding: 24px; }
     .section a {
       display: block;
       font-size: 15px;
-      color: #d97706;
+      color: var(--color-accent);
       text-decoration: none;
       padding: 4px 0;
     }

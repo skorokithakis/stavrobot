@@ -1,5 +1,6 @@
 import http from "http";
 import pg from "pg";
+import { getBaseStyles } from "./theme.js";
 
 export interface TableInfo {
   name: string;
@@ -137,27 +138,22 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
   <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.3.2/dist/purify.min.js" integrity="sha384-8hAfZQ5Oqos5HLTHfR0sLvvwpcVI4fGhV+0Dj/HCcpkKaacivQs82XHmvLOnAhXn" crossorigin="anonymous"></script>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    ${getBaseStyles()}
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       display: flex;
       height: 100vh;
-      color: #1a1a1a;
-      background: #f8f9fa;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
     }
     #sidebar {
       width: 240px;
-      background: #fff;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+      background: var(--color-surface);
+      box-shadow: 0 1px 3px var(--color-shadow), 0 1px 2px var(--color-shadow-secondary);
       overflow-y: auto;
       padding: 16px 0;
     }
     #sidebar h2 {
       font-size: 14px;
       font-weight: 600;
-      color: #666;
+      color: var(--color-text-secondary);
       padding: 0 16px 12px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
@@ -170,13 +166,13 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
       border-left: 3px solid transparent;
       transition: all 0.15s ease;
     }
-    .table-item:hover { background: #f8f9fa; }
+    .table-item:hover { background: var(--color-bg); }
     .table-item.selected {
-      background: #fff7ed;
-      border-left-color: #d97706;
+      background: var(--color-accent-light);
+      border-left-color: var(--color-accent);
     }
     .table-name { font-weight: 500; }
-    .row-count { color: #999; font-size: 13px; }
+    .row-count { color: var(--color-text-faint); font-size: 13px; }
     #mobile-topbar {
       display: none;
     }
@@ -188,8 +184,8 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
     }
     #header {
       padding: 20px 24px;
-      background: #fff;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+      background: var(--color-surface);
+      box-shadow: 0 1px 3px var(--color-shadow), 0 1px 2px var(--color-shadow-secondary);
     }
     #header h1 {
       font-size: 20px;
@@ -198,16 +194,16 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
     }
     #schema {
       font-size: 13px;
-      color: #666;
+      color: var(--color-text-secondary);
       margin-top: 8px;
     }
     #schema summary {
       cursor: pointer;
-      color: #888;
+      color: var(--color-text-muted);
       font-size: 12px;
       user-select: none;
     }
-    #schema summary:hover { color: #666; }
+    #schema summary:hover { color: var(--color-text-secondary); }
     #schema-list {
       margin-top: 8px;
       padding-left: 4px;
@@ -215,9 +211,9 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
     .schema-row {
       padding: 3px 0;
     }
-    .col-name { color: #1a1a1a; font-weight: 500; }
-    .col-type { color: #888; margin-left: 8px; }
-    .col-nullable { color: #aaa; font-style: italic; margin-left: 8px; }
+    .col-name { color: var(--color-text); font-weight: 500; }
+    .col-type { color: var(--color-text-muted); margin-left: 8px; }
+    .col-nullable { color: var(--color-text-faint); font-style: italic; margin-left: 8px; }
     #content {
       flex: 1;
       overflow: auto;
@@ -227,40 +223,40 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
       width: 100%;
       border-collapse: collapse;
       font-size: 13px;
-      background: #fff;
+      background: var(--color-surface);
     }
     th, td {
       text-align: left;
       padding: 10px 12px;
-      border-bottom: 1px solid #eee;
+      border-bottom: 1px solid var(--color-border-medium);
       max-width: 300px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     th {
-      background: #fafafa;
+      background: var(--color-table-header-bg);
       font-weight: 600;
       position: sticky;
       top: 0;
-      border-bottom: 2px solid #ddd;
+      border-bottom: 2px solid var(--color-table-header-border);
       cursor: pointer;
       user-select: none;
       transition: background 0.15s ease;
     }
-    th:hover { background: #f0f0f0; }
-    th .sort-indicator { margin-left: 4px; color: #999; }
+    th:hover { background: var(--color-border-light); }
+    th .sort-indicator { margin-left: 4px; color: var(--color-text-faint); }
     tbody tr { cursor: pointer; transition: background 0.15s ease; }
     tbody tr.expanded td {
-      background: #fafafa;
+      background: var(--color-table-header-bg);
       white-space: pre-wrap;
       word-break: break-word;
       max-width: none;
     }
     #pagination {
       padding: 12px 24px;
-      background: #fff;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+      background: var(--color-surface);
+      box-shadow: 0 1px 3px var(--color-shadow), 0 1px 2px var(--color-shadow-secondary);
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -270,30 +266,31 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
       padding: 6px 12px;
       font-size: 13px;
       cursor: pointer;
-      background: #fff;
-      border: 1px solid #ddd;
+      background: var(--color-surface);
+      color: var(--color-text);
+      border: 1px solid var(--color-border);
       border-radius: 6px;
       margin-left: 8px;
       transition: all 0.15s ease;
     }
-    #pagination button:hover:not(:disabled) { background: #f8f9fa; }
+    #pagination button:hover:not(:disabled) { background: var(--color-bg); }
     #pagination button:disabled { opacity: 0.5; cursor: default; }
     #empty {
       display: flex;
       align-items: center;
       justify-content: center;
       height: 100%;
-      color: #999;
+      color: var(--color-text-faint);
       font-size: 15px;
     }
-    .null-value { color: #aaa; font-style: italic; }
-    .json-value { font-family: monospace; font-size: 12px; }
+    .null-value { color: var(--color-text-faint); font-style: italic; }
+    .json-value { font-family: monospace; font-size: 12px; color: var(--color-text); }
     #row-modal {
       display: none;
       position: fixed;
       inset: 0;
       z-index: 100;
-      background: rgba(0, 0, 0, 0.45);
+      background: var(--color-modal-backdrop);
       align-items: center;
       justify-content: center;
     }
@@ -301,7 +298,7 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
       display: flex;
     }
     #row-modal-card {
-      background: #fff;
+      background: var(--color-surface);
       width: 100%;
       max-width: calc(100vw - 48px);
       max-height: calc(100vh - 48px);
@@ -324,13 +321,13 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
       border: none;
       font-size: 20px;
       cursor: pointer;
-      color: #666;
+      color: var(--color-text-secondary);
       line-height: 1;
       padding: 4px;
     }
     .modal-field {
       padding: 10px 0;
-      border-bottom: 1px solid #eee;
+      border-bottom: 1px solid var(--color-border-medium);
     }
     .modal-field:last-child {
       border-bottom: none;
@@ -338,7 +335,7 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
     .modal-field-label {
       font-size: 11px;
       font-weight: 600;
-      color: #888;
+      color: var(--color-text-muted);
       text-transform: uppercase;
       letter-spacing: 0.4px;
       margin-bottom: 4px;
@@ -361,8 +358,8 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
       #mobile-topbar {
         display: flex;
         align-items: center;
-        background: #fff;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+        background: var(--color-surface);
+        box-shadow: 0 1px 3px var(--color-shadow), 0 1px 2px var(--color-shadow-secondary);
         padding: 10px 12px;
         gap: 8px;
         flex-shrink: 0;
@@ -370,17 +367,17 @@ const EXPLORER_PAGE_HTML = `<!DOCTYPE html>
       #mobile-topbar label {
         font-size: 13px;
         font-weight: 600;
-        color: #666;
+        color: var(--color-text-secondary);
         white-space: nowrap;
       }
       #mobile-table-select {
         flex: 1;
         font-size: 14px;
         padding: 6px 8px;
-        border: 1px solid #ddd;
+        border: 1px solid var(--color-border);
         border-radius: 6px;
-        background: #f8f9fa;
-        color: #1a1a1a;
+        background: var(--color-bg);
+        color: var(--color-text);
       }
       #content {
         overflow-x: auto;

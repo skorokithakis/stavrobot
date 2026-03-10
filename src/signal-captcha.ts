@@ -1,5 +1,6 @@
 import http from "http";
 import { log } from "./log.js";
+import { getBaseStyles } from "./theme.js";
 
 const SIGNAL_CAPTCHA_PAGE_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -8,30 +9,8 @@ const SIGNAL_CAPTCHA_PAGE_HTML = `<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Signal captcha</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: #f8f9fa;
-      color: #1a1a1a;
-      padding: 24px;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
-    @media (max-width: 480px) {
-      body { padding: 12px; }
-    }
-    h1 {
-      font-size: 22px;
-      font-weight: 600;
-      margin-bottom: 24px;
-    }
-    .section {
-      background: #fff;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 20px;
-    }
+    ${getBaseStyles()}
+    body { padding: 24px; }
     p {
       font-size: 14px;
       line-height: 1.6;
@@ -47,7 +26,7 @@ const SIGNAL_CAPTCHA_PAGE_HTML = `<!DOCTYPE html>
       margin-bottom: 6px;
     }
     a {
-      color: #d97706;
+      color: var(--color-accent);
       text-decoration: none;
     }
     a:hover {
@@ -56,35 +35,32 @@ const SIGNAL_CAPTCHA_PAGE_HTML = `<!DOCTYPE html>
     textarea {
       width: 100%;
       padding: 8px 10px;
-      border: 1px solid #ddd;
+      border: 1px solid var(--color-border);
       border-radius: 6px;
       font-size: 14px;
       font-family: monospace;
       resize: vertical;
       min-height: 80px;
       transition: all 0.15s ease;
-    }
-    textarea:focus {
-      outline: none;
-      border-color: #d97706;
-      box-shadow: 0 0 0 3px rgba(217,119,6,0.1);
+      background: var(--color-surface);
+      color: var(--color-text);
     }
     .btn {
       margin-top: 12px;
       padding: 8px 16px;
-      border: 1px solid #d97706;
+      border: 1px solid var(--color-accent);
       border-radius: 6px;
       font-size: 14px;
       cursor: pointer;
-      background: #d97706;
+      background: var(--color-accent);
       color: #fff;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+      box-shadow: 0 1px 2px var(--color-shadow);
       transition: all 0.15s ease;
     }
     .btn:hover:not(:disabled) {
-      background: #b45309;
-      border-color: #b45309;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+      background: var(--color-accent-hover);
+      border-color: var(--color-accent-hover);
+      box-shadow: 0 2px 4px var(--color-shadow);
       transform: translateY(-1px);
     }
     .btn:disabled {
@@ -96,8 +72,8 @@ const SIGNAL_CAPTCHA_PAGE_HTML = `<!DOCTYPE html>
       margin-top: 12px;
       display: block;
     }
-    #status.success { color: #15803d; }
-    #status.error { color: #dc2626; }
+    #status.success { color: var(--color-success); }
+    #status.error { color: var(--color-error); }
   </style>
 </head>
 <body>
