@@ -422,6 +422,9 @@ async function handlePageRequest(
 
 async function main(): Promise<void> {
   const config = loadConfig();
+  if (config.password === undefined) {
+    throw new Error("Config must specify a password.");
+  }
   loadAllowlist(config);
   const pool = await connectDatabase();
   await initializeSchema(pool);
