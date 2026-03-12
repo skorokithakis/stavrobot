@@ -35,7 +35,9 @@ name = "Stavros"
 # signal = "+1234567890"
 # telegram = "123456789"
 # whatsapp = "+1234567890"
-# email = "owner@example.com"
+# email = "owner@example.com"          # specific address
+# email = "*@example.com"              # any address at this domain
+# email = "myuser+*@gmail.com"         # any plus-tag for this user
 
 # Signal integration. account is the bot's phone number (registered with
 # signal-cli — must be a separate number from the owner's).
@@ -74,7 +76,9 @@ botToken = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 #        WEBHOOK_SECRET = <the same value as webhookSecret below>
 #   4. In Cloudflare Email Routing, add a routing rule that forwards inbound mail
 #      to the worker.
-#   5. Add allowed sender addresses via the /settings web UI.
+#   5. Add allowed sender addresses via the /settings web UI. The local part
+#      (before @) supports * as a glob wildcard, e.g. *@example.com or
+#      myuser+*@gmail.com.
 #
 # Cloudflare Email Worker code (create a new Worker and paste this):
 #

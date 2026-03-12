@@ -616,6 +616,77 @@ describe("isInAllowlist", () => {
     expect(isInAllowlist("email", "anyone@example.com")).toBe(true);
     expect(isInAllowlist("email", "other@test.org")).toBe(true);
   });
+
+  it("returns true for an email matching a domain wildcard pattern in the allowlist", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [], telegram: [], email: ["*@example.com"] }));
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist, isInAllowlist } = await import("./allowlist.js");
+    loadAllowlist(makeConfig());
+
+    expect(isInAllowlist("email", "user@example.com")).toBe(true);
+    expect(isInAllowlist("email", "other@example.com")).toBe(true);
+  });
+
+  it("returns false for an email not matching a domain wildcard pattern in the allowlist", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [], telegram: [], email: ["*@example.com"] }));
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist, isInAllowlist } = await import("./allowlist.js");
+    loadAllowlist(makeConfig());
+
+    expect(isInAllowlist("email", "user@other.com")).toBe(false);
+  });
+});
+
+describe("matchesEmailEntry", () => {
+  it("matches a domain wildcard against an address at that domain", async () => {
+    const { matchesEmailEntry } = await import("./allowlist.js");
+    expect(matchesEmailEntry("user@example.com", "*@example.com")).toBe(true);
+  });
+
+  it("does not match a domain wildcard against an address at a different domain", async () => {
+    const { matchesEmailEntry } = await import("./allowlist.js");
+    expect(matchesEmailEntry("user@other.com", "*@example.com")).toBe(false);
+  });
+
+  it("does not match a domain wildcard against an address with @ in the local part", async () => {
+    // Security test: * must not cross the @ boundary.
+    const { matchesEmailEntry } = await import("./allowlist.js");
+    expect(matchesEmailEntry('"user@example.com"@evil.com', "*@example.com")).toBe(false);
+  });
+
+  it("matches a plus-tag wildcard against a tagged address", async () => {
+    const { matchesEmailEntry } = await import("./allowlist.js");
+    expect(matchesEmailEntry("myuser+tag@gmail.com", "myuser+*@gmail.com")).toBe(true);
+  });
+
+  it("does not match a plus-tag wildcard against a different local part", async () => {
+    const { matchesEmailEntry } = await import("./allowlist.js");
+    expect(matchesEmailEntry("other@gmail.com", "myuser+*@gmail.com")).toBe(false);
+  });
+
+  it("matches an exact pattern against the same address", async () => {
+    const { matchesEmailEntry } = await import("./allowlist.js");
+    expect(matchesEmailEntry("exact@example.com", "exact@example.com")).toBe(true);
+  });
+
+  it("does not match an exact pattern against a different address", async () => {
+    const { matchesEmailEntry } = await import("./allowlist.js");
+    expect(matchesEmailEntry("other@example.com", "exact@example.com")).toBe(false);
+  });
+
+  it("matches any address when the pattern is the bare wildcard *", async () => {
+    const { matchesEmailEntry } = await import("./allowlist.js");
+    expect(matchesEmailEntry("anyone@anywhere.org", "*")).toBe(true);
+  });
+
+  it("matches case-insensitively", async () => {
+    const { matchesEmailEntry } = await import("./allowlist.js");
+    expect(matchesEmailEntry("User@Example.COM", "*@example.com")).toBe(true);
+  });
 });
 
 describe("getOwnerIdentities", () => {

@@ -131,6 +131,20 @@ export function getAllowlist(): Allowlist {
   };
 }
 
+export function matchesEmailEntry(senderEmail: string, pattern: string): boolean {
+  if (pattern === "*") {
+    return true;
+  }
+  // Escape all regex-special characters first, then replace the escaped \* with
+  // [^@]* so that wildcards cannot match across the @ boundary. The order is
+  // critical: escaping must happen before the replacement, otherwise the [^@]*
+  // we insert would itself get escaped.
+  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regexSource = escaped.replace(/\\\*/g, "[^@]*");
+  const regex = new RegExp(`^${regexSource}$`, "i");
+  return regex.test(senderEmail);
+}
+
 export function isInAllowlist(service: string, identifier: string): boolean {
   if (service === "signal") {
     if (currentAllowlist.signal.includes("*")) {
@@ -155,10 +169,7 @@ export function isInAllowlist(service: string, identifier: string): boolean {
     return currentAllowlist.whatsapp.includes(identifier);
   }
   if (service === "email") {
-    if (currentAllowlist.email.includes("*")) {
-      return true;
-    }
-    return currentAllowlist.email.includes(identifier.toLowerCase());
+    return currentAllowlist.email.some((entry) => matchesEmailEntry(identifier, entry));
   }
   return false;
 }

@@ -5,6 +5,7 @@ import { loadPostgresConfig, OWNER_CHANNELS } from "./config.js";
 import { encodeToToon } from "./toon.js";
 import type { OwnerConfig } from "./config.js";
 import { log } from "./log.js";
+import { matchesEmailEntry } from "./allowlist.js";
 
 export async function connectDatabase(): Promise<pg.Pool> {
   const config = loadPostgresConfig();
@@ -61,6 +62,8 @@ let ownerInterlocutorId: number | null = null;
 let mainAgentId: number | null = null;
 // Keyed as "service:identifier" for O(1) lookup.
 let ownerIdentitySet: Set<string> = new Set();
+// Owner email patterns (may include wildcards) for use with matchesEmailEntry.
+let ownerEmailEntries: string[] = [];
 
 export function getOwnerInterlocutorId(): number {
   if (ownerInterlocutorId === null) {
@@ -77,6 +80,9 @@ export function getMainAgentId(): number {
 }
 
 export function isOwnerIdentity(service: string, identifier: string): boolean {
+  if (service === "email") {
+    return ownerEmailEntries.some((entry) => matchesEmailEntry(identifier, entry));
+  }
   return ownerIdentitySet.has(`${service}:${identifier}`);
 }
 
@@ -251,6 +257,9 @@ export async function seedOwner(pool: pg.Pool, ownerConfig: OwnerConfig): Promis
   ownerInterlocutorId = ownerId;
   mainAgentId = seededMainAgentId;
   ownerIdentitySet = new Set(identities.map(({ service, identifier }) => `${service}:${identifier}`));
+  ownerEmailEntries = identities
+    .filter(({ service }) => service === "email")
+    .map(({ identifier }) => identifier);
 
   return ownerId;
 }
