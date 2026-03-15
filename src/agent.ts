@@ -1347,7 +1347,7 @@ function formatDate(date: Date): string {
   return `${day} ${year}-${month}-${dayOfMonth} ${hours}:${minutes}:${seconds}`;
 }
 
-function formatUserMessage(userMessage: string, source?: string, sender?: string): string {
+export function formatUserMessage(userMessage: string, source?: string, sender?: string): string {
   const time = formatDate(new Date());
   const resolvedSource = source ?? "cli";
   const resolvedSender = sender ?? "unknown";

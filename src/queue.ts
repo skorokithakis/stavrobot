@@ -1,7 +1,7 @@
 import type pg from "pg";
-import type { Agent } from "@mariozechner/pi-agent-core";
+import type { Agent, AgentMessage } from "@mariozechner/pi-agent-core";
 import type { Config } from "./config.js";
-import { handlePrompt } from "./agent.js";
+import { handlePrompt, formatUserMessage } from "./agent.js";
 import { AbortError } from "./errors.js";
 import { AuthError } from "./auth.js";
 import { isInAllowlist } from "./allowlist.js";
@@ -18,6 +18,29 @@ const RETRY_DELAY_MS = 30_000;
 // Sources that require allowlist + interlocutor lookup before routing.
 // All other external sources route directly to the main agent.
 const GATED_SOURCES: string[] = ["signal", "telegram", "whatsapp", "email"];
+
+// Channels where the owner interacts in real-time. Used to decide whether an
+// incoming message while the agent is busy should steer the running turn
+// instead of being queued behind it.
+const INTERACTIVE_SOURCES: string[] = ["signal", "telegram", "whatsapp", "email"];
+
+function isInteractiveOwnerMessage(source: string | undefined, sender: string | undefined): boolean {
+  if (source === undefined) {
+    // CLI calls have no source and are always from the owner.
+    return true;
+  }
+  return INTERACTIVE_SOURCES.includes(source) && sender !== undefined && isOwnerIdentity(source, sender);
+}
+
+// Whether the message currently being processed belongs to the owner's
+// conversation. Used to guard steering so owner messages don't get injected
+// into subagent conversations.
+function isCurrentEntryOwnerConversation(): boolean {
+  if (currentEntry === undefined) return false;
+  if (currentEntry.source === undefined) return true;
+  if (currentEntry.sender === undefined) return false;
+  return isOwnerIdentity(currentEntry.source, currentEntry.sender);
+}
 
 export interface RoutingResult {
   agentId: number;
@@ -40,6 +63,7 @@ interface QueueEntry {
 
 const queue: QueueEntry[] = [];
 let processing = false;
+let currentEntry: QueueEntry | undefined;
 
 let queueAgent: Agent | undefined;
 let queuePool: pg.Pool | undefined;
@@ -180,6 +204,7 @@ async function processQueue(): Promise<void> {
     const entry = queue.shift()!;
     const preview = (entry.message ?? "").slice(0, 200);
     log.info(`[stavrobot] message in: ${entry.source} - ${entry.sender} - ${preview}`);
+    currentEntry = entry;
     try {
       const routing = await resolveTargetAgent(queuePool!, entry.source, entry.sender, entry.targetAgentId);
       if (routing === null) {
@@ -229,6 +254,8 @@ async function processQueue(): Promise<void> {
         log.error(`[stavrobot] Message failed after ${MAX_RETRIES + 1} attempts, giving up: ${errorMessage}`);
         entry.reject(error);
       }
+    } finally {
+      currentEntry = undefined;
     }
   }
   processing = false;
@@ -249,6 +276,18 @@ export function enqueueMessage(
       log.info("[stavrobot] /stop received but agent is idle, no-op.");
     }
     return Promise.resolve("Aborted.");
+  }
+
+  if (processing && message !== undefined && isCurrentEntryOwnerConversation() && isInteractiveOwnerMessage(source, sender)) {
+    const formatted = formatUserMessage(message, source, sender);
+    const agentMessage: AgentMessage = {
+      role: "user",
+      content: [{ type: "text", text: formatted }],
+      timestamp: Date.now(),
+    };
+    queueAgent!.steer(agentMessage);
+    log.info(`[stavrobot] Steering agent with message from ${source ?? "cli"}.`);
+    return Promise.resolve("Message received, steering the current request.");
   }
 
   return new Promise<string>((resolve, reject) => {

@@ -9,6 +9,7 @@ import type { RoutingResult } from "./queue.js";
 // Mock the modules that processQueue depends on so tests don't need real infrastructure.
 vi.mock("./agent.js", () => ({
   handlePrompt: vi.fn(),
+  formatUserMessage: vi.fn((message: string, source?: string) => `[${source ?? "cli"}] ${message}`),
 }));
 vi.mock("./signal.js", () => ({
   sendSignalMessage: vi.fn(),
@@ -27,12 +28,13 @@ vi.mock("./allowlist.js", () => ({
   isInAllowlist: vi.fn().mockReturnValue(false),
 }));
 
-import { handlePrompt } from "./agent.js";
+import { handlePrompt, formatUserMessage } from "./agent.js";
 import { getMainAgentId, isOwnerIdentity, resolveInterlocutor } from "./database.js";
 import { isInAllowlist } from "./allowlist.js";
 import { initializeQueue, enqueueMessage } from "./queue.js";
 
 const mockHandlePrompt = vi.mocked(handlePrompt);
+const mockFormatUserMessage = vi.mocked(formatUserMessage);
 const mockGetMainAgentId = vi.mocked(getMainAgentId);
 const mockIsOwnerIdentity = vi.mocked(isOwnerIdentity);
 const mockResolveInterlocutor = vi.mocked(resolveInterlocutor);
@@ -40,7 +42,8 @@ const mockIsInAllowlist = vi.mocked(isInAllowlist);
 
 // Minimal stubs — the queue only passes these through to handlePrompt, which is mocked.
 const mockAbort = vi.fn();
-const stubAgent = { abort: mockAbort } as unknown as Agent;
+const mockSteer = vi.fn();
+const stubAgent = { abort: mockAbort, steer: mockSteer } as unknown as Agent;
 const stubPool = {} as unknown as pg.Pool;
 const stubConfig = { publicHostname: "http://localhost" } as unknown as Config;
 
@@ -291,5 +294,133 @@ describe("/stop command", () => {
     const promptResult = await promptPromise;
     expect(promptResult).toBe("Aborted.");
     expect(mockHandlePrompt).toHaveBeenCalledOnce();
+  });
+});
+
+describe("steering", () => {
+  it("steers the running agent when the owner sends a message on an interactive source while processing an owner conversation", async () => {
+    mockIsOwnerIdentity.mockReturnValue(true);
+    mockHandlePrompt.mockImplementationOnce(
+      () => new Promise<string>((resolve) => {
+        // Resolve after a tick so the steering message arrives while processing.
+        setTimeout(() => resolve("done"), 10);
+      }),
+    );
+
+    // The first message must be from the owner so the current entry is an owner conversation.
+    const promptPromise = enqueueMessage("first message", "signal", "+1234567890");
+    // Yield to let processQueue start and call handlePrompt.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const steerResult = await enqueueMessage("steer me", "signal", "+1234567890");
+    expect(steerResult).toBe("Message received, steering the current request.");
+    expect(mockSteer).toHaveBeenCalledOnce();
+    expect(mockFormatUserMessage).toHaveBeenCalledWith("steer me", "signal", "+1234567890");
+    // The original prompt should still complete normally.
+    await promptPromise;
+    expect(mockHandlePrompt).toHaveBeenCalledOnce();
+  });
+
+  it("steers the running agent when the owner sends a CLI message (no source) while processing", async () => {
+    mockHandlePrompt.mockImplementationOnce(
+      () => new Promise<string>((resolve) => {
+        setTimeout(() => resolve("done"), 10);
+      }),
+    );
+
+    // CLI message: no source, no sender — always treated as owner.
+    const promptPromise = enqueueMessage("first message");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const steerResult = await enqueueMessage("steer me");
+    expect(steerResult).toBe("Message received, steering the current request.");
+    expect(mockSteer).toHaveBeenCalledOnce();
+    expect(mockFormatUserMessage).toHaveBeenCalledWith("steer me", undefined, undefined);
+
+    await promptPromise;
+  });
+
+  it("does not steer when the message is undefined (attachment-only)", async () => {
+    mockIsOwnerIdentity.mockReturnValue(true);
+    mockHandlePrompt.mockImplementationOnce(
+      () => new Promise<string>((resolve) => {
+        setTimeout(() => resolve("done"), 10);
+      }),
+    );
+
+    const promptPromise = enqueueMessage("first message", "signal", "+1234567890");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Attachment-only message: message is undefined.
+    const attachment = { storedPath: "/tmp/stavrobot-temp/upload-abc.jpg", originalFilename: "photo.jpg", mimeType: "image/jpeg", size: 1024 };
+    await enqueueMessage(undefined, "signal", "+1234567890", [attachment]);
+    expect(mockSteer).not.toHaveBeenCalled();
+
+    await promptPromise;
+  });
+
+  it("does not steer when the sender is not the owner on an interactive source", async () => {
+    // mockIsOwnerIdentity returns false by default from beforeEach.
+    mockIsInAllowlist.mockReturnValue(true);
+    mockResolveInterlocutor.mockResolvedValue({
+      interlocutorId: 42,
+      identityId: 10,
+      agentId: 1,
+      isOwner: false,
+      displayName: "Alice",
+    });
+    mockHandlePrompt.mockResolvedValue("done");
+
+    const promptPromise = enqueueMessage("first message");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Non-owner message on an interactive source should queue, not steer.
+    const secondPromise = enqueueMessage("hi from alice", "signal", "+9876543210");
+    expect(mockSteer).not.toHaveBeenCalled();
+
+    await promptPromise;
+    await secondPromise;
+  });
+
+  it("does not steer when the agent is not processing", async () => {
+    mockIsOwnerIdentity.mockReturnValue(true);
+
+    // No active processing — message should be queued normally.
+    await enqueueMessage("hello", "signal", "+1234567890");
+    expect(mockSteer).not.toHaveBeenCalled();
+    expect(mockHandlePrompt).toHaveBeenCalledOnce();
+  });
+
+  it("does not steer when the current entry is a non-owner conversation (subagent)", async () => {
+    // isOwnerIdentity returns true only for the owner's number, not Alice's.
+    mockIsOwnerIdentity.mockImplementation(
+      (_source: string, sender: string) => sender === "+1111111111",
+    );
+    mockIsInAllowlist.mockReturnValue(true);
+    mockResolveInterlocutor.mockResolvedValue({
+      interlocutorId: 42,
+      identityId: 10,
+      agentId: 2,
+      isOwner: false,
+      displayName: "Alice",
+    });
+    mockHandlePrompt.mockImplementationOnce(
+      () => new Promise<string>((resolve) => {
+        setTimeout(() => resolve("done"), 10);
+      }),
+    );
+
+    // Alice's message starts processing — not the owner's conversation.
+    const promptPromise = enqueueMessage("hello from alice", "signal", "+9876543210");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Owner sends a message while Alice's conversation is processing.
+    // isInteractiveOwnerMessage returns true (owner on interactive source),
+    // but isCurrentEntryOwnerConversation returns false (Alice's entry).
+    const ownerMessage = enqueueMessage("owner message", "telegram", "+1111111111");
+    expect(mockSteer).not.toHaveBeenCalled();
+
+    await promptPromise;
+    await ownerMessage;
   });
 });
