@@ -60,7 +60,7 @@ Create the following page using `upsert_page`. The page must be private (not pub
 
 Split trips into two sections: "Upcoming trips" (where `end_date` is today or later) and "Past trips" (where `end_date` is before today). Within each section, list trips in chronological order — upcoming trips sorted by `start_date` ascending, past trips sorted by `start_date` descending.
 
-For each trip, show the name and date range. Each trip should be clickable to expand and show the full `content` field rendered as markdown, inline on the same page (not a separate page). Only one trip should be expanded at a time — clicking another trip collapses the previous one.
+For each trip, show the name and date range. Each trip should be clickable to expand and show the full `notes` field rendered as markdown, inline on the same page (not a separate page). Only one trip should be expanded at a time — clicking another trip collapses the previous one.
 
 Define two named queries:
 - `upcoming_trips`: returns all trips where `end_date >= CURRENT_DATE`, ordered by `start_date` ascending.
