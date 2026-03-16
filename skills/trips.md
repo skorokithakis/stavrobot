@@ -1,7 +1,7 @@
 ---
 title: Trip tracking
 description: Track trips, flights, reservations, packing lists, and get flight status alerts.
-version: 1
+version: 2
 author: Stavros Korokithakis
 ---
 
@@ -13,10 +13,10 @@ Create the following table if it does not already exist.
 
 **`trips`** — A single trip (vacation, business trip, or any travel requiring tickets/reservations).
 - `id` (serial, primary key)
-- `name` (text) — short label, e.g. "Tokyo 2026", "London conference"
+- `destination` (text) — short label, e.g. "Tokyo 2026", "London conference"
 - `start_date` (date)
 - `end_date` (date)
-- `content` (text) — markdown free text with all trip details: destinations, packing lists, flight numbers, reservation confirmations, accommodation, transportation, notes, etc.
+- `notes` (text) — markdown free text with all trip details: destinations, packing lists, flight numbers, reservation confirmations, accommodation, transportation, notes, etc.
 
 ## Step 2: Install the flights plugin
 
