@@ -47,7 +47,7 @@ function makeMockResponse(): MockResponse {
 // The first call returns the page row; subsequent calls (for the actual SQL) are not
 // expected in the auth-failure path, but we provide a fallback for the public-page path.
 function makeMockPool(isPublic: boolean): Pool {
-  const pageRow = { query: "SELECT 1", is_public: isPublic };
+  const pageRow = { query: "SELECT 1", is_public: isPublic, data: Buffer.from("content") };
   const pool = {
     query: vi.fn().mockImplementation(() =>
       Promise.resolve({ rows: [pageRow], command: "SELECT", rowCount: 1 } as unknown as QueryResult),

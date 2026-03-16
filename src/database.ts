@@ -784,6 +784,30 @@ export async function initializePagesSchema(pool: pg.Pool): Promise<void> {
     )
   `);
   await pool.query(`ALTER TABLE pages ADD COLUMN IF NOT EXISTS queries JSONB`);
+  await pool.query(`ALTER TABLE pages ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1`);
+  await pool.query(`ALTER TABLE pages DROP COLUMN IF EXISTS updated_at`);
+  // Drop the old unique constraint on path alone and replace it with a composite
+  // unique constraint on (path, version) to support multiple version rows per path.
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'pages_path_key'
+          AND conrelid = 'pages'::regclass
+      ) THEN
+        ALTER TABLE pages DROP CONSTRAINT pages_path_key;
+      END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'pages_path_version_key'
+          AND conrelid = 'pages'::regclass
+      ) THEN
+        ALTER TABLE pages ADD CONSTRAINT pages_path_version_key UNIQUE (path, version);
+      END IF;
+    END
+    $$
+  `);
 }
 
 export interface Page {
@@ -795,16 +819,21 @@ export interface Page {
 
 export async function getPageByPath(pool: pg.Pool, path: string): Promise<Page | null> {
   const result = await pool.query(
-    "SELECT mimetype, data, is_public, queries FROM pages WHERE path = $1",
+    "SELECT mimetype, data, is_public, queries FROM pages WHERE path = $1 ORDER BY version DESC LIMIT 1",
     [path],
   );
   if (result.rows.length === 0) {
     return null;
   }
   const row = result.rows[0];
+  const data = row.data as Buffer;
+  // An empty data buffer is a tombstone left by deletePage(); treat it as not found.
+  if (data.length === 0) {
+    return null;
+  }
   return {
     mimetype: row.mimetype as string,
-    data: row.data as Buffer,
+    data,
     isPublic: row.is_public as boolean,
     queries: row.queries as Record<string, string> | null,
   };
@@ -816,13 +845,18 @@ export async function getPageQueryByPath(
   queryName: string,
 ): Promise<{ query: string; isPublic: boolean } | null> {
   const result = await pool.query(
-    "SELECT queries->>$2 AS query, is_public FROM pages WHERE path = $1",
+    "SELECT queries->>$2 AS query, is_public, data FROM pages WHERE path = $1 ORDER BY version DESC LIMIT 1",
     [pagePath, queryName],
   );
   if (result.rows.length === 0) {
     return null;
   }
   const row = result.rows[0];
+  const data = row.data as Buffer;
+  // An empty data buffer is a tombstone left by deletePage(); treat it as not found.
+  if (data.length === 0) {
+    return null;
+  }
   const query = row.query as string | null;
   if (query === null) {
     return null;
@@ -841,58 +875,199 @@ export async function upsertPage(
   isPublic?: boolean,
   queries?: Record<string, string>,
 ): Promise<string> {
-  const existing = await pool.query("SELECT 1 FROM pages WHERE path = $1", [path]);
+  // Fetch the latest existing version (if any) to carry forward unchanged fields
+  // and to compute the next version number.
+  const existing = await pool.query<{
+    version: number;
+    mimetype: string;
+    data: Buffer;
+    is_public: boolean;
+    queries: Record<string, string> | null;
+  }>(
+    "SELECT version, mimetype, data, is_public, queries FROM pages WHERE path = $1 ORDER BY version DESC LIMIT 1",
+    [path],
+  );
 
   if (existing.rows.length === 0) {
+    // New page: content and mimetype are required.
     if (content === undefined || mimetype === undefined) {
       return "Error: content and mimetype are required when creating a new page.";
     }
     await pool.query(
-      `INSERT INTO pages (path, mimetype, data, is_public, queries)
-       VALUES ($1, $2, convert_to($3, 'UTF8'), $4, $5)`,
+      `INSERT INTO pages (path, mimetype, data, is_public, queries, version)
+       VALUES ($1, $2, convert_to($3, 'UTF8'), $4, $5, 1)`,
       [path, mimetype, content, isPublic ?? false, queries !== undefined ? JSON.stringify(queries) : null],
     );
     return `Page created at /pages/${path}`;
   }
 
-  const setClauses: string[] = [];
-  const values: unknown[] = [];
-  let paramIndex = 1;
+  const latest = existing.rows[0];
 
-  if (mimetype !== undefined) {
-    setClauses.push(`mimetype = $${paramIndex++}`);
-    values.push(mimetype);
-  }
-  if (content !== undefined) {
-    setClauses.push(`data = convert_to($${paramIndex++}, 'UTF8')`);
-    values.push(content);
-  }
-  if (isPublic !== undefined) {
-    setClauses.push(`is_public = $${paramIndex++}`);
-    values.push(isPublic);
-  }
-  if (queries !== undefined) {
-    setClauses.push(`queries = $${paramIndex++}`);
-    values.push(JSON.stringify(queries));
-  }
-
-  if (setClauses.length === 0) {
+  // For updates, at least one field must be provided.
+  if (mimetype === undefined && content === undefined && isPublic === undefined && queries === undefined) {
     return "Error: no fields to update. Provide at least one of mimetype, content, is_public, or queries.";
   }
 
-  setClauses.push(`updated_at = NOW()`);
-  values.push(path);
+  const nextVersion = latest.version + 1;
+  const newMimetype = mimetype ?? latest.mimetype;
+  const newIsPublic = isPublic ?? latest.is_public;
+  const newQueries = queries !== undefined ? JSON.stringify(queries) : (latest.queries !== null ? JSON.stringify(latest.queries) : null);
 
-  await pool.query(
-    `UPDATE pages SET ${setClauses.join(", ")} WHERE path = $${paramIndex}`,
-    values,
-  );
+  if (content !== undefined) {
+    await pool.query(
+      `INSERT INTO pages (path, mimetype, data, is_public, queries, version)
+       VALUES ($1, $2, convert_to($3, 'UTF8'), $4, $5, $6)`,
+      [path, newMimetype, content, newIsPublic, newQueries, nextVersion],
+    );
+  } else {
+    // Carry forward the existing data unchanged.
+    await pool.query(
+      `INSERT INTO pages (path, mimetype, data, is_public, queries, version)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [path, newMimetype, latest.data, newIsPublic, newQueries, nextVersion],
+    );
+  }
+
   return `Page updated at /pages/${path}`;
 }
 
 export async function deletePage(pool: pg.Pool, path: string): Promise<boolean> {
-  const result = await pool.query("DELETE FROM pages WHERE path = $1", [path]);
-  return (result.rowCount ?? 0) > 0;
+  // Fetch the latest version to carry forward metadata and compute the next version.
+  const existing = await pool.query<{
+    version: number;
+    mimetype: string;
+    data: Buffer;
+    is_public: boolean;
+    queries: Record<string, string> | null;
+  }>(
+    "SELECT version, mimetype, data, is_public, queries FROM pages WHERE path = $1 ORDER BY version DESC LIMIT 1",
+    [path],
+  );
+
+  if (existing.rows.length === 0) {
+    return false;
+  }
+
+  const latest = existing.rows[0];
+
+  // If the latest version is already a tombstone, the page is already deleted.
+  if (latest.data.length === 0) {
+    return false;
+  }
+
+  const nextVersion = latest.version + 1;
+  await pool.query(
+    `INSERT INTO pages (path, mimetype, data, is_public, queries, version)
+     VALUES ($1, $2, convert_to('', 'UTF8'), $3, $4, $5)`,
+    [path, latest.mimetype, latest.is_public, latest.queries !== null ? JSON.stringify(latest.queries) : null, nextVersion],
+  );
+  return true;
+}
+
+export interface PageVersion {
+  path: string;
+  version: number;
+  mimetype: string;
+  data: string;
+  isPublic: boolean;
+  queries: Record<string, string> | null;
+  createdAt: Date;
+}
+
+export async function readPage(pool: pg.Pool, path: string, version?: number): Promise<PageVersion | null> {
+  let result;
+  if (version !== undefined) {
+    result = await pool.query<{
+      path: string;
+      version: number;
+      mimetype: string;
+      data: string;
+      is_public: boolean;
+      queries: Record<string, string> | null;
+      created_at: Date;
+    }>(
+      "SELECT path, version, mimetype, convert_from(data, 'UTF8') AS data, is_public, queries, created_at FROM pages WHERE path = $1 AND version = $2",
+      [path, version],
+    );
+  } else {
+    result = await pool.query<{
+      path: string;
+      version: number;
+      mimetype: string;
+      data: string;
+      is_public: boolean;
+      queries: Record<string, string> | null;
+      created_at: Date;
+    }>(
+      "SELECT path, version, mimetype, convert_from(data, 'UTF8') AS data, is_public, queries, created_at FROM pages WHERE path = $1 ORDER BY version DESC LIMIT 1",
+      [path],
+    );
+  }
+  if (result.rows.length === 0) {
+    return null;
+  }
+  const row = result.rows[0];
+  return {
+    path: row.path,
+    version: row.version,
+    mimetype: row.mimetype,
+    data: row.data,
+    isPublic: row.is_public,
+    queries: row.queries,
+    createdAt: row.created_at,
+  };
+}
+
+export interface PageVersionSummary {
+  version: number;
+  createdAt: Date;
+  isEmpty: boolean;
+}
+
+export async function listPageVersions(pool: pg.Pool, path: string): Promise<PageVersionSummary[]> {
+  const result = await pool.query<{
+    version: number;
+    created_at: Date;
+    data: Buffer;
+  }>(
+    "SELECT version, created_at, data FROM pages WHERE path = $1 ORDER BY version DESC",
+    [path],
+  );
+  return result.rows.map((row) => ({
+    version: row.version,
+    createdAt: row.created_at,
+    isEmpty: (row.data as Buffer).length === 0,
+  }));
+}
+
+export async function restorePageVersion(pool: pg.Pool, path: string, version: number): Promise<string> {
+  const sourceResult = await pool.query<{
+    mimetype: string;
+    data: Buffer;
+    is_public: boolean;
+    queries: Record<string, string> | null;
+  }>(
+    "SELECT mimetype, data, is_public, queries FROM pages WHERE path = $1 AND version = $2",
+    [path, version],
+  );
+  if (sourceResult.rows.length === 0) {
+    return `Error: version ${version} of page '${path}' not found.`;
+  }
+  const source = sourceResult.rows[0];
+
+  const maxResult = await pool.query<{ max_version: number }>(
+    "SELECT MAX(version) AS max_version FROM pages WHERE path = $1",
+    [path],
+  );
+  const nextVersion = (maxResult.rows[0].max_version ?? 0) + 1;
+
+  await pool.query(
+    `INSERT INTO pages (path, mimetype, data, is_public, queries, version)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [path, source.mimetype, source.data, source.is_public, source.queries !== null ? JSON.stringify(source.queries) : null, nextVersion],
+  );
+
+  return `Page '${path}' restored from version ${version} as version ${nextVersion}.`;
 }
 
 export async function initializeScratchpadSchema(pool: pg.Pool): Promise<void> {
