@@ -522,7 +522,16 @@ export function createRunPluginToolTool(): AgentTool {
           };
         }
         if (!permissions.includes("*") && !permissions.includes(tool)) {
-          const result = `Tool '${tool}' not found on plugin '${plugin}'.`;
+          const availableTools = Array.isArray(manifest.tools)
+            ? (manifest.tools as ToolManifest[]).filter(
+                (t) => typeof t.name === "string" && permissions.includes(t.name)
+              )
+            : [];
+          const availablePart =
+            availableTools.length > 0
+              ? ` Available tools: ${formatAvailableTools(availableTools)}`
+              : "";
+          const result = `Tool '${tool}' not found on plugin '${plugin}'.${availablePart}`;
           log.debug(`[stavrobot] run_plugin_tool: rejected '${plugin}/${tool}' — tool not in permissions list`);
           return {
             content: [{ type: "text" as const, text: result }],
@@ -598,6 +607,19 @@ export function createRunPluginToolTool(): AgentTool {
 
 function isBundleManifest(value: unknown): value is BundleManifest {
   return typeof value === "object" && value !== null;
+}
+
+function formatAvailableTools(tools: ToolManifest[]): string {
+  return tools
+    .map((t) => {
+      const params = t.parameters !== undefined
+        ? Object.entries(t.parameters)
+            .map(([name, schema]) => `${name}: ${schema.type}`)
+            .join(", ")
+        : "";
+      return params.length > 0 ? `${t.name} (${params})` : t.name;
+    })
+    .join(", ");
 }
 
 export function createRequestCodingTaskTool(): AgentTool {

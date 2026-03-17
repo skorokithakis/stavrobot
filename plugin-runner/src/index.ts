@@ -761,8 +761,17 @@ async function handleRunTool(
 
   const tool = findTool(bundle, toolName);
   if (tool === null) {
+    const availableTools = bundle.tools
+      .map((t) => {
+        const params = Object.entries(t.manifest.parameters)
+          .map(([name, schema]) => `${name}: ${schema.type}`)
+          .join(", ");
+        return params.length > 0 ? `${t.manifest.name} (${params})` : t.manifest.name;
+      })
+      .join(", ");
+    const availablePart = availableTools.length > 0 ? ` Available tools: ${availableTools}` : "";
     response.writeHead(404, { "Content-Type": "application/json" });
-    response.end(JSON.stringify({ error: "Tool not found" }));
+    response.end(JSON.stringify({ error: `Tool not found.${availablePart}` }));
     return;
   }
 

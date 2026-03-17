@@ -210,6 +210,52 @@ describe("createRunPluginToolTool", () => {
     expect(text).toBe("Tool 'mytool' not found on plugin 'myplugin'.");
   });
 
+  it("includes available tools in the error when the manifest has a tools array", async () => {
+    const manifest = {
+      name: "myplugin",
+      permissions: ["search", "lookup"],
+      tools: [
+        { name: "search", parameters: { query: { type: "string" }, count: { type: "integer" } } },
+        { name: "lookup", parameters: { id: { type: "string" } } },
+        { name: "hidden", parameters: {} },
+      ],
+    };
+    mockFetchSequence({ status: 200, body: JSON.stringify(manifest) });
+    const result = await tool.execute("call-15b", { plugin: "myplugin", tool: "missing_tool", parameters: "{}" });
+    const text = (result.content[0] as { type: string; text: string }).text;
+    expect(text).toBe("Tool 'missing_tool' not found on plugin 'myplugin'. Available tools: search (query: string, count: integer), lookup (id: string)");
+  });
+
+  it("omits the available tools part when no permitted tools are in the manifest", async () => {
+    const manifest = {
+      name: "myplugin",
+      permissions: ["other_tool"],
+      tools: [
+        { name: "hidden", parameters: {} },
+      ],
+    };
+    mockFetchSequence({ status: 200, body: JSON.stringify(manifest) });
+    const result = await tool.execute("call-15c", { plugin: "myplugin", tool: "missing_tool", parameters: "{}" });
+    const text = (result.content[0] as { type: string; text: string }).text;
+    expect(text).toBe("Tool 'missing_tool' not found on plugin 'myplugin'.");
+  });
+
+  it("does not leak tools that are not in the permissions list", async () => {
+    const manifest = {
+      name: "myplugin",
+      permissions: ["allowed_tool"],
+      tools: [
+        { name: "allowed_tool", parameters: { query: { type: "string" } } },
+        { name: "secret_tool", parameters: { key: { type: "string" } } },
+      ],
+    };
+    mockFetchSequence({ status: 200, body: JSON.stringify(manifest) });
+    const result = await tool.execute("call-15d", { plugin: "myplugin", tool: "missing_tool", parameters: "{}" });
+    const text = (result.content[0] as { type: string; text: string }).text;
+    expect(text).toContain("allowed_tool");
+    expect(text).not.toContain("secret_tool");
+  });
+
   it("proceeds when the tool is in the explicit permissions list", async () => {
     mockFetchSequence(
       { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["mytool", "other_tool"] }) },
