@@ -7,7 +7,7 @@ import type { Config } from "./config.js";
 import { isInAllowlist } from "./allowlist.js";
 import type { FileAttachment } from "./uploads.js";
 import { getApiKey } from "./auth.js";
-import { executeSql, loadMessages, saveMessage, saveCompaction, loadLatestCompaction, loadAllMemories, upsertMemory, deleteMemory, upsertScratchpad, deleteScratchpad, createCronEntry, updateCronEntry, deleteCronEntry, listCronEntries, loadAllScratchpadTitles, resolveRecipient, resolveInterlocutorByName, getMainAgentId, loadAgent, type Memory } from "./database.js";
+import { executeSql, loadMessages, saveMessage, saveCompaction, loadLatestCompaction, loadAllMemories, upsertMemory, deleteMemory, upsertScratchpad, deleteScratchpad, readScratchpad, createCronEntry, updateCronEntry, deleteCronEntry, listCronEntries, loadAllScratchpadTitles, resolveRecipient, resolveInterlocutorByName, getMainAgentId, loadAgent, type Memory } from "./database.js";
 import type { RoutingResult } from "./queue.js";
 import { reloadScheduler } from "./scheduler.js";
 import { createManagePluginsTool, createRunPluginToolTool, createRequestCodingTaskTool } from "./plugin-tools.js";
@@ -75,20 +75,21 @@ export function createExecuteSqlTool(pool: pg.Pool): AgentTool {
   };
 }
 
-const MANAGE_KNOWLEDGE_HELP_TEXT = `manage_knowledge: upsert or delete entries in the two-tier knowledge store.
+const MANAGE_KNOWLEDGE_HELP_TEXT = `manage_knowledge: upsert, delete, or read entries in the two-tier knowledge store.
 
 Stores:
 - memory: full content is injected into the system prompt every turn. Use for frequently needed facts, user preferences, and anything that should always be in context. Keep entries concise — they consume context on every request.
-- scratchpad: only titles are injected each turn; bodies are read on demand via execute_sql. Use for less frequent, longer-form knowledge such as reference material, detailed notes, or anything that doesn't need to be in context every turn. Note here anything you learn about the user. Keep titles short and descriptive (under 50 characters) so you can tell at a glance what each entry contains.
+- scratchpad: only titles are injected each turn; bodies are read on demand via the read action. Use for less frequent, longer-form knowledge such as reference material, detailed notes, or anything that doesn't need to be in context every turn. Note here anything you learn about the user. Keep titles short and descriptive (under 50 characters) so you can tell at a glance what each entry contains.
 
 Actions:
 - upsert: create or update an entry. Parameters: store (required), id (omit to create, provide to update), content (required for memory), title (required for scratchpad), body (required for scratchpad).
 - delete: remove an entry by id. Parameters: store (required), id (required).
+- read: read a scratchpad entry's title and body by id. Parameters: store (must be "scratchpad"), id (required).
 - help: show this help text.
 
 Constraints:
 - Memory entries are injected in full every turn; keep them concise.
-- Scratchpad bodies are not injected automatically; read them via execute_sql on the "scratchpad" table.`;
+- Scratchpad bodies are not injected automatically; use the read action to retrieve them.`;
 
 export function createManageKnowledgeTool(pool: pg.Pool): AgentTool {
   return {
@@ -99,8 +100,9 @@ export function createManageKnowledgeTool(pool: pg.Pool): AgentTool {
       action: Type.Union([
         Type.Literal("upsert"),
         Type.Literal("delete"),
+        Type.Literal("read"),
         Type.Literal("help"),
-      ], { description: "Action to perform: upsert, delete, or help." }),
+      ], { description: "Action to perform: upsert, delete, read, or help." }),
       store: Type.Optional(Type.Union([
         Type.Literal("memory"),
         Type.Literal("scratchpad"),
@@ -261,7 +263,41 @@ export function createManageKnowledgeTool(pool: pg.Pool): AgentTool {
         };
       }
 
-      const errorMessage = `Error: unknown action '${action}'. Valid actions: upsert, delete, help.`;
+      if (action === "read") {
+        if (store !== "scratchpad") {
+          const errorMessage = "Error: read is only supported for the scratchpad store.";
+          return {
+            content: [{ type: "text" as const, text: errorMessage }],
+            details: { message: errorMessage },
+          };
+        }
+
+        if (raw.id === undefined) {
+          const errorMessage = "Error: id is required for read.";
+          return {
+            content: [{ type: "text" as const, text: errorMessage }],
+            details: { message: errorMessage },
+          };
+        }
+
+        const entry = await readScratchpad(pool, raw.id);
+        if (entry === null) {
+          const errorMessage = `Error: scratchpad entry ${raw.id} not found.`;
+          return {
+            content: [{ type: "text" as const, text: errorMessage }],
+            details: { message: errorMessage },
+          };
+        }
+
+        log.info(`[stavrobot] Scratchpad entry ${entry.id} read.`);
+        const message = `Title: ${entry.title}\n\n${entry.body}`;
+        return {
+          content: [{ type: "text" as const, text: message }],
+          details: { message },
+        };
+      }
+
+      const errorMessage = `Error: unknown action '${action}'. Valid actions: upsert, delete, read, help.`;
       return {
         content: [{ type: "text" as const, text: errorMessage }],
         details: { message: errorMessage },
@@ -1691,7 +1727,7 @@ export async function handlePrompt(
     }
 
     if (scratchpadTitles.length > 0) {
-      const scratchpadLines = ["Your scratchpad (use manage_knowledge with store: \"scratchpad\" to upsert or delete entries; read bodies via execute_sql on the \"scratchpad\" table):", ""];
+      const scratchpadLines = ["Your scratchpad (use manage_knowledge with store: \"scratchpad\" to upsert, delete, or read entries; use the read action to retrieve a body by id):", ""];
       for (const entry of scratchpadTitles) {
         scratchpadLines.push(`[Scratchpad ${entry.id}] ${entry.title}`);
       }

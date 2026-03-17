@@ -1,6 +1,87 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, type MockedFunction } from "vitest";
 import type { AgentMessage, AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
-import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext } from "./agent.js";
+import type { Pool } from "pg";
+import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool } from "./agent.js";
+
+// Mock all heavy dependencies so the module loads without real infrastructure.
+vi.mock("./database.js", () => ({
+  executeSql: vi.fn(),
+  loadMessages: vi.fn(),
+  saveMessage: vi.fn(),
+  saveCompaction: vi.fn(),
+  loadLatestCompaction: vi.fn(),
+  loadAllMemories: vi.fn(),
+  upsertMemory: vi.fn(),
+  deleteMemory: vi.fn(),
+  upsertScratchpad: vi.fn(),
+  deleteScratchpad: vi.fn(),
+  readScratchpad: vi.fn(),
+  createCronEntry: vi.fn(),
+  updateCronEntry: vi.fn(),
+  deleteCronEntry: vi.fn(),
+  listCronEntries: vi.fn(),
+  loadAllScratchpadTitles: vi.fn(),
+  resolveRecipient: vi.fn(),
+  resolveInterlocutorByName: vi.fn(),
+  getMainAgentId: vi.fn(),
+  loadAgent: vi.fn(),
+}));
+vi.mock("./config.js", () => ({
+  loadPostgresConfig: vi.fn().mockReturnValue({}),
+  OWNER_CHANNELS: [],
+}));
+vi.mock("./log.js", () => ({
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+vi.mock("./allowlist.js", () => ({ isInAllowlist: vi.fn() }));
+vi.mock("./uploads.js", () => ({}));
+vi.mock("./auth.js", () => ({ getApiKey: vi.fn() }));
+vi.mock("./queue.js", () => ({}));
+vi.mock("./scheduler.js", () => ({ reloadScheduler: vi.fn() }));
+vi.mock("./plugin-tools.js", () => ({
+  createManagePluginsTool: vi.fn(),
+  createRunPluginToolTool: vi.fn(),
+  createRequestCodingTaskTool: vi.fn(),
+}));
+vi.mock("./python.js", () => ({ createRunPythonTool: vi.fn() }));
+vi.mock("./pages.js", () => ({ createManagePagesTool: vi.fn() }));
+vi.mock("./files.js", () => ({ createManageFilesTool: vi.fn() }));
+vi.mock("./interlocutors.js", () => ({ createManageInterlocutorsTool: vi.fn() }));
+vi.mock("./agents.js", () => ({ createManageAgentsTool: vi.fn() }));
+vi.mock("./send-agent-message.js", () => ({ createSendAgentMessageTool: vi.fn() }));
+vi.mock("./search.js", () => ({ createSearchTool: vi.fn() }));
+vi.mock("./upload-tools.js", () => ({ createManageUploadsTool: vi.fn() }));
+vi.mock("./telegram.js", () => ({ convertMarkdownToTelegramHtml: vi.fn() }));
+vi.mock("./toon.js", () => ({ encodeToToon: vi.fn() }));
+vi.mock("./signal.js", () => ({ sendSignalMessage: vi.fn() }));
+vi.mock("./telegram-api.js", () => ({ sendTelegramMessage: vi.fn() }));
+vi.mock("./internal-fetch.js", () => ({ internalFetch: vi.fn() }));
+vi.mock("./whatsapp-api.js", () => ({
+  getWhatsappSocket: vi.fn(),
+  e164ToJid: vi.fn(),
+  sendWhatsappTextMessage: vi.fn(),
+}));
+vi.mock("./email-api.js", () => ({ sendEmail: vi.fn() }));
+vi.mock("./temp-dir.js", () => ({ TEMP_ATTACHMENTS_DIR: "/tmp/attachments" }));
+vi.mock("./errors.js", () => ({ AbortError: class AbortError extends Error {} }));
+vi.mock("@mariozechner/pi-ai", () => ({
+  Type: {
+    Object: vi.fn().mockReturnValue({}),
+    String: vi.fn().mockReturnValue({}),
+    Optional: vi.fn().mockReturnValue({}),
+    Union: vi.fn().mockReturnValue({}),
+    Literal: vi.fn().mockReturnValue({}),
+    Number: vi.fn().mockReturnValue({}),
+    Boolean: vi.fn().mockReturnValue({}),
+    Array: vi.fn().mockReturnValue({}),
+    Record: vi.fn().mockReturnValue({}),
+  },
+  getModel: vi.fn(),
+  complete: vi.fn(),
+}));
+vi.mock("@mariozechner/pi-agent-core", () => ({
+  Agent: vi.fn(),
+}));
 
 // Helper to build a minimal assistant message without filling in all required
 // fields that the serializer never reads (api, provider, model, usage).
@@ -650,5 +731,47 @@ describe("truncateContext", () => {
     const block = (result[0] as { content: Array<{ type: string; text: string }> }).content[0];
     // The block must not have grown: the suffix alone is longer than the original.
     expect(block.text.length).toBeLessThanOrEqual(tinyText.length);
+  });
+});
+
+describe("createManageKnowledgeTool — read action", () => {
+  // Import the mocked readScratchpad after vi.mock has been set up.
+  async function getReadScratchpadMock(): Promise<MockedFunction<() => Promise<unknown>>> {
+    const db = await import("./database.js");
+    return db.readScratchpad as unknown as MockedFunction<() => Promise<unknown>>;
+  }
+
+  it("returns the title and body when the entry exists", async () => {
+    const readScratchpad = await getReadScratchpadMock();
+    readScratchpad.mockResolvedValueOnce({ id: 5, title: "My note", body: "Some content." });
+
+    const tool = createManageKnowledgeTool({} as Pool);
+    const result = await tool.execute("tc1", { action: "read", store: "scratchpad", id: 5 });
+
+    expect(result.content[0]).toMatchObject({ type: "text", text: "Title: My note\n\nSome content." });
+  });
+
+  it("returns an error when the entry is not found", async () => {
+    const readScratchpad = await getReadScratchpadMock();
+    readScratchpad.mockResolvedValueOnce(null);
+
+    const tool = createManageKnowledgeTool({} as Pool);
+    const result = await tool.execute("tc1", { action: "read", store: "scratchpad", id: 99 });
+
+    expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("not found") });
+  });
+
+  it("returns an error when store is not scratchpad", async () => {
+    const tool = createManageKnowledgeTool({} as Pool);
+    const result = await tool.execute("tc1", { action: "read", store: "memory", id: 1 });
+
+    expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("only supported for the scratchpad store") });
+  });
+
+  it("returns an error when id is missing", async () => {
+    const tool = createManageKnowledgeTool({} as Pool);
+    const result = await tool.execute("tc1", { action: "read", store: "scratchpad" });
+
+    expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("id is required") });
   });
 });

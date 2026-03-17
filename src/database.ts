@@ -1087,6 +1087,28 @@ export interface ScratchpadTitle {
   title: string;
 }
 
+export interface ScratchpadEntry {
+  id: number;
+  title: string;
+  body: string;
+}
+
+export async function readScratchpad(pool: pg.Pool, id: number): Promise<ScratchpadEntry | null> {
+  const result = await pool.query<{ id: number; title: string; body: string }>(
+    "SELECT id, title, body FROM scratchpad WHERE id = $1",
+    [id],
+  );
+  if (result.rows.length === 0) {
+    return null;
+  }
+  const row = result.rows[0];
+  return {
+    id: row.id,
+    title: row.title,
+    body: row.body,
+  };
+}
+
 export async function loadAllScratchpadTitles(pool: pg.Pool): Promise<ScratchpadTitle[]> {
   const result = await pool.query("SELECT id, title FROM scratchpad ORDER BY created_at");
   return result.rows.map((row) => ({

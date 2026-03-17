@@ -15,7 +15,7 @@ vi.mock("./toon.js", () => ({
 vi.mock("fs");
 
 import fs from "fs";
-import { resolveInterlocutor, seedOwner, seedCronEntries, upsertPage, deletePage, getPageByPath, getPageQueryByPath, readPage, listPageVersions, restorePageVersion } from "./database.js";
+import { resolveInterlocutor, seedOwner, seedCronEntries, upsertPage, deletePage, getPageByPath, getPageQueryByPath, readPage, listPageVersions, restorePageVersion, readScratchpad } from "./database.js";
 import type { OwnerConfig } from "./config.js";
 
 // Seed the owner so getOwnerInterlocutorId() doesn't throw. The mock pool
@@ -806,5 +806,45 @@ describe("restorePageVersion", () => {
 
     expect(result).toMatch(/version 1/);
     expect(insertedRows[0].values[insertedRows[0].values.length - 1]).toBe(1);
+  });
+});
+
+describe("readScratchpad", () => {
+  it("returns null when no entry with the given id exists", async () => {
+    const pool = makeMockPool(() =>
+      Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult),
+    );
+
+    const result = await readScratchpad(pool, 99);
+
+    expect(result).toBeNull();
+  });
+
+  it("returns the entry with id, title, and body when found", async () => {
+    const pool = makeMockPool(() =>
+      Promise.resolve({
+        rows: [{ id: 7, title: "My note", body: "Some content here." }],
+        rowCount: 1,
+      } as unknown as QueryResult),
+    );
+
+    const result = await readScratchpad(pool, 7);
+
+    expect(result).toEqual({ id: 7, title: "My note", body: "Some content here." });
+  });
+
+  it("queries with the correct id parameter", async () => {
+    let capturedValues: unknown[] | undefined;
+    const pool = makeMockPool((_text, values) => {
+      capturedValues = values;
+      return Promise.resolve({
+        rows: [{ id: 3, title: "Test", body: "Body text." }],
+        rowCount: 1,
+      } as unknown as QueryResult);
+    });
+
+    await readScratchpad(pool, 3);
+
+    expect(capturedValues).toEqual([3]);
   });
 });
