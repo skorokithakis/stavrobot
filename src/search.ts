@@ -44,6 +44,7 @@ export interface RankedMessage {
 export interface SearchResults {
   tableResults: TableResult[];
   messages: RankedMessage[];
+  queryEmbedding?: number[];
 }
 
 export async function runSearch(
@@ -152,12 +153,14 @@ export async function runSearch(
   // Semantic search on messages when embeddings are configured.
   const semanticRanks = new Map<number, number>();
   const semanticRows = new Map<number, MessageRow>();
+  let queryEmbedding: number[] | undefined;
 
   if (embeddingsConfig !== undefined) {
     const truncatedQuery = query.slice(0, TEXT_TRUNCATION_LIMIT);
     try {
       const embeddings = await fetchEmbeddings([truncatedQuery], embeddingsConfig.apiKey);
-      const queryVector = `[${embeddings[0].join(",")}]`;
+      queryEmbedding = embeddings[0];
+      const queryVector = `[${queryEmbedding.join(",")}]`;
 
       const semanticResult = await pool.query<MessageRow>(
         `SELECT m.id, m.role, m.content, m.created_at
@@ -213,7 +216,7 @@ export async function runSearch(
   mergedMessages.sort((a, b) => b.score - a.score);
   const topMessages = mergedMessages.slice(0, limit);
 
-  return { tableResults, messages: topMessages };
+  return { tableResults, messages: topMessages, queryEmbedding };
 }
 
 export function createSearchTool(pool: pg.Pool, embeddingsConfig?: EmbeddingsConfig): AgentTool {

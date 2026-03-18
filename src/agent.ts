@@ -1835,7 +1835,7 @@ export async function handlePrompt(
 
   agent.setSystemPrompt(systemPrompt);
 
-  let saveChain: Promise<void> = Promise.resolve();
+  let saveChain: Promise<unknown> = Promise.resolve();
 
   let resolvedMessage = userMessage;
 
@@ -1862,6 +1862,8 @@ export async function handlePrompt(
     }
   }
 
+  let autoSearchEmbedding: number[] | undefined;
+
   if (
     config.featureFlags?.autoSearch === true &&
     isMainAgent &&
@@ -1875,6 +1877,8 @@ export async function handlePrompt(
       const searchResults = await runSearch(pool, resolvedMessage, AUTO_SEARCH_LIMIT, getMainAgentId(), config.embeddings);
       const searchDuration = Date.now() - searchStart;
       log.debug(`[stavrobot] auto-search completed in ${searchDuration}ms (${searchResults.tableResults.length} table results, ${searchResults.messages.length} messages)`);
+
+      autoSearchEmbedding = searchResults.queryEmbedding;
 
       const hasResults = searchResults.tableResults.length > 0 || searchResults.messages.length > 0;
       if (hasResults) {
@@ -1933,7 +1937,17 @@ export async function handlePrompt(
         // external sender.
         if (message.role === "user" && !firstUserMessageSaved) {
           firstUserMessageSaved = true;
-          saveChain = saveChain.then(() => saveMessage(pool, message, agentId, senderIdentityId, senderAgentId));
+          saveChain = saveChain.then(async () => {
+            const messageId = await saveMessage(pool, message, agentId, senderIdentityId, senderAgentId);
+            if (autoSearchEmbedding !== undefined) {
+              const vectorLiteral = `[${autoSearchEmbedding.join(",")}]`;
+              await pool.query(
+                "INSERT INTO message_embeddings (message_id, embedding) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                [messageId, vectorLiteral],
+              );
+              log.debug(`[stavrobot] auto-search embedding stored for message ${messageId}`);
+            }
+          });
         } else {
           saveChain = saveChain.then(() => saveMessage(pool, message, agentId));
         }

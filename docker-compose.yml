@@ -33,7 +33,7 @@ services:
       PGUSER: ${POSTGRES_USER:-stavrobot}
       PGPASSWORD: ${POSTGRES_PASSWORD:-stavrobot}
       PGDATABASE: ${POSTGRES_DB:-stavrobot}
-      STAVROBOT_DEBUG: ${STAVROBOT_DEBUG:-0}
+      STAVROBOT_LOG_LEVEL: ${STAVROBOT_LOG_LEVEL:-info}
       CONFIG_PATH: /app/config/config.toml
       ALLOWLIST_PATH: /app/data/allowlist.json
     restart: unless-stopped

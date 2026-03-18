@@ -610,11 +610,12 @@ export async function saveMessage(
   agentId: number,
   senderIdentityId?: number,
   senderAgentId?: number,
-): Promise<void> {
-  await pool.query(
-    "INSERT INTO messages (role, content, agent_id, sender_identity_id, sender_agent_id) VALUES ($1, $2, $3, $4, $5)",
+): Promise<number> {
+  const result = await pool.query<{ id: number }>(
+    "INSERT INTO messages (role, content, agent_id, sender_identity_id, sender_agent_id) VALUES ($1, $2, $3, $4, $5) RETURNING id",
     [message.role, message, agentId, senderIdentityId ?? null, senderAgentId ?? null],
   );
+  return result.rows[0].id;
 }
 
 export async function initializeCronSchema(pool: pg.Pool): Promise<void> {

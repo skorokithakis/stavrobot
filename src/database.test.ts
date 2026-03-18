@@ -15,8 +15,9 @@ vi.mock("./toon.js", () => ({
 vi.mock("fs");
 
 import fs from "fs";
-import { resolveInterlocutor, seedOwner, seedCronEntries, upsertPage, deletePage, getPageByPath, getPageQueryByPath, readPage, listPageVersions, restorePageVersion, readScratchpad } from "./database.js";
+import { resolveInterlocutor, seedOwner, seedCronEntries, upsertPage, deletePage, getPageByPath, getPageQueryByPath, readPage, listPageVersions, restorePageVersion, readScratchpad, saveMessage } from "./database.js";
 import type { OwnerConfig } from "./config.js";
+import type { AgentMessage } from "@mariozechner/pi-agent-core";
 
 // Seed the owner so getOwnerInterlocutorId() doesn't throw. The mock pool
 // returns a stable owner ID of 42 for all tests in this file.
@@ -846,5 +847,73 @@ describe("readScratchpad", () => {
     await readScratchpad(pool, 3);
 
     expect(capturedValues).toEqual([3]);
+  });
+});
+
+describe("saveMessage — returns inserted id", () => {
+  const message: AgentMessage = {
+    role: "user",
+    content: "hello",
+    timestamp: 0,
+  };
+
+  it("returns the id from the RETURNING clause", async () => {
+    const pool = makeMockPool(() =>
+      Promise.resolve({
+        rows: [{ id: 77 }],
+        rowCount: 1,
+      } as unknown as QueryResult),
+    );
+
+    const id = await saveMessage(pool, message, 1);
+
+    expect(id).toBe(77);
+  });
+
+  it("uses RETURNING id in the INSERT query", async () => {
+    let capturedText = "";
+    const pool = makeMockPool((text) => {
+      capturedText = text;
+      return Promise.resolve({
+        rows: [{ id: 1 }],
+        rowCount: 1,
+      } as unknown as QueryResult);
+    });
+
+    await saveMessage(pool, message, 1);
+
+    expect(capturedText).toMatch(/RETURNING id/i);
+  });
+
+  it("passes senderIdentityId and senderAgentId as null when not provided", async () => {
+    let capturedValues: unknown[] | undefined;
+    const pool = makeMockPool((_text, values) => {
+      capturedValues = values;
+      return Promise.resolve({
+        rows: [{ id: 5 }],
+        rowCount: 1,
+      } as unknown as QueryResult);
+    });
+
+    await saveMessage(pool, message, 2);
+
+    expect(capturedValues?.[3]).toBeNull();
+    expect(capturedValues?.[4]).toBeNull();
+  });
+
+  it("passes senderIdentityId and senderAgentId when provided", async () => {
+    let capturedValues: unknown[] | undefined;
+    const pool = makeMockPool((_text, values) => {
+      capturedValues = values;
+      return Promise.resolve({
+        rows: [{ id: 10 }],
+        rowCount: 1,
+      } as unknown as QueryResult);
+    });
+
+    await saveMessage(pool, message, 1, 42, undefined);
+
+    expect(capturedValues?.[3]).toBe(42);
+    expect(capturedValues?.[4]).toBeNull();
   });
 });

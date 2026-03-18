@@ -120,12 +120,13 @@ botToken = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 [coder]
 model = "sonnet"
 
-# Optional OpenAI embeddings support. When present, the bot can generate and
-# store vector embeddings for semantic search. This improves the search tool
-# the agent can use to find more relevant messages.
+# Optional OpenAI embeddings support. When present, the bot generates vector
+# embeddings for semantic search. This improves recall (finding relevant
+# messages that don't share exact keywords) at the cost of ~50ms extra latency
+# per search. Without embeddings, search falls back to full-text only.
 # [embeddings]
 # apiKey = "your-openai-api-key-here"
 
 # Feature flags. All flags are optional and default to disabled.
 # [featureFlags]
-# autoSearch = true  # Automatically run a web search before responding to messages.
+# autoSearch = true  # Automatically search conversation history before responding.

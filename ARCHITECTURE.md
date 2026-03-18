@@ -255,7 +255,6 @@ Migrations are additive `ALTER TABLE … ADD COLUMN IF NOT EXISTS` statements.
 - Postgres connection: environment variables (`PGHOST`, `PGPORT`, `PGUSER`,
   `PGPASSWORD`, `PGDATABASE`).
 - Log level: `STAVROBOT_LOG_LEVEL` env var (`error`/`warn`/`info`/`debug`; default `info`).
-- Debug mode: `STAVROBOT_DEBUG=1` env var.
 - Feature gates in `config.toml` (presence of section enables the feature):
   - `[coder]` — enables `request_coding_task` tool and `manage_plugins create` action.
   - `[telegram]` — enables Telegram webhook + `send_telegram_message` tool.
