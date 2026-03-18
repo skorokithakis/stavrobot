@@ -41,6 +41,8 @@ services:
       - ./data/main:/app/config
       - ./data/app:/app/data
       - ./data/whatsapp:/app/data/whatsapp
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
