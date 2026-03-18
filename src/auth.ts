@@ -90,62 +90,6 @@ export async function getApiKey(config: Config): Promise<string> {
   throw new AuthError(`OAuth token refresh failed after ${MAX_RETRIES} attempts: ${finalMessage}`);
 }
 
-// Unconditionally refreshes the OAuth token and persists the new credentials to
-// disk. Unlike getApiKey (which only refreshes on expiry), this ensures we
-// rotate tokens proactively so that server-side revocations are recovered from
-// within one refresh interval.
-async function refreshAndPersistToken(config: Config): Promise<void> {
-  const authFile = config.authFile as string;
-
-  let credentials: CredentialsMap;
-  try {
-    credentials = JSON.parse(fs.readFileSync(authFile, "utf-8")) as CredentialsMap;
-  } catch (readError) {
-    if (readError instanceof Error && (readError as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new AuthError("Auth file not found. Login required.");
-    }
-    throw readError;
-  }
-
-  const provider = getOAuthProvider(config.provider);
-  if (provider === undefined) {
-    throw new AuthError(`Unknown OAuth provider "${config.provider}".`);
-  }
-
-  const providerCredentials = credentials[config.provider];
-  if (providerCredentials === undefined) {
-    throw new AuthError(`No OAuth credentials found for provider "${config.provider}" in ${authFile}. Run the Pi coding agent /login command to authenticate.`);
-  }
-
-  log.debug(`[stavrobot] Background refresh: current refresh=...${providerCredentials.refresh.slice(-8)}, access=...${providerCredentials.access.slice(-8)}, expires=${providerCredentials.expires}`);
-
-  let lastError: unknown;
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    try {
-      const refreshed = await provider.refreshToken(providerCredentials);
-      credentials[config.provider] = refreshed;
-      fs.writeFileSync(authFile, JSON.stringify(credentials, null, 2));
-
-      log.debug(`[stavrobot] Background refresh: new refresh=...${refreshed.refresh.slice(-8)}, access=...${refreshed.access.slice(-8)}, expires=${refreshed.expires}`);
-      return;
-    } catch (error) {
-      lastError = error;
-      const errorMessage = error instanceof Error ? error.message : String(error);
-
-      if (error instanceof AuthError) {
-        throw error;
-      }
-
-      const delayMilliseconds = BASE_DELAY_MILLISECONDS * Math.pow(2, attempt);
-      log.error(`[stavrobot] Background token refresh failed (attempt ${attempt + 1}/${MAX_RETRIES}): ${errorMessage}. Retrying in ${delayMilliseconds}ms...`);
-      await sleep(delayMilliseconds);
-    }
-  }
-
-  const finalMessage = lastError instanceof Error ? lastError.message : String(lastError);
-  throw new Error(`Background token refresh failed after ${MAX_RETRIES} attempts: ${finalMessage}`);
-}
-
 export function startBackgroundTokenRefresh(config: Config): void {
   if (config.apiKey !== undefined) {
     return;
@@ -154,8 +98,8 @@ export function startBackgroundTokenRefresh(config: Config): void {
   setInterval(() => {
     void (async () => {
       try {
-        await refreshAndPersistToken(config);
-        log.info("[stavrobot] Background token refresh succeeded.");
+        await getApiKey(config);
+        log.debug("[stavrobot] Background token refresh succeeded.");
       } catch (error) {
         log.error("[stavrobot] Background token refresh failed:", error instanceof Error ? error.message : String(error));
       }
