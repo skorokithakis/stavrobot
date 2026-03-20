@@ -27,7 +27,7 @@ It has all the nice features of an AI assistant, but focuses on sandboxing, isol
 1. Copy `config.example.toml` to `data/main/config.toml`.
 2. Fill in API keys and settings. The example file has comments explaining each section.
 3. At minimum, set `authFile` (or `apiKey`) and `publicHostname`. Everything else is optional.
-4. Copy `env.example` to `.env` and set your timezone (`TZ`). Postgres credentials and other environment settings can also be overridden there. The defaults work out of the box with docker-compose.
+4. Copy `env.example` to `.env` and set your timezone (`TZ`). Postgres credentials and other environment settings can also be overridden there. **Always set `POSTGRES_PASSWORD` to something secure** — the default is a weak placeholder and should not be used in production.
 
 ### Authentication
 
