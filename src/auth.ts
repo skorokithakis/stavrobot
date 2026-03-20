@@ -54,7 +54,7 @@ export async function getApiKey(config: Config): Promise<string> {
 
       let providerCredentials = credentials[config.provider];
       if (providerCredentials === undefined) {
-        throw new AuthError(`No OAuth credentials found for provider "${config.provider}" in ${authFile}. Run the Pi coding agent /login command to authenticate.`);
+        throw new AuthError(`No OAuth credentials found for provider "${config.provider}". Visit /login to authenticate.`);
       }
 
       log.debug(`[stavrobot] OAuth token state: refresh=...${providerCredentials.refresh.slice(-8)}, access=...${providerCredentials.access.slice(-8)}, expires=${providerCredentials.expires}`);

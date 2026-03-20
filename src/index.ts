@@ -12,7 +12,7 @@ import { initializeScheduler } from "./scheduler.js";
 import { initializeEmbeddingsWorker } from "./embeddings.js";
 import type { TelegramConfig } from "./config.js";
 import { registerTelegramWebhook, handleTelegramWebhook } from "./telegram.js";
-import { serveLoginPage, handleLoginPost } from "./login.js";
+import { serveLoginPage, handleLoginEvents, handleLoginRespond } from "./login.js";
 import {
   serveExplorerPage,
   handleTablesRequest,
@@ -64,6 +64,16 @@ function isPublicRoute(method: string, pathname: string): boolean {
   }
   // Page queries have per-page auth: the handler checks is_public and enforces auth itself.
   if (method === "GET" && pathname.startsWith("/api/pages/") && pathname.includes("/queries/")) {
+    return true;
+  }
+  // The login flow must be accessible without auth — its whole purpose is to obtain credentials.
+  if (method === "GET" && pathname === "/login") {
+    return true;
+  }
+  if (method === "GET" && pathname === "/login/events") {
+    return true;
+  }
+  if (method === "POST" && pathname === "/login/respond") {
     return true;
   }
   return false;
@@ -501,10 +511,12 @@ async function main(): Promise<void> {
         response.writeHead(404, { "Content-Type": "application/json" });
         response.end(JSON.stringify({ error: "Not found" }));
       }
-    } else if (request.method === "GET" && pathname === "/providers/anthropic/login") {
-      serveLoginPage(response);
-    } else if (request.method === "POST" && pathname === "/providers/anthropic/login") {
-      void handleLoginPost(request, response, config);
+    } else if (request.method === "GET" && pathname === "/login") {
+      serveLoginPage(response, config);
+    } else if (request.method === "GET" && pathname === "/login/events") {
+      void handleLoginEvents(request, response, config);
+    } else if (request.method === "POST" && pathname === "/login/respond") {
+      void handleLoginRespond(request, response);
     } else if (request.method === "GET" && pathname === "/explorer") {
       serveExplorerPage(response);
     } else if (request.method === "GET" && pathname === "/api/explorer/tables") {

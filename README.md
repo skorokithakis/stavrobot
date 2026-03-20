@@ -34,8 +34,8 @@ It has all the nice features of an AI assistant, but focuses on sandboxing, isol
 The app supports two authentication modes: API key or OAuth.
 
 - **API key:** Set `apiKey` in `config.toml`. No login or logout needed.
-- **OAuth:** Set `authFile` in `config.toml` (a path where credentials will be stored). The login page below is for Anthropic; Pi supports other OAuth providers as well.
-  - **Login:** Visit `<your-hostname>/providers/anthropic/login` in a browser. Follow the OAuth flow, paste the callback code, and credentials are saved to the auth file. If auth expires while the bot is running, it sends a message with the login URL to you via your messaging platform.
+- **OAuth:** Set `authFile` in `config.toml` (a path where credentials will be stored). The login page works with any OAuth provider supported by Pi.
+  - **Login:** Visit `<your-hostname>/login` in a browser. Follow the prompts on the page, and credentials are saved to the auth file. If auth expires while the bot is running, it sends a message with the login URL to you via your messaging platform.
   - **Logout:** Delete the file at the `authFile` path. The bot will detect missing credentials on the next message and prompt you to log in again.
 
 ### Claude Code setup
