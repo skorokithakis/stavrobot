@@ -5,6 +5,4 @@ compile_sass = false
 build_search_index = false
 minify_html = true
 
-[markdown]
-
 [extra]
