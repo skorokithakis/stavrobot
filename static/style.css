@@ -374,6 +374,8 @@ body {
   .arch-cards { grid-template-columns: 1fr; }
   .nav-links { gap: 16px; }
   .site-nav { flex-wrap: wrap; gap: 12px; }
+  .site-nav .nav-title { flex: 1; }
+  .nav-links { width: 100%; order: 1; }
   .hero-buttons { flex-direction: column; align-items: center; }
   .terminal-body { font-size: 12px; }
 }
