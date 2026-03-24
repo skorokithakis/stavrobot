@@ -376,6 +376,7 @@ body {
   .site-nav { flex-wrap: wrap; gap: 12px; }
   .site-nav .nav-title { flex: 1; }
   .nav-links { width: 100%; order: 1; }
+  .hide-mobile { display: none; }
   .hero-buttons { flex-direction: column; align-items: center; }
   .terminal-body { font-size: 12px; }
 }
