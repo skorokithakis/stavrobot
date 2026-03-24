@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="hero">
+  <img src="https://github.com/skorokithakis/stavrobot/raw/master/misc/stavrobot.jpg" alt="Stavrobot" class="hero-avatar">
+  <h1 class="title-font gradient-text">Stavrobot</h1>
+  <h2 class="hero-sub">Your personal AI assistant.<br><span class="gradient-text">Secure. Light. Extensible.</span></h2>
+  <p class="tagline">Runs in containers, talks on your messaging apps, remembers what matters. Deploy with <code>docker compose up</code>.</p>
+  <div class="hero-buttons">
+    <a href="https://github.com/skorokithakis/stavrobot" class="cta-button">Get started</a>
+    <a href="#features" class="cta-button-secondary mono">Features</a>
+  </div>
+</div>
+
+<div class="section-label" id="features">Features</div>
+
+<div class="feature-grid">
+  <div class="feature-card">
+    <h3>Sandboxed</h3>
+    <p>Everything in containers. Your host is invisible to the AI.</p>
+  </div>
+
+  <div class="feature-card">
+    <h3>Lightweight</h3>
+    <p>One container for plugins, separated by Unix permissions. No bloat.</p>
+  </div>
+
+  <div class="feature-card">
+    <h3>Any model</h3>
+    <p>Local, OpenRouter, Anthropic, OpenAI. Whatever <a href="https://pi.dev" style="color: #4fc3f7;">Pi</a> supports.</p>
+  </div>
+
+  <div class="feature-card">
+    <h3>Messaging</h3>
+    <p>Signal, Telegram, WhatsApp, email. Two-way, with attachments.</p>
+  </div>
+
+  <div class="feature-card">
+    <h3>Three-tier knowledge</h3>
+    <p>Memories, scratchpad, and database. Intelligent context retrieval.</p>
+  </div>
+
+  <div class="feature-card">
+    <h3>Low token usage</h3>
+    <p>Uses <a href="https://github.com/toon-format/toon" style="color: #4fc3f7;">TOON</a> internally. Optimized to keep costs down.</p>
+  </div>
+
+  <div class="feature-card">
+    <h3>Plugins</h3>
+    <p>Install from a git URL. Each plugin runs as its own system user.</p>
+  </div>
+
+  <div class="feature-card">
+    <h3>Subagents</h3>
+    <p>Spins up agents with their own context to message people on your behalf.</p>
+  </div>
+
+  <div class="feature-card">
+    <h3>Self-programming</h3>
+    <p>Writes its own code. Sandboxed Python with <code>uv</code>.</p>
+  </div>
+
+  <div class="feature-card">
+    <h3>Scheduling</h3>
+    <p>Recurring and one-shot tasks. The agent manages its own queue.</p>
+  </div>
+</div>
+
+<div class="section-label" id="quickstart">Quickstart</div>
+
+<div class="quickstart">
+  <div class="terminal">
+    <div class="terminal-header">
+      <div class="terminal-dot" style="background: #ff5f57;"></div>
+      <div class="terminal-dot" style="background: #febc2e;"></div>
+      <div class="terminal-dot" style="background: #28c840;"></div>
+      <span class="terminal-title mono">Terminal</span>
+    </div>
+    <div class="terminal-body mono">
+      <div class="terminal-line"><span class="terminal-prompt">$</span> <span class="terminal-cmd">cp</span> env.example .env <span class="terminal-comment"># set password &amp; timezone</span></div>
+      <div class="terminal-line"><span class="terminal-prompt">$</span> <span class="terminal-cmd">cp</span> config.example.toml data/main/config.toml <span class="terminal-comment"># add API key &amp; bot token</span></div>
+      <div class="terminal-line"><span class="terminal-prompt">$</span> <span class="terminal-cmd">docker compose</span> up --build</div>
+    </div>
+  </div>
+  <p class="quickstart-note">Create a Telegram bot via <a href="https://t.me/BotFather">@BotFather</a>, fill in the config, and you're running.</p>
+</div>
+
+<div class="section-label">Architecture</div>
+
+<div class="architecture">
+  <div class="arch-cards">
+    <div class="arch-card">
+      <h4>app</h4>
+      <p>TypeScript server. Chat API, webhooks, WhatsApp via Baileys.</p>
+    </div>
+    <div class="arch-card">
+      <h4>postgres</h4>
+      <p>PostgreSQL 17. The bot gets full SQL access.</p>
+    </div>
+    <div class="arch-card">
+      <h4>plugin-runner</h4>
+      <p>Executes plugins. Local or git-installed.</p>
+    </div>
+    <div class="arch-card">
+      <h4>coder</h4>
+      <p>Claude Code agent. Creates and modifies plugins live.</p>
+    </div>
+  </div>
+</div>
+
+<div class="cta-section">
+  <a href="https://github.com/skorokithakis/stavrobot" class="cta-button">View on GitHub</a>
+</div>
+{% endblock %}

@@ -1,0 +1,10 @@
+base_url = "https://stavrobot.stavros.io"
+title = "Stavrobot"
+description = "A personal AI assistant with all the access it needs, and no more."
+compile_sass = false
+build_search_index = false
+minify_html = true
+
+[markdown]
+
+[extra]

@@ -1,4 +1,5 @@
 output/
+public/
 data/
 cache/
 node_modules/
