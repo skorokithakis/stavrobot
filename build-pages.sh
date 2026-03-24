@@ -3,9 +3,14 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+if ! command -v zola &>/dev/null; then
+	ZOLA_VERSION="0.22.1"
+	echo "Zola not found, installing v${ZOLA_VERSION}..."
+	curl -sL "https://github.com/getzola/zola/releases/download/v${ZOLA_VERSION}/zola-v${ZOLA_VERSION}-x86_64-unknown-linux-gnu.tar.gz" | tar xz -C /usr/local/bin
+fi
+
 rm -rf "$REPO_ROOT/public"
 
-# Build the Zola site into public/.
 zola build
 
 # Copy raw skill .md files into the Zola output so they're served as-is at
