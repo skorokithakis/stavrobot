@@ -156,6 +156,10 @@ body {
   color: #fff;
   margin-bottom: 4px;
 }
+.feature-emoji {
+  display: inline;
+  margin-right: 6px;
+}
 .feature-card p {
   font-size: 14px;
   color: rgba(255,255,255,0.5);
@@ -173,6 +177,14 @@ body {
   border-radius: 3px;
   font-size: 13px;
   color: rgba(255,255,255,0.6);
+}
+
+/* Security grid */
+.security { margin-bottom: 60px; }
+.security-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
 }
 
 /* Terminal quickstart */
@@ -358,6 +370,7 @@ body {
   .hero h1 { font-size: 36px; }
   .hero-sub { font-size: 20px; }
   .feature-grid { grid-template-columns: 1fr; }
+  .security-grid { grid-template-columns: 1fr; }
   .arch-cards { grid-template-columns: 1fr; }
   .nav-links { gap: 16px; }
   .site-nav { flex-wrap: wrap; gap: 12px; }

@@ -16,52 +16,52 @@
 
 <div class="feature-grid">
   <div class="feature-card">
-    <h3>Sandboxed</h3>
+    <h3><span class="feature-emoji">🔒</span> Sandboxed</h3>
     <p>Everything in containers. Your host is invisible to the AI.</p>
   </div>
 
   <div class="feature-card">
-    <h3>Lightweight</h3>
+    <h3><span class="feature-emoji">🪶</span> Lightweight</h3>
     <p>One container for plugins, separated by Unix permissions. No bloat.</p>
   </div>
 
   <div class="feature-card">
-    <h3>Any model</h3>
-    <p>Local, OpenRouter, Anthropic, OpenAI. Whatever <a href="https://pi.dev" style="color: #4fc3f7;">Pi</a> supports.</p>
+    <h3><span class="feature-emoji">🧠</span> Any model</h3>
+    <p>Local, OpenRouter, Anthropic, OpenAI. Whatever <a href="https://pi.dev">Pi</a> supports.</p>
   </div>
 
   <div class="feature-card">
-    <h3>Messaging</h3>
+    <h3><span class="feature-emoji">💬</span> Messaging</h3>
     <p>Signal, Telegram, WhatsApp, email. Two-way, with attachments.</p>
   </div>
 
   <div class="feature-card">
-    <h3>Three-tier knowledge</h3>
+    <h3><span class="feature-emoji">📚</span> Three-tier knowledge</h3>
     <p>Memories, scratchpad, and database. Intelligent context retrieval.</p>
   </div>
 
   <div class="feature-card">
-    <h3>Low token usage</h3>
-    <p>Uses <a href="https://github.com/toon-format/toon" style="color: #4fc3f7;">TOON</a> internally. Optimized to keep costs down.</p>
+    <h3><span class="feature-emoji">⚡</span> Low token usage</h3>
+    <p>Uses <a href="https://github.com/toon-format/toon">TOON</a> internally. Optimized to keep costs down.</p>
   </div>
 
   <div class="feature-card">
-    <h3>Plugins</h3>
+    <h3><span class="feature-emoji">🧩</span> Plugins</h3>
     <p>Install from a git URL. Each plugin runs as its own system user.</p>
   </div>
 
   <div class="feature-card">
-    <h3>Subagents</h3>
-    <p>Spins up agents with their own context to message people on your behalf.</p>
+    <h3><span class="feature-emoji">🤖</span> Subagents</h3>
+    <p>Talks to other people only via isolated subagents, for added security.</p>
   </div>
 
   <div class="feature-card">
-    <h3>Self-programming</h3>
+    <h3><span class="feature-emoji">✨</span> Self-programming</h3>
     <p>Writes its own code. Sandboxed Python with <code>uv</code>.</p>
   </div>
 
   <div class="feature-card">
-    <h3>Scheduling</h3>
+    <h3><span class="feature-emoji">⏰</span> Scheduling</h3>
     <p>Recurring and one-shot tasks. The agent manages its own queue.</p>
   </div>
 </div>
@@ -83,6 +83,37 @@
     </div>
   </div>
   <p class="quickstart-note">Create a Telegram bot via <a href="https://t.me/BotFather">@BotFather</a>, fill in the config, and you're running.</p>
+</div>
+
+<div class="section-label" id="security">Security</div>
+
+<div class="security">
+  <div class="security-grid">
+    <div class="feature-card">
+      <h3><span class="feature-emoji">📦</span> Container isolation</h3>
+      <p>The AI runs inside Docker containers. Your host OS is completely invisible.</p>
+    </div>
+    <div class="feature-card">
+      <h3><span class="feature-emoji">🔐</span> No access to secrets</h3>
+      <p>API keys and credentials are never exposed to the AI.</p>
+    </div>
+    <div class="feature-card">
+      <h3><span class="feature-emoji">👤</span> Unix file isolation</h3>
+      <p>Each plugin runs as a dedicated system user. Plugins can't read each other's files.</p>
+    </div>
+    <div class="feature-card">
+      <h3><span class="feature-emoji">🛡️</span> No direct messaging</h3>
+      <p>The AI never talks to other people directly. All conversations go through isolated subagents.</p>
+    </div>
+    <div class="feature-card">
+      <h3><span class="feature-emoji">📋</span> Contact whitelist</h3>
+      <p>Every contact must be manually added to the allowlist before the bot can message them.</p>
+    </div>
+    <div class="feature-card">
+      <h3><span class="feature-emoji">🚫</span> No self-modification of permissions</h3>
+      <p>The bot cannot modify its own allowlist, access controls, or security settings.</p>
+    </div>
+  </div>
 </div>
 
 <div class="section-label">Architecture</div>
