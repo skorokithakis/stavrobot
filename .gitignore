@@ -1,5 +1,6 @@
 output/
 public/
+.bin/
 data/
 cache/
 node_modules/
