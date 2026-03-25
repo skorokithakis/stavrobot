@@ -175,6 +175,7 @@ body {
 .feature-emoji {
   display: inline;
   margin-right: 6px;
+  filter: grayscale(1);
 }
 .feature-card p {
   font-size: 14px;
