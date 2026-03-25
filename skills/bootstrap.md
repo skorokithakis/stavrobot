@@ -1,6 +1,6 @@
 ---
 title: Skill system bootstrap
-description: Bootstraps the skill system by creating the skills table and teaching the bot how to discover, install, and upgrade skills.
+description: This is the foundational skill that sets up the entire skills system. It creates the skills database table and teaches Stavrobot how to discover, install, and upgrade skills from the skill index. Install this first before any other skill.
 version: 3
 author: Stavros Korokithakis
 ---

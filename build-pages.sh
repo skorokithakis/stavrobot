@@ -13,6 +13,60 @@ fi
 
 rm -rf "$REPO_ROOT/public"
 
+# Generate Zola content files for the skills section before building.
+# These are derived from skills/*.md and are not committed (see .gitignore).
+# Remove first to prevent ghost pages from deleted or renamed skills.
+rm -rf "$REPO_ROOT/content/skills"
+mkdir -p "$REPO_ROOT/content/skills"
+
+cat >"$REPO_ROOT/content/skills/_index.md" <<'ZOLA_EOF'
++++
+title = "Skills"
+sort_by = "title"
+template = "skills/list.html"
++++
+ZOLA_EOF
+
+if [ -d "$REPO_ROOT/skills" ]; then
+	for skill_file in "$REPO_ROOT/skills/"*.md; do
+		[ -f "$skill_file" ] || continue
+
+		filename="$(basename "$skill_file")"
+		slug="${filename%.md}"
+
+		title="$(awk '/^---/{f=!f; next} f && /^title:/{sub(/^title:[[:space:]]*/, ""); print; exit}' "$skill_file")"
+		description="$(awk '/^---/{f=!f; next} f && /^description:/{sub(/^description:[[:space:]]*/, ""); print; exit}' "$skill_file")"
+		version="$(awk '/^---/{f=!f; next} f && /^version:/{sub(/^version:[[:space:]]*/, ""); print; exit}' "$skill_file")"
+		author="$(awk '/^---/{f=!f; next} f && /^author:/{sub(/^author:[[:space:]]*/, ""); print; exit}' "$skill_file")"
+
+		# Extract the body (everything after the closing --- of the front matter).
+		# Count the first two --- delimiters (front matter open/close) and skip them.
+		# Any --- lines after the second delimiter are body content and are printed verbatim.
+		body="$(awk '/^---/ && count < 2 {count++; next} count >= 2' "$skill_file")"
+
+		# Write a Zola content file with TOML front matter.
+		# version and author go under [extra] since Zola only knows title/description natively.
+		# is_bootstrap lets the list template render bootstrap separately from regular skills.
+		is_bootstrap="false"
+		[ "$filename" = "bootstrap.md" ] && is_bootstrap="true"
+
+		{
+			echo '+++'
+			echo "title = $(printf '%s' "$title" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')"
+			echo "description = $(printf '%s' "$description" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')"
+			echo "template = \"skills/page.html\""
+			echo ""
+			echo "[extra]"
+			echo "version = $(printf '%s' "$version" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')"
+			echo "author = $(printf '%s' "$author" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')"
+			echo "is_bootstrap = $is_bootstrap"
+			echo '+++'
+			echo ""
+			printf '%s\n' "$body"
+		} >"$REPO_ROOT/content/skills/${slug}.md"
+	done
+fi
+
 zola build
 
 # Copy raw skill .md files into the Zola output so they're served as-is at

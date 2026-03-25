@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}Skills — {{ config.title }}{% endblock %}
+
+{% block content %}
+<div class="section-label">Skills</div>
+
+{% set bootstrap_pages = section.pages | filter(attribute="extra.is_bootstrap", value=true) %}
+{% set skill_pages = section.pages | filter(attribute="extra.is_bootstrap", value=false) %}
+
+{% if bootstrap_pages %}
+{% set bootstrap = bootstrap_pages | first %}
+<a href="{{ bootstrap.permalink }}" class="skills-bootstrap-section">
+  <h2 class="skills-bootstrap-heading">Install the skills system</h2>
+  <p class="skills-bootstrap-desc">Before installing any skill, you need to bootstrap the skill system. Click here to view the bootstrap skill — it sets up the database table and teaches the bot how to discover, install, and upgrade skills.</p>
+</a>
+{% endif %}
+
+<ul class="skills-list">
+  {% for page in skill_pages %}
+  <li class="skills-list-item">
+    <a href="{{ page.permalink }}" class="skills-list-link">
+      <div class="skills-list-title">{{ page.title }}</div>
+      <div class="skills-list-description">{{ page.description }}</div>
+      <div class="skills-list-meta mono">
+        <span>v{{ page.extra.version }}</span>
+        <span class="skill-meta-sep">·</span>
+        <span>{{ page.extra.author }}</span>
+      </div>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% endblock %}

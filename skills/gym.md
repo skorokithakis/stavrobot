@@ -1,6 +1,6 @@
 ---
 title: Gym tracking
-description: Track workouts, exercises, body measurements, and view progress over time.
+description: A comprehensive gym tracking system. Log workouts with individual sets, reps, and weights for each exercise, track body weight and measurements over time, and view your progress on interactive charts. Includes an exercise catalog and per-workout detail pages.
 version: 2
 author: Stavros Korokithakis
 ---

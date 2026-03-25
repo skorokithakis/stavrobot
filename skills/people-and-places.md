@@ -1,6 +1,6 @@
 ---
 title: People and places
-description: Track significant people and places in the user's life, with fuzzy search, tagging, and diary integration.
+description: Keep track of the important people and places in your life. Store relationships, closeness ratings, notes, and tags, with fuzzy search powered by trigram matching. Stavrobot will proactively offer to remember new people and places as they come up in conversation, and surface relevant context when you mention them later.
 version: 1
 author: Stavros Korokithakis
 ---

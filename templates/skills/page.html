@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page.title }} — {{ config.title }}{% endblock %}
+
+{% block content %}
+<div class="skill-detail">
+  <div class="skill-detail-header">
+    <a href="/skills/" class="skill-back mono">← Skills</a>
+    <h1 class="skill-detail-title">{{ page.title }}</h1>
+    <p class="skill-detail-description">{{ page.description }}</p>
+    <div class="skill-detail-meta mono">
+      <span>v{{ page.extra.version }}</span>
+      <span class="skill-meta-sep">·</span>
+      <span>{{ page.extra.author }}</span>
+    </div>
+    <button class="cta-button skill-install-btn" id="install-btn">Install skill</button>
+  </div>
+
+  <h2 class="skill-body-heading">Skill contents</h2>
+  <div class="skill-body-container prose">
+    {{ page.content | safe }}
+  </div>
+</div>
+
+<!-- Install modal -->
+<div class="modal-overlay" id="modal-overlay" aria-hidden="true">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <button class="modal-close" id="modal-close" aria-label="Close">×</button>
+    <p class="modal-instruction" id="modal-title">Tell Stavrobot the following:</p>
+    <div class="modal-input-row">
+      <textarea
+        class="modal-input mono"
+        id="modal-input"
+        rows="3"
+        readonly
+      >Please install the skill {{ config.base_url }}/skills/{{ page.slug }}.md</textarea>
+      <button class="modal-copy-btn mono" id="modal-copy-btn">Copy</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var overlay = document.getElementById('modal-overlay');
+    var installBtn = document.getElementById('install-btn');
+    var closeBtn = document.getElementById('modal-close');
+    var copyBtn = document.getElementById('modal-copy-btn');
+    var input = document.getElementById('modal-input');
+
+    function openModal() {
+      overlay.removeAttribute('aria-hidden');
+      overlay.classList.add('is-open');
+    }
+
+    function closeModal() {
+      overlay.setAttribute('aria-hidden', 'true');
+      overlay.classList.remove('is-open');
+      copyBtn.textContent = 'Copy';
+      copyBtn.classList.remove('copied');
+    }
+
+    installBtn.addEventListener('click', openModal);
+    closeBtn.addEventListener('click', closeModal);
+
+    overlay.addEventListener('click', function (event) {
+      if (event.target === overlay) {
+        closeModal();
+      }
+    });
+
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && overlay.classList.contains('is-open')) {
+        closeModal();
+      }
+    });
+
+    copyBtn.addEventListener('click', function () {
+      navigator.clipboard.writeText(input.value).then(function () {
+        copyBtn.textContent = 'Copied!';
+        copyBtn.classList.add('copied');
+      });
+    });
+  })();
+</script>
+{% endblock %}

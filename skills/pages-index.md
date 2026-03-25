@@ -1,6 +1,6 @@
 ---
 title: Pages index
-description: A page that lists all pages in the system with links and metadata.
+description: Creates a central directory page that lists all pages registered in the system. Each page is shown as a clickable card with its path, public/private status, and last update time. Useful for navigating between skill-generated pages.
 version: 1
 author: Stavros Korokithakis
 ---

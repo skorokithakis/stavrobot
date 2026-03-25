@@ -1,6 +1,6 @@
 ---
 title: Agent conversations
-description: View the full conversation history for any subagent.
+description: This skill creates a page that shows you the full conversation history of any subagent. Select the subagent you want to view from the dropdown, and the entire history is displayed as a chat, with nicely-formatted messages, tool calls, and errors.
 version: 1
 author: Stavros Korokithakis
 ---

@@ -1,6 +1,6 @@
 ---
 title: Todos
-description: Simple task tracking with titles, descriptions, due dates, and completion status.
+description: A straightforward task tracker. Create todos with titles, descriptions, and optional due dates, then view them on a clean page split into open and completed sections. Overdue tasks are highlighted, and completed tasks are shown with strikethrough and completion dates.
 version: 2
 author: Stavros Korokithakis
 ---

@@ -1,6 +1,6 @@
 ---
 title: Trip tracking
-description: Track trips, flights, reservations, packing lists, and get flight status alerts.
+description: Plan and track your trips with flights, reservations, and packing lists. Includes automatic flight status monitoring — Stavrobot will start checking your flight 4 hours before departure and message you immediately if there are any delays, cancellations, or gate changes.
 version: 2
 author: Stavros Korokithakis
 ---
