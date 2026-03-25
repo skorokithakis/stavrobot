@@ -241,8 +241,14 @@ body {
   color: rgba(255,255,255,0.5);
   margin-bottom: 14px;
 }
+.ai-install-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
 .ai-install-url {
-  display: block;
+  flex: 1;
   font-family: 'JetBrains Mono', monospace;
   font-size: 15px;
   background: rgba(255,255,255,0.06);
@@ -250,8 +256,25 @@ body {
   border-radius: 8px;
   padding: 14px 20px;
   color: #4fc3f7;
-  margin-bottom: 14px;
   word-break: break-all;
+  text-align: left;
+}
+.ai-copy-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 10px;
+  color: rgba(255,255,255,0.5);
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s;
+}
+.ai-copy-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.85);
 }
 .ai-install-sub {
   font-size: 13px !important;
