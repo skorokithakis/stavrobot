@@ -173,9 +173,11 @@ body {
   margin-bottom: 4px;
 }
 .feature-emoji {
-  display: inline;
+  display: inline-block;
+  width: 20px;
+  height: 20px;
   margin-right: 6px;
-  filter: grayscale(1);
+  vertical-align: -4px;
 }
 .feature-card p {
   font-size: 14px;
@@ -319,7 +321,7 @@ body {
   white-space: nowrap;
   overflow-x: auto;
 }
-.terminal-prompt { color: rgba(255,255,255,0.3); }
+.terminal-prompt { color: rgba(255,255,255,0.3); margin-right: 8px; }
 .terminal-cmd { color: #4fc3f7; }
 .terminal-comment { color: rgba(255,255,255,0.2); }
 .quickstart-note {
