@@ -203,6 +203,62 @@ body {
   gap: 12px;
 }
 
+/* Quickstart tabs */
+.quickstart-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 0;
+}
+.quickstart-tab {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  padding: 10px 24px;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-bottom: none;
+  color: rgba(255,255,255,0.35);
+  cursor: pointer;
+  border-radius: 8px 8px 0 0;
+  transition: all 0.2s;
+}
+.quickstart-tab:first-child { border-right: none; }
+.quickstart-tab.active {
+  background: rgba(255,255,255,0.03);
+  color: rgba(255,255,255,0.7);
+}
+.quickstart-tab:hover:not(.active) { color: rgba(255,255,255,0.5); }
+.quickstart-panel { display: none; }
+.quickstart-panel.active { display: block; }
+.ai-install-box {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 0 12px 12px 12px;
+  padding: 32px;
+  text-align: center;
+}
+.ai-install-box p {
+  font-size: 15px;
+  color: rgba(255,255,255,0.5);
+  margin-bottom: 14px;
+}
+.ai-install-url {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 14px 20px;
+  color: #4fc3f7;
+  margin-bottom: 14px;
+  word-break: break-all;
+}
+.ai-install-sub {
+  font-size: 13px !important;
+  color: rgba(255,255,255,0.25) !important;
+  margin-bottom: 0 !important;
+}
+
 /* Terminal quickstart */
 .quickstart {
   margin-bottom: 60px;
@@ -210,7 +266,7 @@ body {
 .terminal {
   background: rgba(255,255,255,0.03);
   border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 12px;
+  border-radius: 0 12px 12px 12px;
   overflow: hidden;
 }
 .terminal-header {

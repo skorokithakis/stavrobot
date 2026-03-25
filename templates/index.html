@@ -83,23 +83,46 @@
 <div class="section-label" id="quickstart">Quickstart</div>
 
 <div class="quickstart">
-  <div class="terminal">
-    <div class="terminal-header">
-      <div class="terminal-dot" style="background: #ff5f57;"></div>
-      <div class="terminal-dot" style="background: #febc2e;"></div>
-      <div class="terminal-dot" style="background: #28c840;"></div>
-      <span class="terminal-title mono">Terminal</span>
+  <div class="quickstart-tabs">
+    <button class="quickstart-tab active" data-tab="manual">Manual</button>
+    <button class="quickstart-tab" data-tab="via-ai">Via AI</button>
+  </div>
+  <div class="quickstart-panel active" data-panel="manual">
+    <div class="terminal">
+      <div class="terminal-header">
+        <div class="terminal-dot" style="background: #ff5f57;"></div>
+        <div class="terminal-dot" style="background: #febc2e;"></div>
+        <div class="terminal-dot" style="background: #28c840;"></div>
+        <span class="terminal-title mono">Terminal</span>
+      </div>
+      <div class="terminal-body mono">
+        <div class="terminal-line"><span class="terminal-comment"># set password &amp; timezone</span></div>
+        <div class="terminal-line"><span class="terminal-prompt">$</span> <span class="terminal-cmd">cp</span> env.example .env</div>
+        <div class="terminal-line"><span class="terminal-comment"># add bot token &amp; config</span></div>
+        <div class="terminal-line"><span class="terminal-prompt">$</span> <span class="terminal-cmd">cp</span> config.example.toml data/main/config.toml</div>
+        <div class="terminal-line"><span class="terminal-prompt">$</span> <span class="terminal-cmd">docker compose</span> up --build</div>
+      </div>
     </div>
-    <div class="terminal-body mono">
-      <div class="terminal-line"><span class="terminal-comment"># set password &amp; timezone</span></div>
-      <div class="terminal-line"><span class="terminal-prompt">$</span> <span class="terminal-cmd">cp</span> env.example .env</div>
-      <div class="terminal-line"><span class="terminal-comment"># add API key &amp; bot token</span></div>
-      <div class="terminal-line"><span class="terminal-prompt">$</span> <span class="terminal-cmd">cp</span> config.example.toml data/main/config.toml</div>
-      <div class="terminal-line"><span class="terminal-prompt">$</span> <span class="terminal-cmd">docker compose</span> up --build</div>
+    <p class="quickstart-note">Create a Telegram bot via <a href="https://t.me/BotFather">@BotFather</a>, fill in the config, and you're running.</p>
+  </div>
+  <div class="quickstart-panel" data-panel="via-ai">
+    <div class="ai-install-box">
+      <p>Tell your coding AI to fetch and follow the installation guide:</p>
+      <code class="ai-install-url">https://stavrobot.stavros.io/INSTALL.md</code>
+      <p class="ai-install-sub">Works with Claude Code, Cursor, Windsurf, or any AI coding assistant.</p>
     </div>
   </div>
-  <p class="quickstart-note">Create a Telegram bot via <a href="https://t.me/BotFather">@BotFather</a>, fill in the config, and you're running.</p>
 </div>
+<script>
+  document.querySelectorAll('.quickstart-tab').forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      document.querySelectorAll('.quickstart-tab').forEach(function(t) { t.classList.remove('active'); });
+      document.querySelectorAll('.quickstart-panel').forEach(function(p) { p.classList.remove('active'); });
+      tab.classList.add('active');
+      document.querySelector('[data-panel="' + tab.dataset.tab + '"]').classList.add('active');
+    });
+  });
+</script>
 
 <div class="section-label" id="security">Security</div>
 
