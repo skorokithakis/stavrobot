@@ -91,7 +91,13 @@ mkdir -p "$REPO_ROOT/static/plugins"
 	echo "|------|-------------|-----|"
 } >"$REPO_ROOT/static/plugins/index.md"
 
-repos_json="$(curl -sf "https://api.github.com/orgs/stavrobot/repos?per_page=100")" || true
+# Use a GitHub token if available to avoid API rate limits on shared CI IPs.
+gh_auth=()
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+	gh_auth=(-H "Authorization: token $GITHUB_TOKEN")
+fi
+
+repos_json="$(curl -sf "${gh_auth[@]}" "https://api.github.com/orgs/stavrobot/repos?per_page=100")" || true
 
 # Declared unconditionally so the Zola content loop below is safe under set -u
 # even when the API call fails and the if block is never entered.
