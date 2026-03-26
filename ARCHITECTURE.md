@@ -6,7 +6,7 @@
   - Bash — primary build/orchestration language (`build-pages.sh`)
   - JavaScript (ESM, no TypeScript source) — plugin runner (`plugin-runner/dist/index.js`; compiled artifact, no source `.ts` found in repo)
   - Python 3 — used inline in `build-pages.sh` for JSON manipulation; plugin scripts run via `uv` (evidenced by `cache/plugins/*/uv/` trees)
-  - HTML/Jinja2 — Zola templates (`templates/`)
+  - HTML/Tera — Zola templates (`templates/`); Zola uses the Tera templating engine (Jinja2-compatible syntax)
 
 - **Frameworks and major libraries:**
   - [Zola](https://www.getzola.org/) — static site generator (`config.toml`, `build-pages.sh` calls `zola build`)
@@ -16,7 +16,7 @@
   - OpenAI API — TTS, STT, embeddings (`data/main/config.toml`)
   - PostgreSQL — persistent storage (`data/main/config.toml` `[postgres]` section, `data/db-backups/*.sql.gz`)
   - Signal (signal-cli) — messaging integration (`data/signal-cli/`, `COMPOSE_PROFILES=signal` in `.envrc`)
-  - WhatsApp (Baileys) — messaging integration (`data/whatsapp/`)
+  - WhatsApp (Baileys) — messaging integration (`data/whatsapp/`, `node_modules/@whiskeysockets` or similar)
   - Telegram — messaging integration (`data/main/config.toml` `[telegram]`)
   - Claude Code — self-modification / coder container (`data/claude-code/`, `data/coder/`)
 
@@ -96,6 +96,58 @@ Source: `build-pages.sh` lines 7–12 — generates `content/skills/` and `stati
 - `data/` — all runtime state (gitignored); subdivided by service (`app`, `main`, `claude-code`, `coder`, `postgres`, `signal-cli`, `whatsapp`, `plugins`, `db-backups`)
 - `cache/` — ephemeral plugin environments (gitignored)
 - `misc/coding-team/` — branch-name list used by the coding team workflow (gitignored content)
+
+---
+
+## OG tag / meta tag patterns
+
+All meta tags live exclusively in `templates/base.html` (lines 4–16). Every page inherits them via Tera template inheritance (`{% extends "base.html" %}`). There is **no per-page OG override mechanism** — all pages share the same static values from `config.toml`.
+
+### Current meta tags in `templates/base.html`
+
+```html
+<title>{% block title %}{{ config.title }}{% endblock %}</title>
+<meta name="description" content="{{ config.description }}">
+<meta property="og:title" content="{{ config.title }}">
+<meta property="og:description" content="{{ config.description }}">
+<meta property="og:image" content="https://github.com/skorokithakis/stavrobot/raw/master/misc/stavrobot.jpg">
+<meta property="og:url" content="{{ config.base_url }}">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="{{ config.title }}">
+<meta name="twitter:description" content="{{ config.description }}">
+<meta name="twitter:image" content="https://github.com/skorokithakis/stavrobot/raw/master/misc/stavrobot.jpg">
+```
+
+### Values resolved from `config.toml`
+
+| Variable | Value |
+|---|---|
+| `config.title` | `"Stavrobot"` |
+| `config.description` | `"A personal AI assistant with all the access it needs, and no more."` |
+| `config.base_url` | `"https://stavrobot.stavros.io"` |
+| OG image (hardcoded) | `https://github.com/skorokithakis/stavrobot/raw/master/misc/stavrobot.jpg` |
+
+### `{% block title %}` overrides per template
+
+| Template | `<title>` output |
+|---|---|
+| `templates/base.html` (default) | `Stavrobot` |
+| `templates/index.html` | *(no override — inherits default)* → `Stavrobot` |
+| `templates/404.html` | `404 - Page not found` |
+| `templates/skills/list.html` | `Skills — Stavrobot` |
+| `templates/skills/page.html` | `{{ page.title }} — Stavrobot` |
+| `templates/plugins/list.html` | `Plugins — Stavrobot` |
+| `templates/plugins/page.html` | `{{ page.title }} — Stavrobot` |
+
+### Key gaps
+
+- **`og:title`, `og:description`, `og:url` are never overridden per page.** Skill and plugin detail pages (`skills/page.html`, `plugins/page.html`) have their own `page.title` and `page.description` available in the Tera context but do not use them in OG tags — all pages share the site-level title and description.
+- **`og:url` is always `config.base_url`** (`https://stavrobot.stavros.io`) regardless of the actual page URL. Canonical per-page URLs are not set.
+- **`og:type` is always `"website"`** — individual skill/plugin pages could use `"article"` instead.
+- **No `og:locale`** tag is present.
+- **Twitter card type is `"summary"`** (small image). `"summary_large_image"` would show the image more prominently.
+- The OG image points to a raw GitHub URL (`raw/master/...`), not a stable CDN or `config.base_url`-relative path.
 
 ---
 

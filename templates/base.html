@@ -4,15 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}{{ config.title }}{% endblock %}</title>
-  <meta name="description" content="{{ config.description }}">
-  <meta property="og:title" content="{{ config.title }}">
-  <meta property="og:description" content="{{ config.description }}">
+  <meta name="description" content="{% if page and page.description %}{{ page.description }}{% else %}{{ config.description }}{% endif %}">
+  <meta property="og:title" content="{% if page %}{{ page.title }} — Stavrobot{% else %}{{ config.title }}{% endif %}">
+  <meta property="og:description" content="{% if page and page.description %}{{ page.description }}{% else %}{{ config.description }}{% endif %}">
   <meta property="og:image" content="https://github.com/skorokithakis/stavrobot/raw/master/misc/stavrobot.jpg">
-  <meta property="og:url" content="{{ config.base_url }}">
+  <meta property="og:url" content="{% if page %}{{ page.permalink }}{% else %}{{ config.base_url }}{% endif %}">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="{{ config.title }}">
-  <meta name="twitter:description" content="{{ config.description }}">
+  <meta name="twitter:title" content="{% if page %}{{ page.title }} — Stavrobot{% else %}{{ config.title }}{% endif %}">
+  <meta name="twitter:description" content="{% if page and page.description %}{{ page.description }}{% else %}{{ config.description }}{% endif %}">
   <meta name="twitter:image" content="https://github.com/skorokithakis/stavrobot/raw/master/misc/stavrobot.jpg">
   <link rel="stylesheet" href="/style.css">
 </head>
