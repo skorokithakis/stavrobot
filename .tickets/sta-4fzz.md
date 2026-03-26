@@ -1,6 +1,6 @@
 ---
 id: sta-4fzz
-status: open
+status: closed
 deps: [sta-ent0]
 links: []
 created: 2026-03-26T15:30:42Z
