@@ -189,8 +189,10 @@ export async function initializeAgentsSchema(pool: pg.Pool): Promise<void> {
 }
 
 export async function seedOwner(pool: pg.Pool, ownerConfig: OwnerConfig): Promise<number> {
-  // Seed the main agent (agent 1) first. Its system prompt is built at runtime from
-  // files, so we store an empty string here and never read it back from the DB.
+  // Seed the main agent with a fixed id=1. This id is an invariant: all routing and
+  // permission checks use getMainAgentId() rather than the literal 1, with the sole
+  // exception of this INSERT. Its system prompt is built at runtime from files, so we
+  // store an empty string here and never read it back from the DB.
   const agentResult = await pool.query<{ id: number }>(
     `INSERT INTO agents (id, name, system_prompt, allowed_tools, allowed_plugins)
      VALUES (1, 'main', '', '{*}', '{*}')

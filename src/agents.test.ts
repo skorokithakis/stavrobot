@@ -6,6 +6,7 @@ vi.mock("./database.js", () => ({
   createAgent: vi.fn(),
   updateAgent: vi.fn(),
   listAgents: vi.fn(),
+  getMainAgentId: vi.fn().mockReturnValue(1),
 }));
 
 import { createAgent, updateAgent, listAgents } from "./database.js";

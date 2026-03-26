@@ -5,6 +5,7 @@ import {
   createAgent as createAgentInDb,
   updateAgent,
   listAgents,
+  getMainAgentId,
 } from "./database.js";
 import { encodeToToon } from "./toon.js";
 import { log } from "./log.js";
@@ -21,7 +22,9 @@ const SUBAGENT_TOOL_ALLOWLIST = new Set([
   "db_search",
 ]);
 
-const HELP_TEXT = `manage_agents tool — full documentation
+function buildHelpText(): string {
+  const mainAgentId = getMainAgentId();
+  return `manage_agents tool — full documentation
 
 Actions:
 
@@ -34,7 +37,7 @@ create — Create a new subagent.
   allowed_plugins (optional): Whitelist of plugins the agent may use. Defaults to [] (no plugins). Use ["*"] to allow all plugins, ["weather"] to allow all tools in the weather plugin, or ["weather.get_forecast"] to allow a specific tool. Empty list or omission means no plugin access. When non-empty, run_plugin_tool is implicitly available.
   Returns the new agent's ID.
 
-update — Update an existing agent's fields. Only provided fields are updated. Refuses to modify agent 1 (the main agent).
+update — Update an existing agent's fields. Only provided fields are updated. Refuses to modify agent ${mainAgentId} (the main agent).
   id (required): Agent ID.
   name (optional): New name.
   system_prompt (optional): New system prompt.
@@ -54,14 +57,15 @@ Guidance on creating subagents:
 - Always scope plugin access to the specific tools needed. Use dot notation: ["caldav.list_events", "caldav.get_event"] rather than ["caldav"]. Granting a whole plugin or ["*"] gives the subagent access to every tool in that plugin, including destructive ones — only do this when every tool is genuinely needed.
 - The subagent's system prompt automatically includes the list of available plugins and their tools, so the subagent will know what it can use — you do not need to describe the plugins in the system_prompt.
 - Provide the subagent with all the information it needs to perform its task in the system_prompt field, but no more than necessary. Information about the person it's talking to, the places or facts of the task, etc are especially helpful.
-- Instruct the subagent to ask the main agent (agent 1) if it needs information or tools it doesn't have.
+- Instruct the subagent to ask the main agent (agent ${mainAgentId}) if it needs information or tools it doesn't have.
 - After creating a subagent, send it its first task via send_agent_message.
 
 Guidance on the system_prompt field:
 
 This is appended to a base agent prompt. It should contain the subagent's specific instructions, context, and constraints. Write it as if you're briefing a colleague on a task: what they should do, what they know, and what they must not do.
 
-Note: agent 1 is the main agent and cannot be modified via this tool.`;
+Note: agent ${mainAgentId} is the main agent and cannot be modified via this tool.`;
+}
 
 function validateAllowedTools(allowedTools: string[]): string[] {
   return allowedTools.filter((entry) => {
@@ -115,7 +119,7 @@ export function createManageAgentsTool(pool: pg.Pool): AgentTool {
       const { action } = raw;
 
       if (action === "help") {
-        return toolSuccess(HELP_TEXT);
+        return toolSuccess(buildHelpText());
       }
 
       if (action === "create") {
@@ -149,8 +153,8 @@ export function createManageAgentsTool(pool: pg.Pool): AgentTool {
         if (raw.id === undefined) {
           return toolError("Error: id is required for update.");
         }
-        if (raw.id === 1) {
-          return toolError("Error: Cannot modify agent 1 (the main agent).");
+        if (raw.id === getMainAgentId()) {
+          return toolError(`Error: Cannot modify agent ${getMainAgentId()} (the main agent).`);
         }
 
         const fields: { name?: string; systemPrompt?: string; allowedTools?: string[]; allowedPlugins?: string[] } = {};

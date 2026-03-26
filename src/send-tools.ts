@@ -101,7 +101,7 @@ async function checkSubagentRecipientScope(
   const normalize = serviceKey === "email" ? (s: string) => s.toLowerCase() : (s: string) => s;
   const assignedIdentifiers = result.rows.map((row) => normalize(row.identifier));
   if (!assignedIdentifiers.includes(normalize(recipient))) {
-    const errorMessage = "You can only message your assigned interlocutor. If you need to message someone else, ask the main agent (agent 1) via send_agent_message.";
+    const errorMessage = `You can only message your assigned interlocutor. If you need to message someone else, ask the main agent (agent ${getMainAgentId()}) via send_agent_message.`;
     log.warn(`[stavrobot] ${toolName} rejected: subagent ${currentAgentId} attempted to message '${recipient}' on ${serviceKey}, not in assigned identifiers`);
     return toolError(errorMessage);
   }

@@ -563,7 +563,7 @@ export async function handlePrompt(
     const agentSystemPrompt = subagentRow?.systemPrompt ?? "";
     const subagentAllowedPlugins = subagentRow?.allowedPlugins ?? [];
 
-    const basePrompt = config.baseAgentPrompt + buildPromptSuffix(config.publicHostname);
+    const basePrompt = config.baseAgentPrompt.replace("{{main_agent_id}}", String(getMainAgentId())) + buildPromptSuffix(config.publicHostname);
 
     // Only inject the plugin list if the agent has plugin access. Injecting it
     // for agents with no plugin access would be noise.
@@ -670,7 +670,7 @@ export async function handlePrompt(
     if (!isMainAgent) {
       const allowedTools = subagentRow?.allowedTools ?? [];
       const allowedPlugins = subagentRow?.allowedPlugins ?? [];
-      // A wildcard means all tools are allowed (should only be agent 1 in practice).
+      // A wildcard means all tools are allowed (should only be the main agent in practice).
       if (!allowedTools.includes("*")) {
         const filteredTools = filterToolsForSubagent(fullTools, allowedTools, allowedPlugins);
         agent.setTools(filteredTools);

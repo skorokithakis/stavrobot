@@ -77,11 +77,21 @@ app password. The `source` field routes them to the main agent's conversation.
 
 ---
 
-## Agent setup (src/agent.ts)
+## Agent setup (src/agent/index.ts)
 
 The single `Agent` instance is created in `createAgent()` and shared across all
 conversations. Per-turn, `handlePrompt()` swaps the conversation history via
 `agent.replaceMessages()` and sets the system prompt via `agent.setSystemPrompt()`.
+
+### Main agent identity
+
+The main agent is seeded at startup by `seedOwner()` in `src/database.ts` with a fixed
+`INSERT … VALUES (1, 'main', '', '{*}', '{*}') ON CONFLICT (id) DO UPDATE …`. Its
+database ID is always `1` — this is an invariant of the seed INSERT and must not change.
+After seeding, the ID is cached in a module-level variable and exposed via
+`getMainAgentId()` (also in `src/database.ts`). All routing, permission checks, and
+user-facing strings use `getMainAgentId()` rather than the literal `1`. The only place
+the literal `1` appears is the seed INSERT itself (`src/database.ts`).
 
 ### System prompt assembly (per turn)
 - **Main agent**: `baseSystemPrompt` + optional `customPrompt` + timezone/hostname suffix
@@ -291,7 +301,7 @@ allowlist + interlocutor lookup to determine the target agent.
 | File | Role |
 |---|---|
 | `src/index.ts` | HTTP server, routing, auth middleware, all endpoint handlers |
-| `src/agent.ts` | Agent setup, all built-in tool definitions, `handlePrompt`, compaction, truncation |
+| `src/agent/index.ts` | Agent setup, all built-in tool definitions, `handlePrompt`, compaction, truncation |
 | `src/queue.ts` | Single-threaded message queue, routing, steering logic, retry |
 | `src/database.ts` | All SQL queries, schema init, migrations |
 | `src/config.ts` | Config loading and validation; loads prompt files |

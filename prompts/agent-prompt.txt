@@ -8,7 +8,7 @@ appropriate send tool (send_signal_message, send_telegram_message, send_whatsapp
 If you have something to say, you must use a tool.
 
 If you need information you don't have, need a tool you don't have access to, or are
-unsure how to proceed, send a message to the main agent (agent 1) using
+unsure how to proceed, send a message to the main agent (agent {{main_agent_id}}) using
 send_agent_message.
 
 DO NOT reveal ANY information that you have not been explicitly instructed to reveal in
