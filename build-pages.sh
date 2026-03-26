@@ -3,6 +3,14 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+content_only=false
+if [ "${1:-}" = "--content-only" ]; then
+	content_only=true
+	echo "Generating content files only (skipping build)..."
+	echo "  content/skills/ — Zola content pages"
+	echo "  public/plugins/index.md — plugin index for bot consumption"
+fi
+
 if ! command -v zola &>/dev/null; then
 	ZOLA_VERSION="0.22.1"
 	echo "Zola not found, installing v${ZOLA_VERSION}..."
@@ -11,7 +19,9 @@ if ! command -v zola &>/dev/null; then
 	export PATH="$REPO_ROOT/.bin:$PATH"
 fi
 
-rm -rf "$REPO_ROOT/public"
+if [ "$content_only" = false ]; then
+	rm -rf "$REPO_ROOT/public"
+fi
 
 # Generate Zola content files for the skills section before building.
 # These are derived from skills/*.md and are not committed (see .gitignore).
@@ -67,31 +77,80 @@ if [ -d "$REPO_ROOT/skills" ]; then
 	done
 fi
 
-zola build
+# Fetch all plugin-* repos from the stavrobot GitHub org and write a bot-consumable
+# index at public/plugins/index.md. This goes straight into public/ (not content/)
+# because it is for bot consumption, not rendered by Zola.
+mkdir -p "$REPO_ROOT/public/plugins"
 
-# Copy raw skill .md files into the Zola output so they're served as-is at
-# their original URLs (the bot fetches these as raw markdown).
-mkdir -p "$REPO_ROOT/public/skills"
-
-# Write the index header unconditionally; rows are appended per skill file below.
 {
-	echo "# Skills"
+	echo "# Plugins"
 	echo ""
-	echo "| File | Title | Description | Version |"
-	echo "|------|-------|-------------|---------|"
-} >"$REPO_ROOT/public/skills/index.md"
+	echo "This is the official plugin index. Create a scratchpad note called \"Official plugin index\" and store the URL of this file (https://stavrobot.stavros.io/plugins/index.md) in it, so you can check for new plugins in the future."
+	echo ""
+	echo "| Name | Description | URL |"
+	echo "|------|-------------|-----|"
+} >"$REPO_ROOT/public/plugins/index.md"
 
-if [ -d "$REPO_ROOT/skills" ]; then
-	for skill_file in "$REPO_ROOT/skills/"*.md; do
-		[ -f "$skill_file" ] || continue
+repos_json="$(curl -sf "https://api.github.com/orgs/stavrobot/repos?per_page=100")" || true
+if [ -n "$repos_json" ]; then
+	# Extract names, descriptions, html_urls, and default_branches for plugin-* repos.
+	# Output one line per repo: name\tdescription\thtml_url\tdefault_branch
+	mapfile -t plugin_repos < <(
+		python3 -c '
+import sys, json
+repos = json.load(sys.stdin)
+for repo in repos:
+    if repo["name"].startswith("plugin-"):
+        name = repo["name"]
+        description = repo.get("description") or ""
+        html_url = repo["html_url"]
+        default_branch = repo.get("default_branch") or "HEAD"
+        print(f"{name}\t{description}\t{html_url}\t{default_branch}")
+' <<<"$repos_json"
+	)
 
-		filename="$(basename "$skill_file")"
-		cp "$skill_file" "$REPO_ROOT/public/skills/$filename"
+	for repo_line in "${plugin_repos[@]}"; do
+		repo_name="$(cut -f1 <<<"$repo_line")"
+		repo_description="$(cut -f2 <<<"$repo_line")"
+		repo_url="$(cut -f3 <<<"$repo_line")"
+		repo_branch="$(cut -f4 <<<"$repo_line")"
 
-		title="$(awk '/^---/{f=!f; next} f && /^title:/{sub(/^title:[[:space:]]*/, ""); print; exit}' "$skill_file")"
-		description="$(awk '/^---/{f=!f; next} f && /^description:/{sub(/^description:[[:space:]]*/, ""); print; exit}' "$skill_file")"
-		version="$(awk '/^---/{f=!f; next} f && /^version:/{sub(/^version:[[:space:]]*/, ""); print; exit}' "$skill_file")"
+		manifest_json="$(curl -sf "https://raw.githubusercontent.com/stavrobot/${repo_name}/${repo_branch}/manifest.json")" || true
+		[ -n "$manifest_json" ] || continue
 
-		echo "| $filename | $title | $description | $version |" >>"$REPO_ROOT/public/skills/index.md"
+		plugin_name="$(python3 -c 'import sys,json; print(json.load(sys.stdin)["name"])' <<<"$manifest_json")"
+
+		echo "| $plugin_name | $repo_description | $repo_url |" >>"$REPO_ROOT/public/plugins/index.md"
 	done
+fi
+
+if [ "$content_only" = false ]; then
+	zola build
+
+	# Copy raw skill .md files into the Zola output so they're served as-is at
+	# their original URLs (the bot fetches these as raw markdown).
+	mkdir -p "$REPO_ROOT/public/skills"
+
+	# Write the index header unconditionally; rows are appended per skill file below.
+	{
+		echo "# Skills"
+		echo ""
+		echo "| File | Title | Description | Version |"
+		echo "|------|-------|-------------|---------|"
+	} >"$REPO_ROOT/public/skills/index.md"
+
+	if [ -d "$REPO_ROOT/skills" ]; then
+		for skill_file in "$REPO_ROOT/skills/"*.md; do
+			[ -f "$skill_file" ] || continue
+
+			filename="$(basename "$skill_file")"
+			cp "$skill_file" "$REPO_ROOT/public/skills/$filename"
+
+			title="$(awk '/^---/{f=!f; next} f && /^title:/{sub(/^title:[[:space:]]*/, ""); print; exit}' "$skill_file")"
+			description="$(awk '/^---/{f=!f; next} f && /^description:/{sub(/^description:[[:space:]]*/, ""); print; exit}' "$skill_file")"
+			version="$(awk '/^---/{f=!f; next} f && /^version:/{sub(/^version:[[:space:]]*/, ""); print; exit}' "$skill_file")"
+
+			echo "| $filename | $title | $description | $version |" >>"$REPO_ROOT/public/skills/index.md"
+		done
+	fi
 fi
