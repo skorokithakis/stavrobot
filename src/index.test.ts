@@ -43,15 +43,32 @@ function makeMockResponse(): MockResponse {
   return response;
 }
 
-// Build a mock Pool whose query() returns rows shaped the way getPageQueryByPath expects.
-// The first call returns the page row; subsequent calls (for the actual SQL) are not
-// expected in the auth-failure path, but we provide a fallback for the public-page path.
-function makeMockPool(isPublic: boolean): Pool {
-  const pageRow = { query: "SELECT 1", is_public: isPublic, data: Buffer.from("content") };
+// Build a mock Pool whose query() returns rows shaped the way getPageQueryByPath expects,
+// and whose connect() returns a mock client for the READ ONLY transaction.
+// The pool.query() is used by getPageQueryByPath; pool.connect() is used for the actual
+// page query execution inside a READ ONLY transaction.
+function makeMockPool(isPublic: boolean, clientQueryImpl?: (sql: string) => QueryResult, storedQuery: string = "SELECT 1"): Pool {
+  const pageRow = { query: storedQuery, is_public: isPublic, data: Buffer.from("content") };
+
+  const defaultClientQuery = (sql: string): QueryResult => {
+    if (sql === "BEGIN TRANSACTION READ ONLY" || sql === "COMMIT" || sql === "ROLLBACK") {
+      return { rows: [], command: sql, rowCount: 0 } as unknown as QueryResult;
+    }
+    return { rows: [{ result: 1 }], command: "SELECT", rowCount: 1 } as unknown as QueryResult;
+  };
+
+  const clientQueryFn = clientQueryImpl ?? defaultClientQuery;
+
+  const mockClient = {
+    query: vi.fn().mockImplementation((sql: string) => Promise.resolve(clientQueryFn(sql))),
+    release: vi.fn(),
+  };
+
   const pool = {
     query: vi.fn().mockImplementation(() =>
       Promise.resolve({ rows: [pageRow], command: "SELECT", rowCount: 1 } as unknown as QueryResult),
     ),
+    connect: vi.fn().mockResolvedValue(mockClient),
   };
   return pool as unknown as Pool;
 }
@@ -113,6 +130,78 @@ describe("handlePageQueryRequest auth enforcement", () => {
     // Auth was not enforced — the handler proceeded past the auth check.
     // It ran the query and returned 200.
     expect(response.statusCode).not.toBe(401);
+  });
+});
+
+describe("handlePageQueryRequest transaction enforcement", () => {
+  const pathname = "/api/pages/mypage/queries/myquery";
+  const password = "secret";
+  const url = new URL("http://localhost/api/pages/mypage/queries/myquery");
+
+  it("issues BEGIN TRANSACTION READ ONLY before the query and COMMIT after", async () => {
+    const request = makeMockRequest();
+    const response = makeMockResponse();
+    const pool = makeMockPool(true);
+
+    await handlePageQueryRequest(
+      request,
+      response as unknown as http.ServerResponse,
+      pathname,
+      password,
+      pool,
+      url,
+    );
+
+    expect(response.statusCode).toBe(200);
+    // pool.connect() must have been called to obtain a client.
+    const connectMock = (pool as unknown as { connect: ReturnType<typeof vi.fn> }).connect;
+    expect(connectMock).toHaveBeenCalledOnce();
+
+    const mockClient = await connectMock.mock.results[0].value as { query: ReturnType<typeof vi.fn>; release: ReturnType<typeof vi.fn> };
+    const queryCalls = mockClient.query.mock.calls.map((call: unknown[]) => call[0] as string);
+    expect(queryCalls[0]).toBe("BEGIN TRANSACTION READ ONLY");
+    expect(queryCalls[queryCalls.length - 1]).toBe("COMMIT");
+    expect(mockClient.release).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a writable CTE that passes validateReadOnlySql but is blocked by the READ ONLY transaction", async () => {
+    // This query starts with WITH and has no extra semicolons, so validateReadOnlySql
+    // passes it. Postgres rejects it at the engine level inside a READ ONLY transaction.
+    const writableCte = "WITH x AS (DELETE FROM users RETURNING *) SELECT * FROM x";
+
+    const request = makeMockRequest();
+    const response = makeMockResponse();
+
+    const pool = makeMockPool(true, (sql: string) => {
+      if (sql === "BEGIN TRANSACTION READ ONLY" || sql === "ROLLBACK") {
+        return { rows: [], command: sql, rowCount: 0 } as unknown as QueryResult;
+      }
+      if (sql === writableCte) {
+        throw new Error("cannot execute DELETE in a read-only transaction");
+      }
+      return { rows: [], command: "SELECT", rowCount: 0 } as unknown as QueryResult;
+    }, writableCte);
+
+    await handlePageQueryRequest(
+      request,
+      response as unknown as http.ServerResponse,
+      pathname,
+      password,
+      pool,
+      url,
+    );
+
+    expect(response.statusCode).toBe(500);
+    const parsed = JSON.parse(response.body ?? "{}") as { error: string };
+    expect(parsed.error).toContain("read-only transaction");
+
+    const connectMock = (pool as unknown as { connect: ReturnType<typeof vi.fn> }).connect;
+    const mockClient = await connectMock.mock.results[0].value as { query: ReturnType<typeof vi.fn>; release: ReturnType<typeof vi.fn> };
+    const queryCalls = mockClient.query.mock.calls.map((call: unknown[]) => call[0] as string);
+    expect(queryCalls[0]).toBe("BEGIN TRANSACTION READ ONLY");
+    expect(queryCalls).toContain(writableCte);
+    expect(queryCalls).toContain("ROLLBACK");
+    expect(mockClient.release).toHaveBeenCalledOnce();
   });
 });
 

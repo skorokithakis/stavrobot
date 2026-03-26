@@ -381,7 +381,18 @@ export async function handlePageQueryRequest(
     const parameterizedSql = sql.replace(/\$param:(\w+)/g, (_full, name: string) => paramMap.get(name) ?? "");
 
     log.info(`[stavrobot] Page query: ${pagePath}/${queryName}`, parameterizedSql);
-    const result = await pool.query(parameterizedSql, paramValues);
+    const client = await pool.connect();
+    let result;
+    try {
+      await client.query("BEGIN TRANSACTION READ ONLY");
+      result = await client.query(parameterizedSql, paramValues);
+      await client.query("COMMIT");
+    } catch (queryError) {
+      await client.query("ROLLBACK");
+      throw queryError;
+    } finally {
+      client.release();
+    }
 
     response.writeHead(200, { "Content-Type": "application/json" });
     response.end(JSON.stringify(result.rows));
