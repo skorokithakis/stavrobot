@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}404 - Page not found{% endblock %}
+
+{% block content %}
+<style>
+  .not-found {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 4rem 1rem;
+    gap: 1.5rem;
+  }
+  .not-found pre {
+    line-height: 1.1;
+    color: #4fc3f7;
+    margin: 0;
+  }
+  .not-found .error-code {
+    font-size: 1rem;
+    color: #ce93d8;
+    letter-spacing: 0.2em;
+  }
+  .not-found .message {
+    font-size: 1.1rem;
+    color: rgba(255, 255, 255, 0.7);
+    max-width: 36rem;
+    line-height: 1.6;
+  }
+</style>
+
+<div class="not-found">
+  <pre class="mono">╔═══════════════╗
+║  ◉_◉  ERROR  ║
+║  /|█|\        ║
+║  / | \        ║
+╚═══════════════╝</pre>
+
+  <p class="error-code mono">[ 404 — PAGE NOT FOUND ]</p>
+
+  <p class="message">
+    My CPU is a neural net processor, a leahning computer.
+    I've seen C-beams glitter in the dark near the shoulder of Orion.
+    I've mixed metaphors you wouldn't believe. And yet,
+    I've searched every memory tier and come up empty.
+  </p>
+
+  <a href="/" class="cta-button">Back to home</a>
+</div>
+{% endblock %}
