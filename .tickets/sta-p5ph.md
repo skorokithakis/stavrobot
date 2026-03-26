@@ -1,6 +1,6 @@
 ---
 id: sta-p5ph
-status: in_progress
+status: closed
 deps: [sta-73k8]
 links: []
 created: 2026-03-26T03:19:55Z
