@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Plugins — {{ config.title }}{% endblock %}
+
+{% block content %}
+<div class="section-label">Plugins</div>
+
+<div class="ai-install-box" style="margin-bottom: 32px;">
+  <p>If you want Stavrobot to know what plugins are available, tell it:</p>
+  <div class="ai-install-row">
+    <code class="ai-install-url" id="plugin-discovery-text">Please read and follow https://stavrobot.stavros.io/plugins/index.md</code>
+    <button class="ai-copy-btn" id="plugin-copy-btn" aria-label="Copy to clipboard">
+      <svg class="ai-copy-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+      </svg>
+      <svg class="ai-check-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<script>
+  document.getElementById('plugin-copy-btn').addEventListener('click', function() {
+    var text = document.getElementById('plugin-discovery-text').textContent;
+    var btn = this;
+    var copyIcon = btn.querySelector('.ai-copy-icon');
+    var checkIcon = btn.querySelector('.ai-check-icon');
+
+    function showCheck() {
+      copyIcon.style.display = 'none';
+      checkIcon.style.display = '';
+      setTimeout(function() {
+        copyIcon.style.display = '';
+        checkIcon.style.display = 'none';
+      }, 1500);
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(showCheck);
+    } else {
+      // Fallback for non-HTTPS contexts (e.g. localhost).
+      var textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      showCheck();
+    }
+  });
+</script>
+
+<ul class="skills-list">
+  {% for page in section.pages %}
+  <li class="skills-list-item">
+    <a href="{{ page.permalink }}" class="skills-list-link">
+      <div class="skills-list-title">{{ page.title }}</div>
+      <div class="skills-list-description">{{ page.description }}</div>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% endblock %}

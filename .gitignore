@@ -9,3 +9,5 @@ __pycache__/
 misc/
 .env
 content/skills/
+content/plugins/
+static/plugins/

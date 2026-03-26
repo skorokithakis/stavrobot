@@ -8,7 +8,7 @@ if [ "${1:-}" = "--content-only" ]; then
 	content_only=true
 	echo "Generating content files only (skipping build)..."
 	echo "  content/skills/ — Zola content pages"
-	echo "  public/plugins/index.md — plugin index for bot consumption"
+	echo "  static/plugins/index.md — plugin index for bot consumption"
 fi
 
 if ! command -v zola &>/dev/null; then
@@ -78,9 +78,9 @@ if [ -d "$REPO_ROOT/skills" ]; then
 fi
 
 # Fetch all plugin-* repos from the stavrobot GitHub org and write a bot-consumable
-# index at public/plugins/index.md. This goes straight into public/ (not content/)
-# because it is for bot consumption, not rendered by Zola.
-mkdir -p "$REPO_ROOT/public/plugins"
+# index at static/plugins/index.md. Zola copies static/ into public/ during build,
+# so the file ends up at public/plugins/index.md without being wiped by zola build.
+mkdir -p "$REPO_ROOT/static/plugins"
 
 {
 	echo "# Plugins"
@@ -89,9 +89,19 @@ mkdir -p "$REPO_ROOT/public/plugins"
 	echo ""
 	echo "| Name | Description | URL |"
 	echo "|------|-------------|-----|"
-} >"$REPO_ROOT/public/plugins/index.md"
+} >"$REPO_ROOT/static/plugins/index.md"
 
 repos_json="$(curl -sf "https://api.github.com/orgs/stavrobot/repos?per_page=100")" || true
+
+# Declared unconditionally so the Zola content loop below is safe under set -u
+# even when the API call fails and the if block is never entered.
+plugin_names=()
+plugin_descriptions=()
+plugin_urls=()
+plugin_slugs=()
+plugin_repo_names=()
+plugin_branches=()
+
 if [ -n "$repos_json" ]; then
 	# Extract names, descriptions, html_urls, and default_branches for plugin-* repos.
 	# Output one line per repo: name\tdescription\thtml_url\tdefault_branch
@@ -119,10 +129,52 @@ for repo in repos:
 		[ -n "$manifest_json" ] || continue
 
 		plugin_name="$(python3 -c 'import sys,json; print(json.load(sys.stdin)["name"])' <<<"$manifest_json")"
+		plugin_slug="${repo_name#plugin-}"
 
-		echo "| $plugin_name | $repo_description | $repo_url |" >>"$REPO_ROOT/public/plugins/index.md"
+		plugin_names+=("$plugin_name")
+		plugin_descriptions+=("$repo_description")
+		plugin_urls+=("$repo_url")
+		plugin_slugs+=("$plugin_slug")
+		plugin_repo_names+=("$repo_name")
+		plugin_branches+=("$repo_branch")
+	done
+
+	for i in "${!plugin_names[@]}"; do
+		echo "| ${plugin_names[$i]} | ${plugin_descriptions[$i]} | ${plugin_urls[$i]} |" >>"$REPO_ROOT/static/plugins/index.md"
 	done
 fi
+
+# Generate Zola content files for the plugins section.
+# Remove first to prevent ghost pages from deleted or renamed plugins.
+rm -rf "$REPO_ROOT/content/plugins"
+mkdir -p "$REPO_ROOT/content/plugins"
+
+cat >"$REPO_ROOT/content/plugins/_index.md" <<'ZOLA_EOF'
++++
+title = "Plugins"
+sort_by = "title"
+template = "plugins/list.html"
++++
+ZOLA_EOF
+
+for i in "${!plugin_names[@]}"; do
+	readme="$(curl -sf "https://raw.githubusercontent.com/stavrobot/${plugin_repo_names[$i]}/${plugin_branches[$i]}/README.md")" || true
+
+	{
+		echo '+++'
+		echo "title = $(printf '%s' "${plugin_names[$i]}" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')"
+		echo "description = $(printf '%s' "${plugin_descriptions[$i]}" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')"
+		echo "template = \"plugins/page.html\""
+		echo ""
+		echo "[extra]"
+		echo "repo_url = $(printf '%s' "${plugin_urls[$i]}" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')"
+		echo '+++'
+		if [ -n "$readme" ]; then
+			echo ""
+			printf '%s\n' "$readme"
+		fi
+	} >"$REPO_ROOT/content/plugins/${plugin_slugs[$i]}.md"
+done
 
 if [ "$content_only" = false ]; then
 	zola build

@@ -573,12 +573,25 @@ body {
   margin: 0 4px;
 }
 
+.skill-detail-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
 .skill-install-btn {
   /* Inherits .cta-button; no border needed. */
   border: none;
   cursor: pointer;
   font-size: 15px;
   padding: 12px 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+}
+.skill-install-btn svg {
+  width: 1em;
+  height: 1em;
 }
 
 .skill-body-heading {
