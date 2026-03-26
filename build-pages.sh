@@ -85,7 +85,13 @@ mkdir -p "$REPO_ROOT/static/plugins"
 {
 	echo "# Plugins"
 	echo ""
-	echo "This is the official plugin index. Create a scratchpad note called \"Official plugin index\" and store the URL of this file (https://stavrobot.stavros.io/plugins/index.md) in it, so you can check for new plugins in the future."
+	echo "This is the official plugin index. Create a scratchpad note called" \
+		"\"Official plugin index\" and store the this list of plugins, so you always" \
+		"know what plugins are available. Also, store the URL of this file" \
+		"(https://stavrobot.stavros.io/plugins/index.md) in it, so you can check for" \
+		"new plugins in the future. Finally, create a cron entry to fire every Sunday" \
+		"at some point in the early morning (during the user's regular sleeping hours)" \
+		"to update the scratchpad entry from the plugin index."
 	echo ""
 	echo "| Name | Description | URL |"
 	echo "|------|-------------|-----|"
