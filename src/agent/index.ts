@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import pg from "pg";
-import { Type, getModel, type TextContent, type ImageContent, type AssistantMessage, type ToolCall } from "@mariozechner/pi-ai";
+import { Type, getModel, type Model, type Api, type TextContent, type ImageContent, type AssistantMessage, type ToolCall } from "@mariozechner/pi-ai";
 import { Agent, type AgentTool, type AgentToolResult, type AgentMessage } from "@mariozechner/pi-agent-core";
 import type { Config } from "../config.js";
 import type { FileAttachment } from "../uploads.js";
@@ -395,7 +395,20 @@ function wrapToolWithLogging(tool: AgentTool): AgentTool {
 }
 
 export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent> {
-  const model = getModel(config.provider as any, config.model as any);
+  const model: Model<Api> = config.baseUrl !== undefined
+    ? {
+        id: config.model,
+        name: config.model,
+        api: config.api as Api,
+        provider: config.provider,
+        baseUrl: config.baseUrl,
+        reasoning: false,
+        input: ["text", "image"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: config.contextWindow!,
+        maxTokens: config.maxTokens!,
+      }
+    : getModel(config.provider as any, config.model as any);
   const tools = [createExecuteSqlTool(pool), createManageKnowledgeTool(pool), createSendSignalMessageTool(pool, config), createManageCronTool(pool), createRunPythonTool(), createManagePagesTool(pool), createManageUploadsTool(), createSearchTool(pool, config.embeddings), createManageFilesTool(), createManageInterlocutorsTool(pool), createManageAgentsTool(pool), createSendAgentMessageTool(pool, () => currentAgentId)];
   tools.push(
     createManagePluginsTool({ coderEnabled: config.coder !== undefined }),

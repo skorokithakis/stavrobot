@@ -258,6 +258,72 @@ Migrations are additive `ALTER TABLE … ADD COLUMN IF NOT EXISTS` statements.
 
 ---
 
+## LLM provider configuration
+
+The provider and model are set at the top level of `config.toml`:
+
+```toml
+provider = "anthropic"          # any KnownProvider string from pi-ai
+model    = "claude-sonnet-4-20250514"
+```
+
+`getModel(provider, model)` from `@mariozechner/pi-ai` looks up the model in a static
+registry (`models.generated.js`). The registry maps `(provider, modelId)` to a `Model`
+object that carries `api`, `baseUrl`, `contextWindow`, `maxTokens`, and optional `compat`
+overrides.
+
+### Supported providers (from pi-ai v0.60.0 `KnownProvider` type)
+
+`amazon-bedrock`, `anthropic`, `google`, `google-gemini-cli`, `google-antigravity`,
+`google-vertex`, `openai`, `azure-openai-responses`, `openai-codex`, `github-copilot`,
+`xai`, `groq`, `cerebras`, `openrouter`, `vercel-ai-gateway`, `zai`, `mistral`,
+`minimax`, `minimax-cn`, `huggingface`, `opencode`, `opencode-go`, `kimi-coding`.
+
+### API backends (from pi-ai `KnownApi` type)
+
+| API string | Used by |
+|---|---|
+| `anthropic-messages` | `anthropic`, `amazon-bedrock` (Anthropic models) |
+| `openai-completions` | `openai`, `groq`, `cerebras`, `xai`, `openrouter`, `opencode`, `zai`, and any OpenAI-compatible endpoint |
+| `openai-responses` | `openai` (Responses API), `github-copilot` |
+| `openai-codex-responses` | `openai-codex` |
+| `azure-openai-responses` | `azure-openai-responses` |
+| `google-generative-ai` | `google`, `google-antigravity` |
+| `google-gemini-cli` | `google-gemini-cli` |
+| `google-vertex` | `google-vertex` |
+| `mistral-conversations` | `mistral` |
+| `bedrock-converse-stream` | `amazon-bedrock` |
+
+### Authentication
+
+Exactly one of these must be set in `config.toml`:
+- `apiKey = "..."` — static API key, passed directly to the provider.
+- `authFile = "/path/to/auth.json"` — OAuth credentials file (for Claude Pro/Max
+  subscriptions). The file is read and refreshed by `src/auth.ts` using
+  `getOAuthProvider(config.provider)` from `@mariozechner/pi-ai/oauth`.
+
+The `getApiKey(config)` function in `src/auth.ts` resolves whichever is configured and
+returns a plain string. This string is passed to the `Agent` constructor as
+`getApiKey: () => getApiKey(config)`. The Agent forwards it to the provider stream
+function as `options.apiKey`.
+
+### OpenAI-compatible endpoints
+
+Any provider whose models use `api: "openai-completions"` is handled by
+`streamOpenAICompletions` in pi-ai. The OpenAI SDK client is constructed with
+`baseURL: model.baseUrl`, so pointing `baseUrl` at a custom endpoint (LiteLLM, Ollama,
+vLLM, etc.) is sufficient. Compatibility quirks (whether to send `store`, `developer`
+role, `reasoning_effort`, `max_tokens` vs `max_completion_tokens`, etc.) are
+auto-detected from the `baseUrl` or can be overridden via `model.compat`.
+
+When `baseUrl` is set in `config.toml`, `src/agent/index.ts` constructs a `Model` object
+manually instead of calling `getModel()`. `contextWindow` and `maxTokens` are required.
+`api` defaults to `"openai-completions"` if omitted; the only accepted values are
+`"openai-completions"` and `"anthropic-messages"`. `authFile` is forbidden (only `apiKey`
+is supported with a custom endpoint).
+
+---
+
 ## Configuration
 
 - Runtime config: `config.toml` (path overridable via `CONFIG_PATH` env var).

@@ -18,6 +18,30 @@ password = "change-me"
 # apiKey = "your-api-key-here"
 authFile = "/app/data/auth.json"
 
+# Custom endpoint configuration. Use this to point the bot at a local model
+# server (e.g. Ollama) or an Anthropic-compatible proxy instead of the default
+# provider. When baseUrl is set, apiKey is required and authFile is forbidden.
+# contextWindow and maxTokens are also required. api defaults to
+# "openai-completions" if omitted.
+#
+# Example: Ollama running locally
+# provider = "openai"
+# model = "llama3.2"
+# apiKey = "ollama"
+# baseUrl = "http://localhost:11434/v1"
+# contextWindow = 128000
+# maxTokens = 8192
+# api = "openai-completions"
+#
+# Example: Anthropic-compatible proxy
+# provider = "anthropic"
+# model = "claude-sonnet-4-20250514"
+# apiKey = "your-proxy-key"
+# baseUrl = "https://proxy.example.com"
+# contextWindow = 200000
+# maxTokens = 8192
+# api = "anthropic-messages"
+
 
 # The public HTTPS URL where this server is reachable (no trailing slash).
 publicHostname = "https://example.com"

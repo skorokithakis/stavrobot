@@ -29,6 +29,7 @@ function setupMocks(toml: string): void {
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.resetModules();
 });
 
 describe("loadConfig owner validation", () => {
@@ -113,6 +114,140 @@ telegram = "987654321"
     const { loadConfig } = await import("./config.js");
     const config = loadConfig();
     expect(config.baseAgentPrompt).toBe("You are Stavrobot.");
+  });
+});
+
+describe("loadConfig baseUrl validation", () => {
+  const BASE_TOML_WITH_BASE_URL = `
+provider = "openai"
+model = "llama3.2"
+apiKey = "ollama"
+baseUrl = "http://localhost:11434/v1"
+contextWindow = 128000
+maxTokens = 8192
+publicHostname = "https://example.com"
+
+[owner]
+name = "Stavros"
+`;
+
+  it("loads successfully when baseUrl is set with all required fields", async () => {
+    setupMocks(BASE_TOML_WITH_BASE_URL);
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.baseUrl).toBe("http://localhost:11434/v1");
+    expect(config.contextWindow).toBe(128000);
+    expect(config.maxTokens).toBe(8192);
+  });
+
+  it("defaults api to openai-completions when baseUrl is set and api is omitted", async () => {
+    setupMocks(BASE_TOML_WITH_BASE_URL);
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.api).toBe("openai-completions");
+  });
+
+  it("uses the api value from TOML when baseUrl is set and api is specified", async () => {
+    const toml = `
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+apiKey = "proxy-key"
+baseUrl = "https://proxy.example.com"
+contextWindow = 200000
+maxTokens = 8192
+api = "anthropic-messages"
+publicHostname = "https://example.com"
+
+[owner]
+name = "Stavros"
+`;
+    setupMocks(toml);
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.api).toBe("anthropic-messages");
+  });
+
+  it("throws when baseUrl is set and api is an unsupported value", async () => {
+    const toml = `
+provider = "openai"
+model = "llama3.2"
+apiKey = "ollama"
+baseUrl = "http://localhost:11434/v1"
+contextWindow = 128000
+maxTokens = 8192
+api = "openai-responses"
+publicHostname = "https://example.com"
+
+[owner]
+name = "Stavros"
+`;
+    setupMocks(toml);
+    const { loadConfig } = await import("./config.js");
+    expect(() => loadConfig()).toThrow(
+      'Config api must be one of: openai-completions, anthropic-messages. Got: "openai-responses".',
+    );
+  });
+
+  it("throws when baseUrl and authFile are both set", async () => {
+    const toml = `
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+authFile = "/app/data/auth.json"
+baseUrl = "https://proxy.example.com"
+contextWindow = 200000
+maxTokens = 8192
+publicHostname = "https://example.com"
+
+[owner]
+name = "Stavros"
+`;
+    setupMocks(toml);
+    const { loadConfig } = await import("./config.js");
+    expect(() => loadConfig()).toThrow("Config must not specify both baseUrl and authFile.");
+  });
+
+  it("throws when baseUrl is set but contextWindow is missing", async () => {
+    const toml = `
+provider = "openai"
+model = "llama3.2"
+apiKey = "ollama"
+baseUrl = "http://localhost:11434/v1"
+maxTokens = 8192
+publicHostname = "https://example.com"
+
+[owner]
+name = "Stavros"
+`;
+    setupMocks(toml);
+    const { loadConfig } = await import("./config.js");
+    expect(() => loadConfig()).toThrow("Config must specify contextWindow when baseUrl is set.");
+  });
+
+  it("throws when baseUrl is set but maxTokens is missing", async () => {
+    const toml = `
+provider = "openai"
+model = "llama3.2"
+apiKey = "ollama"
+baseUrl = "http://localhost:11434/v1"
+contextWindow = 128000
+publicHostname = "https://example.com"
+
+[owner]
+name = "Stavros"
+`;
+    setupMocks(toml);
+    const { loadConfig } = await import("./config.js");
+    expect(() => loadConfig()).toThrow("Config must specify maxTokens when baseUrl is set.");
+  });
+
+  it("ignores baseUrl-related fields when baseUrl is absent", async () => {
+    setupMocks(BASE_TOML);
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.baseUrl).toBeUndefined();
+    expect(config.contextWindow).toBeUndefined();
+    expect(config.maxTokens).toBeUndefined();
+    expect(config.api).toBeUndefined();
   });
 });
 

@@ -39,6 +39,10 @@ That's it. Message your bot on Telegram and it will respond. See the detailed se
 3. At minimum, set `authFile` (or `apiKey`) and `publicHostname`. Everything else is optional.
 4. Copy `env.example` to `.env` and set your timezone (`TZ`). Postgres credentials and other environment settings can also be overridden there. **Always set `POSTGRES_PASSWORD` to something secure** — the default is a weak placeholder and should not be used in production.
 
+### Custom and OpenAI-compatible endpoints
+
+Stavrobot can be pointed at any OpenAI-compatible endpoint (Ollama, LiteLLM, vLLM, etc.) or a custom Anthropic-compatible proxy by setting `baseUrl` in `config.toml`. See `config.example.toml` for the required fields and example configurations.
+
 ### Authentication
 
 The app supports two authentication modes: API key or OAuth.

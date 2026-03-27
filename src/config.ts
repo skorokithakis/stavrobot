@@ -59,6 +59,10 @@ export interface Config {
   model: string;
   apiKey?: string;
   authFile?: string;
+  baseUrl?: string;
+  contextWindow?: number;
+  maxTokens?: number;
+  api?: string;
   publicHostname: string;
   password?: string;
   baseSystemPrompt: string;
@@ -103,6 +107,28 @@ export function loadConfig(): Config {
   if (config.apiKey !== undefined && config.authFile !== undefined) {
     throw new Error("Config must specify either apiKey or authFile, not both.");
   }
+
+  if (config.baseUrl !== undefined) {
+    if (config.authFile !== undefined) {
+      throw new Error("Config must not specify both baseUrl and authFile.");
+    }
+    if (config.contextWindow === undefined) {
+      throw new Error("Config must specify contextWindow when baseUrl is set.");
+    }
+    if (config.maxTokens === undefined) {
+      throw new Error("Config must specify maxTokens when baseUrl is set.");
+    }
+    if (config.api === undefined) {
+      config.api = "openai-completions";
+    }
+    const supportedApis = ["openai-completions", "anthropic-messages"];
+    if (!supportedApis.includes(config.api)) {
+      throw new Error(
+        `Config api must be one of: ${supportedApis.join(", ")}. Got: "${config.api}".`,
+      );
+    }
+  }
+
   if (config.publicHostname === undefined) {
     throw new Error("Config must specify publicHostname.");
   }
