@@ -91,7 +91,8 @@ mkdir -p "$REPO_ROOT/static/plugins"
 		"(https://stavrobot.stavros.io/plugins/index.md) in it, so you can check for" \
 		"new plugins in the future. Finally, create a cron entry to fire every Sunday" \
 		"at some point in the early morning (during the user's regular sleeping hours)" \
-		"to update the scratchpad entry from the plugin index."
+		"to update the scratchpad entry from the plugin index. The cron entry should" \
+        "not message the user."
 	echo ""
 	echo "| Name | Description | URL |"
 	echo "|------|-------------|-----|"
