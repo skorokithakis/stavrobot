@@ -12,6 +12,8 @@ import { sendTelegramMessage } from "./telegram-api.js";
 import { internalFetch } from "./internal-fetch.js";
 import { getWhatsappSocket, e164ToJid, sendWhatsappTextMessage } from "./whatsapp-api.js";
 import { sendEmail } from "./email-api.js";
+import { sendAgentmailMessage, getAgentmailAttachmentUrl } from "./agentmail-api.js";
+import { saveAttachment } from "./uploads.js";
 import { TEMP_ATTACHMENTS_DIR } from "./temp-dir.js";
 import { log } from "./log.js";
 import { toolError, toolSuccess } from "./tool-result.js";
@@ -556,6 +558,164 @@ export function createSendEmailTool(pool: pg.Pool, config: Config): AgentTool {
       await sendEmail(recipient, subject, message);
 
       return toolSuccess("Email sent successfully.");
+    },
+  };
+}
+
+// A small map of common file extensions to MIME types for agentmail attachments.
+// Falls back to application/octet-stream for unknown types.
+const MIME_TYPE_MAP: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".pdf": "application/pdf",
+  ".txt": "text/plain",
+  ".html": "text/html",
+  ".htm": "text/html",
+  ".csv": "text/csv",
+  ".json": "application/json",
+  ".xml": "application/xml",
+  ".zip": "application/zip",
+  ".mp3": "audio/mpeg",
+  ".mp4": "video/mp4",
+  ".ogg": "audio/ogg",
+  ".wav": "audio/wav",
+};
+
+export function createSendAgentmailTool(pool: pg.Pool, config: Config): AgentTool {
+  return {
+    name: "send_agentmail",
+    label: "Send agentmail",
+    description: "Send an email via AgentMail to a display name or email address. Sends plain text only.",
+    parameters: Type.Object({
+      recipient: Type.String({ description: "Display name of the recipient (e.g., \"Mom\") or email address (e.g., \"mom@example.com\")." }),
+      inboxId: Type.String({ description: "The AgentMail inbox ID to send from." }),
+      subject: Type.String({ description: "Email subject line." }),
+      message: Type.String({ description: "The email body (plain text)." }),
+      replyToMessageId: Type.Optional(Type.String({ description: "If set, sends as a reply to this message ID for threading." })),
+      attachmentPath: Type.Optional(Type.String({ description: "File path to an attachment under the temp directory (e.g., from manage_files write or a plugin tool)." })),
+    }),
+    execute: async (
+      toolCallId: string,
+      params: unknown
+    ): Promise<AgentToolResult<{ message: string }>> => {
+      const raw = params as {
+        recipient: string;
+        inboxId: string;
+        subject: string;
+        message: string;
+        replyToMessageId?: string;
+        attachmentPath?: string;
+      };
+
+      const recipientInput = raw.recipient;
+      const inboxId = raw.inboxId.trim();
+      const subject = raw.subject.trim();
+      const message = raw.message.trim();
+      const replyToMessageId = raw.replyToMessageId?.trim() || undefined;
+      const attachmentPath = raw.attachmentPath?.trim() || undefined;
+
+      const resolution = await resolveOutboundRecipient(pool, recipientInput, "agentmail", "agentmail", "email address", "send_agentmail", (s) => s.toLowerCase());
+      if ("content" in resolution) {
+        return resolution;
+      }
+
+      // Normalize to lowercase before the allowlist check.
+      const recipient = resolution.recipient.toLowerCase();
+
+      const scopeError = await checkSubagentRecipientScope(pool, recipient, "agentmail", "send_agentmail");
+      if (scopeError !== null) {
+        return scopeError;
+      }
+
+      // Hard gate: recipient must be in the allowlist.
+      if (!isInAllowlist("agentmail", recipient)) {
+        const errorMessage = `Error: recipient '${recipient}' is not in the agentmail allowlist.`;
+        log.warn("[stavrobot] send_agentmail rejected:", errorMessage);
+        return toolError(errorMessage);
+      }
+
+      const agentmailPreview = message.slice(0, 200);
+      log.info(`[stavrobot] message out: agentmail - ${recipient} - ${agentmailPreview}`);
+
+      if (attachmentPath !== undefined) {
+        const resolvedAttachmentPath = path.resolve(attachmentPath);
+        if (!resolvedAttachmentPath.startsWith(TEMP_ATTACHMENTS_DIR + "/")) {
+          return toolError("Error: attachmentPath must be under the temporary attachments directory.");
+        }
+
+        const fileBuffer = await fs.readFile(resolvedAttachmentPath);
+        const filename = path.basename(resolvedAttachmentPath);
+        const extension = path.extname(resolvedAttachmentPath).toLowerCase();
+        const contentType = MIME_TYPE_MAP[extension] ?? "application/octet-stream";
+
+        try {
+          await sendAgentmailMessage(inboxId, recipient, subject, message, replyToMessageId, [
+            { filename, content: fileBuffer.toString("base64"), contentType },
+          ]);
+        } finally {
+          // The path check above guarantees this is a temp file, so always delete it.
+          await fs.unlink(resolvedAttachmentPath);
+        }
+
+        return toolSuccess("Message sent successfully.");
+      }
+
+      await sendAgentmailMessage(inboxId, recipient, subject, message, replyToMessageId);
+
+      return toolSuccess("Message sent successfully.");
+    },
+  };
+}
+
+export function createDownloadAgentmailAttachmentTool(pool: pg.Pool, config: Config): AgentTool {
+  return {
+    name: "download_agentmail_attachment",
+    label: "Download agentmail attachment",
+    description: "Download an attachment from an AgentMail message and save it to the temp directory.",
+    parameters: Type.Object({
+      inboxId: Type.String({ description: "The inbox that received the message." }),
+      messageId: Type.String({ description: "The message containing the attachment." }),
+      attachmentId: Type.String({ description: "The specific attachment to download." }),
+    }),
+    execute: async (
+      toolCallId: string,
+      params: unknown
+    ): Promise<AgentToolResult<{ storedPath: string; filename: string; contentType: string; size: number }>> => {
+      const raw = params as {
+        inboxId: string;
+        messageId: string;
+        attachmentId: string;
+      };
+
+      const { inboxId, messageId, attachmentId } = raw;
+
+      const attachmentInfo = await getAgentmailAttachmentUrl(inboxId, messageId, attachmentId);
+      const { downloadUrl, filename: originalFilename, contentType: originalContentType, size } = attachmentInfo;
+
+      const response = await fetch(downloadUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to download attachment: HTTP ${response.status}`);
+      }
+
+      const filename = originalFilename ?? attachmentId;
+      const contentType = originalContentType ?? "application/octet-stream";
+
+      const { storedPath } = await saveAttachment(
+        Buffer.from(await response.arrayBuffer()),
+        filename,
+        contentType,
+      );
+
+      log.info(`[stavrobot] download_agentmail_attachment: saved ${filename} (${contentType}, ${size} bytes) to ${storedPath}`);
+
+      const resultText = `Attachment saved.\nPath: ${storedPath}\nFilename: ${filename}\nContent type: ${contentType}\nSize: ${size} bytes`;
+      return {
+        content: [{ type: "text" as const, text: resultText }],
+        details: { storedPath, filename, contentType, size },
+      };
     },
   };
 }

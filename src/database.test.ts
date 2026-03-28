@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeAll } from "vitest";
 import type { Pool, QueryResult } from "pg";
 
+// Mutable array so individual tests can temporarily add channels (e.g. "agentmail")
+// without affecting the rest of the suite.
+const ownerChannelsMock: string[] = [];
+
 // Mock config and log dependencies so the module loads without real infrastructure.
 vi.mock("./config.js", () => ({
   loadPostgresConfig: vi.fn().mockReturnValue({}),
-  OWNER_CHANNELS: [],
+  get OWNER_CHANNELS() { return ownerChannelsMock; },
 }));
 vi.mock("./log.js", () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -15,7 +19,7 @@ vi.mock("./toon.js", () => ({
 vi.mock("fs");
 
 import fs from "fs";
-import { resolveInterlocutor, seedOwner, seedCronEntries, upsertPage, deletePage, getPageByPath, getPageQueryByPath, readPage, listPageVersions, restorePageVersion, readScratchpad, saveMessage } from "./database.js";
+import { resolveInterlocutor, seedOwner, seedCronEntries, upsertPage, deletePage, getPageByPath, getPageQueryByPath, readPage, listPageVersions, restorePageVersion, readScratchpad, saveMessage, isOwnerIdentity } from "./database.js";
 import type { OwnerConfig } from "./config.js";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 
@@ -915,5 +919,47 @@ describe("saveMessage — returns inserted id", () => {
 
     expect(capturedValues?.[3]).toBe(42);
     expect(capturedValues?.[4]).toBeNull();
+  });
+});
+
+describe("seedOwner — agentmail identity normalization", () => {
+  it("stores agentmail identity lowercased and isOwnerIdentity matches case-insensitively", async () => {
+    // Temporarily add "agentmail" to the mocked OWNER_CHANNELS for this test.
+    ownerChannelsMock.push("agentmail");
+    try {
+      const upsertedIdentities: Array<{ service: string; identifier: string }> = [];
+      const pool = {
+        query: vi.fn().mockImplementation((text: string, values?: unknown[]) => {
+          if (typeof text === "string" && text.includes("INSERT INTO agents")) {
+            return Promise.resolve({ rows: [{ id: 1 }], rowCount: 1 } as unknown as QueryResult);
+          }
+          if (typeof text === "string" && text.includes("SELECT id FROM interlocutors WHERE owner")) {
+            return Promise.resolve({ rows: [{ id: 99 }], rowCount: 1 } as unknown as QueryResult);
+          }
+          if (typeof text === "string" && text.includes("INSERT INTO interlocutor_identities")) {
+            const service = (values as unknown[])[1] as string;
+            const identifier = (values as unknown[])[2] as string;
+            upsertedIdentities.push({ service, identifier });
+          }
+          return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
+        }),
+      } as unknown as Pool;
+
+      const ownerConfig: OwnerConfig = { name: "Test Owner", agentmail: "User@AgentMail.Example.COM" };
+      await seedOwner(pool, ownerConfig);
+
+      // The identity must be stored lowercased.
+      const agentmailIdentity = upsertedIdentities.find((i) => i.service === "agentmail");
+      expect(agentmailIdentity).toBeDefined();
+      expect(agentmailIdentity?.identifier).toBe("user@agentmail.example.com");
+
+      // isOwnerIdentity must match the original mixed-case address.
+      expect(isOwnerIdentity("agentmail", "User@AgentMail.Example.COM")).toBe(true);
+      expect(isOwnerIdentity("agentmail", "user@agentmail.example.com")).toBe(true);
+      expect(isOwnerIdentity("agentmail", "other@example.com")).toBe(false);
+    } finally {
+      // Restore the mocked OWNER_CHANNELS to its original empty state.
+      ownerChannelsMock.length = 0;
+    }
   });
 });

@@ -17,12 +17,12 @@ const RETRY_DELAY_MS = 30_000;
 
 // Sources that require allowlist + interlocutor lookup before routing.
 // All other external sources route directly to the main agent.
-const GATED_SOURCES: string[] = ["signal", "telegram", "whatsapp", "email"];
+const GATED_SOURCES: string[] = ["signal", "telegram", "whatsapp", "email", "agentmail"];
 
 // Channels where the owner interacts in real-time. Used to decide whether an
 // incoming message while the agent is busy should steer the running turn
 // instead of being queued behind it.
-const INTERACTIVE_SOURCES: string[] = ["signal", "telegram", "whatsapp", "email"];
+const INTERACTIVE_SOURCES: string[] = ["signal", "telegram", "whatsapp", "email", "agentmail"];
 
 function isInteractiveOwnerMessage(source: string | undefined, sender: string | undefined): boolean {
   if (source === undefined) {
@@ -239,6 +239,15 @@ async function processQueue(): Promise<void> {
             await sendWhatsappTextMessage(entry.sender, loginMessage);
           } catch (sendError) {
             log.error(`[stavrobot] Failed to send WhatsApp login notification: ${sendError instanceof Error ? sendError.message : String(sendError)}`);
+          }
+        } else if (entry.source === "agentmail" && entry.sender !== undefined) {
+          try {
+            // Send login link via agentmail — but we need an inboxId.
+            // Since we don't know which inbox to reply from, just log the error.
+            // The sender will need to try again after the owner logs in.
+            log.warn("[stavrobot] Auth failure for agentmail sender, cannot send login link (no inbox context).");
+          } catch (sendError) {
+            log.error(`[stavrobot] Failed to send agentmail login notification: ${sendError instanceof Error ? sendError.message : String(sendError)}`);
           }
         }
         entry.resolve(loginMessage);

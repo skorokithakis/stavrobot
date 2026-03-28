@@ -21,7 +21,7 @@ import { encodeToToon } from "../toon.js";
 import { log } from "../log.js";
 import { AbortError } from "../errors.js";
 import { toolError, toolSuccess } from "../tool-result.js";
-import { createSendSignalMessageTool, createSendTelegramMessageTool, createSendWhatsappMessageTool, createSendEmailTool } from "../send-tools.js";
+import { createSendSignalMessageTool, createSendTelegramMessageTool, createSendWhatsappMessageTool, createSendEmailTool, createSendAgentmailTool, createDownloadAgentmailAttachmentTool } from "../send-tools.js";
 import { currentAgentId, setCurrentAgentId } from "../agent-context.js";
 export { currentAgentId } from "../agent-context.js";
 import {
@@ -48,7 +48,7 @@ import {
 } from "./plugins.js";
 export { TEMP_ATTACHMENTS_DIR } from "../temp-dir.js";
 export { AbortError } from "../errors.js";
-export { createSendSignalMessageTool, createSendTelegramMessageTool, createSendWhatsappMessageTool, createSendEmailTool } from "../send-tools.js";
+export { createSendSignalMessageTool, createSendTelegramMessageTool, createSendWhatsappMessageTool, createSendEmailTool, createSendAgentmailTool, createDownloadAgentmailAttachmentTool } from "../send-tools.js";
 
 // Re-export everything from the extracted modules so external importers that
 // import from "./agent.js" continue to work without changes.
@@ -427,6 +427,10 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
   }
   if (config.email !== undefined && config.email.smtpHost !== undefined) {
     tools.push(createSendEmailTool(pool, config));
+  }
+  if (config.agentmail !== undefined) {
+    tools.push(createSendAgentmailTool(pool, config));
+    tools.push(createDownloadAgentmailAttachmentTool(pool, config));
   }
 
   const effectiveBasePrompt = (config.customPrompt !== undefined

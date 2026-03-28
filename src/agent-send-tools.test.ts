@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { Pool, QueryResult } from "pg";
-import { createSendSignalMessageTool, createSendTelegramMessageTool, createSendWhatsappMessageTool, createSendEmailTool } from "./send-tools.js";
+import { createSendSignalMessageTool, createSendTelegramMessageTool, createSendWhatsappMessageTool, createSendEmailTool, createSendAgentmailTool, createDownloadAgentmailAttachmentTool } from "./send-tools.js";
 import type { Config } from "./config.js";
 import { initInternalFetch } from "./internal-fetch.js";
 
@@ -47,10 +47,25 @@ vi.mock("./email-api.js", () => ({
   initializeEmailTransport: vi.fn(),
 }));
 
+// Mock the agentmail-api module so tests can control sendAgentmailMessage and getAgentmailAttachmentUrl.
+vi.mock("./agentmail-api.js", () => ({
+  sendAgentmailMessage: vi.fn(),
+  getAgentmailAttachmentUrl: vi.fn(),
+  initializeAgentmailClient: vi.fn(),
+  registerAgentmailWebhook: vi.fn(),
+}));
+
+// Mock the uploads module so tests can control saveAttachment.
+vi.mock("./uploads.js", () => ({
+  saveAttachment: vi.fn(),
+}));
+
 import { resolveRecipient, resolveInterlocutorByName, getMainAgentId } from "./database.js";
 import { isInAllowlist } from "./allowlist.js";
 import { getWhatsappSocket, sendWhatsappTextMessage } from "./whatsapp-api.js";
 import { sendEmail } from "./email-api.js";
+import { sendAgentmailMessage, getAgentmailAttachmentUrl } from "./agentmail-api.js";
+import { saveAttachment } from "./uploads.js";
 import { setCurrentAgentId } from "./agent-context.js";
 
 function makeText(result: { content: Array<{ type: string; text?: string }> }): string {
@@ -731,5 +746,281 @@ describe("subagent recipient scoping", () => {
     const tool = createSendEmailTool(pool, config);
     const result = await tool.execute("call-1", { recipient: "anyone@example.com", subject: "Hi", message: "hello" });
     expect(makeText(result)).not.toContain("assigned interlocutor");
+  });
+
+  it("allows main agent to send agentmail to any recipient", async () => {
+    // Main agent (ID 1) is exempt from scoping.
+    vi.mocked(resolveRecipient).mockResolvedValue({ identifier: "anyone@example.com" });
+    const pool = makeScopingPool(["assigned@example.com"], "anyone@example.com");
+    const config = makeConfig({ agentmail: { apiKey: "test-agentmail-key" } });
+    vi.mocked(sendAgentmailMessage).mockResolvedValue(undefined);
+    const tool = createSendAgentmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "anyone@example.com", inboxId: "inbox-1", subject: "Hi", message: "hello" });
+    expect(makeText(result)).not.toContain("assigned interlocutor");
+  });
+
+  it("allows subagent to send to its assigned agentmail interlocutor", async () => {
+    setCurrentAgentId(2);
+    vi.mocked(resolveRecipient).mockResolvedValue({ identifier: "assigned@example.com" });
+    const pool = makeScopingPool(["assigned@example.com"], "assigned@example.com");
+    const config = makeConfig({ agentmail: { apiKey: "test-agentmail-key" } });
+    vi.mocked(sendAgentmailMessage).mockResolvedValue(undefined);
+    const tool = createSendAgentmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "assigned@example.com", inboxId: "inbox-1", subject: "Hi", message: "hello" });
+    expect(makeText(result)).not.toContain("assigned interlocutor");
+  });
+
+  it("rejects subagent sending to a different agentmail interlocutor", async () => {
+    setCurrentAgentId(2);
+    vi.mocked(resolveRecipient).mockResolvedValue({ identifier: "other@example.com" });
+    // The scoping pool returns only assigned@example.com as assigned to agent 2.
+    const pool = makeScopingPool(["assigned@example.com"], "other@example.com");
+    const config = makeConfig({ agentmail: { apiKey: "test-agentmail-key" } });
+    const tool = createSendAgentmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "other@example.com", inboxId: "inbox-1", subject: "Hi", message: "hello" });
+    expect(makeText(result)).toContain("assigned interlocutor");
+    expect(makeText(result)).toContain("send_agent_message");
+  });
+});
+
+describe("isInAllowlist (via send tools) — agentmail", () => {
+  it("send_agentmail rejects when recipient is not in allowlist", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue(null);
+    vi.mocked(resolveInterlocutorByName).mockResolvedValue(null);
+    vi.mocked(isInAllowlist).mockReturnValue(false);
+    const pool = makeIdentityFoundPool("stranger@example.com");
+    const config = makeConfig({ agentmail: { apiKey: "test-agentmail-key" } });
+    const tool = createSendAgentmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "stranger@example.com", inboxId: "inbox-1", subject: "Hi", message: "hello" });
+    expect(makeText(result)).toContain("not in the agentmail allowlist");
+  });
+});
+
+describe("send_agentmail — recipient resolution", () => {
+  it("rejects with a specific error when interlocutor exists but has no agentmail identity", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue(null);
+    vi.mocked(resolveInterlocutorByName).mockResolvedValue({ id: 5 });
+    const pool = makeEmptyPool();
+    const config = makeConfig({ agentmail: { apiKey: "test-agentmail-key" } });
+    const tool = createSendAgentmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "Mom", inboxId: "inbox-1", subject: "Hi", message: "hello" });
+    expect(makeText(result)).toContain("has no agentmail identity");
+    expect(makeText(result)).toContain("manage_interlocutors");
+  });
+
+  it("rejects when display name is not found and raw ID is not in interlocutor_identities", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue(null);
+    vi.mocked(resolveInterlocutorByName).mockResolvedValue(null);
+    const pool = makeEmptyPool();
+    const config = makeConfig({ agentmail: { apiKey: "test-agentmail-key" } });
+    const tool = createSendAgentmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "unknown@example.com", inboxId: "inbox-1", subject: "Hi", message: "hello" });
+    expect(makeText(result)).toContain("unknown recipient");
+    expect(makeText(result)).toContain("unknown@example.com");
+  });
+
+  it("rejects when display name resolves but resolved identifier is not in allowlist", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue({ identifier: "stranger@example.com" });
+    vi.mocked(isInAllowlist).mockReturnValue(false);
+    const pool = makeEmptyPool();
+    const config = makeConfig({ agentmail: { apiKey: "test-agentmail-key" } });
+    const tool = createSendAgentmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "Mom", inboxId: "inbox-1", subject: "Hi", message: "hello" });
+    expect(makeText(result)).toContain("not in the agentmail allowlist");
+  });
+
+  it("rejects with disabled error when resolveRecipient returns disabled", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue({ disabled: true, displayName: "Mom" });
+    const pool = makeEmptyPool();
+    const config = makeConfig({ agentmail: { apiKey: "test-agentmail-key" } });
+    const tool = createSendAgentmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "Mom", inboxId: "inbox-1", subject: "Hi", message: "hello" });
+    expect(makeText(result)).toContain('Interlocutor "Mom" is disabled');
+  });
+
+  it("rejects with unknown recipient when raw email belongs to a disabled interlocutor", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue(null);
+    vi.mocked(resolveInterlocutorByName).mockResolvedValue(null);
+    // The pool returns no rows because the JOIN filters out disabled interlocutors.
+    const pool = makeEmptyPool();
+    const config = makeConfig({ agentmail: { apiKey: "test-agentmail-key" } });
+    const tool = createSendAgentmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "disabled@example.com", inboxId: "inbox-1", subject: "Hi", message: "hello" });
+    expect(makeText(result)).toContain("unknown recipient");
+  });
+
+  it("uses a query that joins interlocutors and checks enabled=true for the agentmail raw-ID path", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue(null);
+    vi.mocked(resolveInterlocutorByName).mockResolvedValue(null);
+    const { pool, capturedQuery } = makeCapturingPool();
+    const config = makeConfig({ agentmail: { apiKey: "test-agentmail-key" } });
+    const tool = createSendAgentmailTool(pool, config);
+    await tool.execute("call-1", { recipient: "test@example.com", inboxId: "inbox-1", subject: "Hi", message: "hello" });
+    expect(capturedQuery.text).toContain("JOIN interlocutors");
+    expect(capturedQuery.text).toContain("enabled = true");
+    // The shared resolveOutboundRecipient helper uses a parameterized query ($2 for service).
+    expect(capturedQuery.text).toContain("service = $2");
+  });
+
+  it("normalizes recipient email to lowercase before allowlist check", async () => {
+    vi.mocked(resolveRecipient).mockResolvedValue(null);
+    vi.mocked(resolveInterlocutorByName).mockResolvedValue(null);
+    vi.mocked(isInAllowlist).mockReturnValue(true);
+    vi.mocked(sendAgentmailMessage).mockResolvedValue(undefined);
+    const pool = makeIdentityFoundPool("test@example.com");
+    const config = makeConfig({ agentmail: { apiKey: "test-agentmail-key" } });
+    const tool = createSendAgentmailTool(pool, config);
+    await tool.execute("call-1", { recipient: "TEST@EXAMPLE.COM", inboxId: "inbox-1", subject: "Hi", message: "hello" });
+    expect(vi.mocked(isInAllowlist)).toHaveBeenCalledWith("agentmail", "test@example.com");
+  });
+});
+
+describe("send_agentmail — text send", () => {
+  beforeEach(() => {
+    vi.mocked(resolveRecipient).mockResolvedValue({ identifier: "mom@example.com" });
+    vi.mocked(isInAllowlist).mockReturnValue(true);
+    vi.mocked(sendAgentmailMessage).mockResolvedValue(undefined);
+  });
+
+  it("calls sendAgentmailMessage with the resolved recipient, inboxId, subject, and message", async () => {
+    const pool = makeEmptyPool();
+    const config = makeConfig({ agentmail: { apiKey: "test-agentmail-key" } });
+    const tool = createSendAgentmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "Mom", inboxId: "inbox-1", subject: "Hello", message: "hi there" });
+    expect(vi.mocked(sendAgentmailMessage)).toHaveBeenCalledWith("inbox-1", "mom@example.com", "Hello", "hi there", undefined);
+    expect(makeText(result)).toBe("Message sent successfully.");
+  });
+
+  it("passes replyToMessageId when provided", async () => {
+    const pool = makeEmptyPool();
+    const config = makeConfig({ agentmail: { apiKey: "test-agentmail-key" } });
+    const tool = createSendAgentmailTool(pool, config);
+    await tool.execute("call-1", { recipient: "Mom", inboxId: "inbox-1", subject: "Re: Hello", message: "reply body", replyToMessageId: "msg-42" });
+    expect(vi.mocked(sendAgentmailMessage)).toHaveBeenCalledWith("inbox-1", "mom@example.com", "Re: Hello", "reply body", "msg-42");
+  });
+});
+
+describe("send_agentmail — attachment send", () => {
+  beforeEach(() => {
+    vi.mocked(resolveRecipient).mockResolvedValue({ identifier: "mom@example.com" });
+    vi.mocked(isInAllowlist).mockReturnValue(true);
+    vi.mocked(sendAgentmailMessage).mockResolvedValue(undefined);
+  });
+
+  it("returns error when attachmentPath is outside the temp directory", async () => {
+    const pool = makeEmptyPool();
+    const config = makeConfig({ agentmail: { apiKey: "test-agentmail-key" } });
+    const tool = createSendAgentmailTool(pool, config);
+    const result = await tool.execute("call-1", { recipient: "Mom", inboxId: "inbox-1", subject: "Hi", message: "hello", attachmentPath: "/etc/passwd" });
+    expect(makeText(result)).toContain("attachmentPath must be under the temporary attachments directory");
+  });
+
+  it("rejects a path that is a sibling directory of TEMP_ATTACHMENTS_DIR (path traversal)", async () => {
+    const pool = makeEmptyPool();
+    const config = makeConfig({ agentmail: { apiKey: "test-agentmail-key" } });
+    const tool = createSendAgentmailTool(pool, config);
+    // /tmp/stavrobot-temp-evil/foo starts with /tmp/stavrobot-temp but is not inside it
+    const result = await tool.execute("call-1", { recipient: "Mom", inboxId: "inbox-1", subject: "Hi", message: "hello", attachmentPath: "/tmp/stavrobot-temp-evil/foo.txt" });
+    expect(makeText(result)).toContain("attachmentPath must be under the temporary attachments directory");
+  });
+
+  it("deletes the temp file even when sendAgentmailMessage throws", async () => {
+    vi.mocked(sendAgentmailMessage).mockRejectedValue(new Error("send failed"));
+
+    // We need a real temp file for the tool to read and then delete.
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const filePath = path.join("/tmp/stavrobot-temp", "test-cleanup.txt");
+    await fs.mkdir("/tmp/stavrobot-temp", { recursive: true });
+    await fs.writeFile(filePath, "test content");
+
+    const pool = makeEmptyPool();
+    const config = makeConfig({ agentmail: { apiKey: "test-agentmail-key" } });
+    const tool = createSendAgentmailTool(pool, config);
+
+    await expect(
+      tool.execute("call-1", { recipient: "Mom", inboxId: "inbox-1", subject: "Hi", message: "hello", attachmentPath: filePath }),
+    ).rejects.toThrow("send failed");
+
+    // File must have been deleted despite the error.
+    await expect(fs.access(filePath)).rejects.toThrow();
+  });
+});
+
+describe("download_agentmail_attachment — happy path", () => {
+  it("fetches the attachment URL, saves it, and returns the stored path and metadata", async () => {
+    vi.mocked(getAgentmailAttachmentUrl).mockResolvedValue({
+      downloadUrl: "https://cdn.example.com/attachment.pdf",
+      filename: "report.pdf",
+      contentType: "application/pdf",
+      size: 1024,
+    });
+
+    const fakeArrayBuffer = new ArrayBuffer(8);
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: async () => fakeArrayBuffer,
+    } as unknown as Response);
+
+    vi.mocked(saveAttachment).mockResolvedValue({
+      storedPath: "/tmp/stavrobot-temp/upload-abc123.pdf",
+      storedFilename: "upload-abc123.pdf",
+    });
+
+    const pool = makeEmptyPool();
+    const config = makeConfig({ agentmail: { apiKey: "test-agentmail-key" } });
+    const tool = createDownloadAgentmailAttachmentTool(pool, config);
+    const result = await tool.execute("call-1", { inboxId: "inbox-1", messageId: "msg-1", attachmentId: "att-1" });
+
+    expect(vi.mocked(getAgentmailAttachmentUrl)).toHaveBeenCalledWith("inbox-1", "msg-1", "att-1");
+    expect(vi.mocked(saveAttachment)).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      "report.pdf",
+      "application/pdf",
+    );
+
+    const text = makeText(result);
+    expect(text).toContain("/tmp/stavrobot-temp/upload-abc123.pdf");
+    expect(text).toContain("report.pdf");
+    expect(text).toContain("application/pdf");
+    expect(text).toContain("1024");
+
+    expect(result.details).toMatchObject({
+      storedPath: "/tmp/stavrobot-temp/upload-abc123.pdf",
+      filename: "report.pdf",
+      contentType: "application/pdf",
+      size: 1024,
+    });
+  });
+
+  it("falls back to attachmentId as filename and application/octet-stream when metadata is absent", async () => {
+    vi.mocked(getAgentmailAttachmentUrl).mockResolvedValue({
+      downloadUrl: "https://cdn.example.com/blob",
+      filename: undefined,
+      contentType: undefined,
+      size: 512,
+    });
+
+    const fakeArrayBuffer = new ArrayBuffer(4);
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: async () => fakeArrayBuffer,
+    } as unknown as Response);
+
+    vi.mocked(saveAttachment).mockResolvedValue({
+      storedPath: "/tmp/stavrobot-temp/upload-xyz.bin",
+      storedFilename: "upload-xyz.bin",
+    });
+
+    const pool = makeEmptyPool();
+    const config = makeConfig({ agentmail: { apiKey: "test-agentmail-key" } });
+    const tool = createDownloadAgentmailAttachmentTool(pool, config);
+    await tool.execute("call-1", { inboxId: "inbox-1", messageId: "msg-1", attachmentId: "att-99" });
+
+    expect(vi.mocked(saveAttachment)).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      "att-99",
+      "application/octet-stream",
+    );
   });
 });

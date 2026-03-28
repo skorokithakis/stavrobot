@@ -43,6 +43,8 @@ import { initializeWhatsApp } from "./whatsapp.js";
 import { serveHomePage } from "./home.js";
 import { handleEmailWebhookRequest } from "./email.js";
 import { initializeEmailTransport } from "./email-api.js";
+import { handleAgentmailWebhookRequest, setAgentmailWebhookSecret } from "./agentmail.js";
+import { initializeAgentmailClient, registerAgentmailWebhook } from "./agentmail-api.js";
 import { log } from "./log.js";
 
 const CSP_HEADER_VALUE =
@@ -57,6 +59,9 @@ function isPublicRoute(method: string, pathname: string): boolean {
     return true;
   }
   if (method === "POST" && pathname === "/email/webhook") {
+    return true;
+  }
+  if (method === "POST" && pathname === "/agentmail/webhook") {
     return true;
   }
   // Pages have per-row auth: the route handler checks is_public and enforces auth itself.
@@ -483,6 +488,12 @@ async function main(): Promise<void> {
     initializeEmailTransport(config.email);
   }
 
+  if (config.agentmail !== undefined) {
+    initializeAgentmailClient(config.agentmail.apiKey);
+    const agentmailWebhookSecret = await registerAgentmailWebhook(config.publicHostname);
+    setAgentmailWebhookSecret(agentmailWebhookSecret);
+  }
+
   const server = http.createServer((request: http.IncomingMessage, response: http.ServerResponse): void => {
     const url = new URL(request.url || "/", `http://${request.headers.host}`);
     const pathname = url.pathname;
@@ -516,6 +527,8 @@ async function main(): Promise<void> {
         response.writeHead(404, { "Content-Type": "application/json" });
         response.end(JSON.stringify({ error: "Not found" }));
       }
+    } else if (request.method === "POST" && pathname === "/agentmail/webhook") {
+      handleAgentmailWebhookRequest(request, response);
     } else if (request.method === "GET" && pathname === "/login") {
       serveLoginPage(response, config);
     } else if (request.method === "GET" && pathname === "/login/events") {
