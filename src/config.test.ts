@@ -141,3 +141,123 @@ name = "Stavros"
     expect(config.compactionTokenThreshold).toBe(50000);
   });
 });
+
+describe("loadConfig openai-compatible provider validation", () => {
+  it("throws when provider is openai-compatible and baseUrl is missing", async () => {
+    const toml = `
+provider = "openai-compatible"
+model = "claude-sonnet-4-6"
+apiKey = "test-key"
+publicHostname = "https://example.com"
+
+[owner]
+name = "Stavros"
+`;
+    setupMocks(toml);
+    const { loadConfig } = await import("./config.js");
+    expect(() => loadConfig()).toThrow("Config must specify baseUrl when provider is \"openai-compatible\".");
+  });
+
+  it("throws when baseUrl is set for a non-openai-compatible provider", async () => {
+    const toml = `
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+apiKey = "test-key"
+baseUrl = "http://localhost:8317/v1"
+publicHostname = "https://example.com"
+
+[owner]
+name = "Stavros"
+`;
+    setupMocks(toml);
+    const { loadConfig } = await import("./config.js");
+    expect(() => loadConfig()).toThrow("Config baseUrl is only valid when provider is \"openai-compatible\".");
+  });
+
+  it("loads successfully for openai-compatible provider with baseUrl", async () => {
+    const toml = `
+provider = "openai-compatible"
+model = "claude-sonnet-4-6"
+apiKey = "test-key"
+baseUrl = "http://localhost:8317/v1"
+publicHostname = "https://example.com"
+
+[owner]
+name = "Stavros"
+`;
+    setupMocks(toml);
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.baseUrl).toBe("http://localhost:8317/v1");
+    expect(config.contextWindow).toBeUndefined();
+    expect(config.maxTokens).toBeUndefined();
+  });
+
+  it("throws when baseUrl is empty for openai-compatible provider", async () => {
+    const toml = `
+provider = "openai-compatible"
+model = "claude-sonnet-4-6"
+apiKey = "test-key"
+baseUrl = ""
+publicHostname = "https://example.com"
+
+[owner]
+name = "Stavros"
+`;
+    setupMocks(toml);
+    const { loadConfig } = await import("./config.js");
+    expect(() => loadConfig()).toThrow("Config baseUrl must not be empty.");
+  });
+
+  it("throws when baseUrl is whitespace-only for openai-compatible provider", async () => {
+    const toml = `
+provider = "openai-compatible"
+model = "claude-sonnet-4-6"
+apiKey = "test-key"
+baseUrl = "   "
+publicHostname = "https://example.com"
+
+[owner]
+name = "Stavros"
+`;
+    setupMocks(toml);
+    const { loadConfig } = await import("./config.js");
+    expect(() => loadConfig()).toThrow("Config baseUrl must not be empty.");
+  });
+
+  it("throws when baseUrl does not start with http:// or https://", async () => {
+    const toml = `
+provider = "openai-compatible"
+model = "claude-sonnet-4-6"
+apiKey = "test-key"
+baseUrl = "localhost:8317/v1"
+publicHostname = "https://example.com"
+
+[owner]
+name = "Stavros"
+`;
+    setupMocks(toml);
+    const { loadConfig } = await import("./config.js");
+    expect(() => loadConfig()).toThrow("Config baseUrl must start with http:// or https://.");
+  });
+
+  it("loads contextWindow and maxTokens overrides when set", async () => {
+    const toml = `
+provider = "openai-compatible"
+model = "claude-sonnet-4-6"
+apiKey = "test-key"
+baseUrl = "http://localhost:8317/v1"
+contextWindow = 200000
+maxTokens = 64000
+publicHostname = "https://example.com"
+
+[owner]
+name = "Stavros"
+`;
+    setupMocks(toml);
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.contextWindow).toBe(200000);
+    expect(config.maxTokens).toBe(64000);
+  });
+});

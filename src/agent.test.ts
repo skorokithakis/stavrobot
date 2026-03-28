@@ -2,7 +2,8 @@ import { describe, it, expect, vi, type MockedFunction, beforeEach } from "vites
 import type { Agent, AgentMessage, AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
 import { complete } from "@mariozechner/pi-ai";
 import type { Pool } from "pg";
-import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool, injectAutoSearchBlock, pendingAutoSearchBlocks, handlePrompt, createAgent, escalatingSummarize, selectCompactionCutIndex, isTurnBoundary } from "./agent/index.js";
+import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool, injectAutoSearchBlock, pendingAutoSearchBlocks, handlePrompt, createAgent, escalatingSummarize, selectCompactionCutIndex, isTurnBoundary, buildOpenAiCompatModel } from "./agent/index.js";
+import type { Config } from "./config.js";
 import { getApiKey } from "./auth.js";
 import { loadMessages, loadAllMemories, loadAllScratchpadTitles, getMainAgentId } from "./database.js";
 import { runSearch } from "./search.js";
@@ -82,6 +83,8 @@ vi.mock("@mariozechner/pi-ai", () => ({
     Record: vi.fn().mockReturnValue({}),
   },
   getModel: vi.fn().mockReturnValue({ contextWindow: 200000 }),
+  getProviders: vi.fn(),
+  getModels: vi.fn(),
   complete: vi.fn(),
 }));
 // makeMinimalTool is hoisted so it can be used in vi.mock factories below.
@@ -809,6 +812,106 @@ describe("truncateContext", () => {
     const block = (result[0] as { content: Array<{ type: string; text: string }> }).content[0];
     // The block must not have grown: the suffix alone is longer than the original.
     expect(block.text.length).toBeLessThanOrEqual(tinyText.length);
+  });
+});
+
+describe("buildOpenAiCompatModel", () => {
+  async function getProvidersMock(): Promise<MockedFunction<() => string[]>> {
+    const piAi = await import("@mariozechner/pi-ai");
+    return piAi.getProviders as unknown as MockedFunction<() => string[]>;
+  }
+
+  async function getModelsMock(): Promise<MockedFunction<(provider: string) => unknown[]>> {
+    const piAi = await import("@mariozechner/pi-ai");
+    return piAi.getModels as unknown as MockedFunction<(provider: string) => unknown[]>;
+  }
+
+  const baseConfig: Config = {
+    provider: "openai-compatible",
+    model: "claude-sonnet-4-6",
+    apiKey: "test-key",
+    baseUrl: "http://localhost:8317/v1",
+    publicHostname: "https://example.com",
+    baseSystemPrompt: "You are a bot.",
+    compactionPrompt: "Compaction prompt.",
+    compactionBulletPrompt: "Bullet prompt.",
+    baseAgentPrompt: "You are Stavrobot.",
+    compactionTokenThreshold: 80000,
+    owner: { name: "Stavros" },
+  };
+
+  it("uses registry metadata and provider for a known model ID", async () => {
+    const getProviders = await getProvidersMock();
+    const getModels = await getModelsMock();
+
+    getProviders.mockReturnValue(["anthropic"]);
+    getModels.mockReturnValue([
+      {
+        id: "claude-sonnet-4-6",
+        name: "Claude Sonnet 4.6",
+        provider: "anthropic",
+        reasoning: false,
+        input: ["text", "image"],
+        cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+        contextWindow: 200000,
+        maxTokens: 64000,
+      },
+    ]);
+
+    const model = buildOpenAiCompatModel(baseConfig);
+
+    expect(model.api).toBe("openai-completions");
+    expect(model.provider).toBe("anthropic");
+    expect(model.id).toBe("claude-sonnet-4-6");
+    expect(model.name).toBe("Claude Sonnet 4.6");
+    expect(model.contextWindow).toBe(200000);
+    expect(model.maxTokens).toBe(64000);
+    expect(model.baseUrl).toBe("http://localhost:8317/v1");
+  });
+
+  it("falls back to provider 'openai-compatible' and default metadata for an unknown model ID", async () => {
+    const getProviders = await getProvidersMock();
+    const getModels = await getModelsMock();
+
+    getProviders.mockReturnValue(["anthropic"]);
+    getModels.mockReturnValue([]);
+
+    const config: Config = { ...baseConfig, model: "unknown-model-xyz" };
+    const model = buildOpenAiCompatModel(config);
+
+    expect(model.provider).toBe("openai-compatible");
+    expect(model.id).toBe("unknown-model-xyz");
+    expect(model.name).toBe("unknown-model-xyz");
+    expect(model.api).toBe("openai-completions");
+    expect(model.contextWindow).toBe(128000);
+    expect(model.maxTokens).toBe(8192);
+    expect(model.reasoning).toBe(false);
+    expect(model.input).toEqual(["text"]);
+  });
+
+  it("config contextWindow and maxTokens override registry values", async () => {
+    const getProviders = await getProvidersMock();
+    const getModels = await getModelsMock();
+
+    getProviders.mockReturnValue(["anthropic"]);
+    getModels.mockReturnValue([
+      {
+        id: "claude-sonnet-4-6",
+        name: "Claude Sonnet 4.6",
+        provider: "anthropic",
+        reasoning: false,
+        input: ["text", "image"],
+        cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+        contextWindow: 200000,
+        maxTokens: 64000,
+      },
+    ]);
+
+    const config: Config = { ...baseConfig, contextWindow: 50000, maxTokens: 4096 };
+    const model = buildOpenAiCompatModel(config);
+
+    expect(model.contextWindow).toBe(50000);
+    expect(model.maxTokens).toBe(4096);
   });
 });
 

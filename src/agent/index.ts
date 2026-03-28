@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import pg from "pg";
-import { Type, getModel, type TextContent, type ImageContent, type AssistantMessage, type ToolCall } from "@mariozechner/pi-ai";
+import { Type, getModel, getProviders, getModels, type TextContent, type ImageContent, type AssistantMessage, type ToolCall } from "@mariozechner/pi-ai";
+import type { Model } from "@mariozechner/pi-ai";
 import { Agent, type AgentTool, type AgentToolResult, type AgentMessage } from "@mariozechner/pi-agent-core";
 import type { Config } from "../config.js";
 import type { FileAttachment } from "../uploads.js";
@@ -394,8 +395,64 @@ function wrapToolWithLogging(tool: AgentTool): AgentTool {
   };
 }
 
+export function buildOpenAiCompatModel(config: Config): Model<"openai-completions"> {
+  // Search the registry for a model whose id matches config.model. The first
+  // match found provides metadata (name, reasoning, input, cost, context sizes).
+  // We keep the original provider so detectCompat() produces the right compat
+  // settings (e.g., "anthropic" for Claude models routed through a proxy).
+  let registryName: string | undefined;
+  let registryReasoning: boolean | undefined;
+  let registryInput: ("text" | "image")[] | undefined;
+  let registryCost: { input: number; output: number; cacheRead: number; cacheWrite: number } | undefined;
+  let registryContextWindow: number | undefined;
+  let registryMaxTokens: number | undefined;
+  let registryProvider: string | undefined;
+
+  for (const provider of getProviders()) {
+    const models = getModels(provider);
+    const match = models.find((m) => m.id === config.model);
+    if (match !== undefined) {
+      registryName = match.name;
+      registryReasoning = match.reasoning;
+      registryInput = match.input;
+      registryCost = match.cost;
+      registryContextWindow = match.contextWindow;
+      registryMaxTokens = match.maxTokens;
+      registryProvider = match.provider as string;
+      log.info(`[stavrobot] openai-compatible: found registry entry for "${config.model}" under provider "${registryProvider}"`);
+      break;
+    }
+  }
+
+  if (registryProvider === undefined) {
+    log.warn(`[stavrobot] openai-compatible: no registry entry found for "${config.model}", using safe defaults`);
+  }
+
+  return {
+    id: config.model,
+    name: registryName ?? config.model,
+    api: "openai-completions" as const,
+    provider: registryProvider ?? "openai-compatible",
+    baseUrl: config.baseUrl as string,
+    reasoning: registryReasoning ?? false,
+    input: registryInput ?? ["text"],
+    cost: registryCost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: config.contextWindow ?? registryContextWindow ?? 128000,
+    maxTokens: config.maxTokens ?? registryMaxTokens ?? 8192,
+  };
+}
+
 export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent> {
-  const model = getModel(config.provider as any, config.model as any);
+  let model: Model<any>;
+  if (config.provider === "openai-compatible") {
+    model = buildOpenAiCompatModel(config);
+    log.info(`[stavrobot] createAgent: using openai-compatible model "${model.id}" via ${config.baseUrl}`);
+  } else {
+    model = getModel(config.provider as any, config.model as any);
+    if (model === undefined) {
+      throw new Error(`No model available for provider "${config.provider}".`);
+    }
+  }
   const tools = [createExecuteSqlTool(pool), createManageKnowledgeTool(pool), createSendSignalMessageTool(pool, config), createManageCronTool(pool), createRunPythonTool(), createManagePagesTool(pool), createManageUploadsTool(), createSearchTool(pool, config.embeddings), createManageFilesTool(), createManageInterlocutorsTool(pool), createManageAgentsTool(pool), createSendAgentMessageTool(pool, () => currentAgentId)];
   tools.push(
     createManagePluginsTool({ coderEnabled: config.coder !== undefined }),

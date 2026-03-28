@@ -59,6 +59,9 @@ export interface Config {
   model: string;
   apiKey?: string;
   authFile?: string;
+  baseUrl?: string;
+  contextWindow?: number;
+  maxTokens?: number;
   publicHostname: string;
   password?: string;
   baseSystemPrompt: string;
@@ -114,6 +117,21 @@ export function loadConfig(): Config {
   }
   if (config.publicHostname.endsWith("/")) {
     throw new Error("Config publicHostname must not end with a trailing slash.");
+  }
+
+  if (config.provider === "openai-compatible" && config.baseUrl === undefined) {
+    throw new Error("Config must specify baseUrl when provider is \"openai-compatible\".");
+  }
+  if (config.provider === "openai-compatible" && config.baseUrl !== undefined) {
+    if (config.baseUrl.trim() === "") {
+      throw new Error("Config baseUrl must not be empty.");
+    }
+    if (!config.baseUrl.startsWith("http://") && !config.baseUrl.startsWith("https://")) {
+      throw new Error("Config baseUrl must start with http:// or https://.");
+    }
+  }
+  if (config.provider !== "openai-compatible" && config.baseUrl !== undefined) {
+    throw new Error("Config baseUrl is only valid when provider is \"openai-compatible\".");
   }
 
   if (config.owner === undefined) {

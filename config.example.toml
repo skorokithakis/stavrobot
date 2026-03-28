@@ -5,6 +5,14 @@
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"
 
+# To use a custom OpenAI-compatible endpoint instead:
+# provider = "openai-compatible"
+# model = "claude-sonnet-4-6"
+# baseUrl = "http://localhost:8317/v1"
+# apiKey = "your-api-key"
+# contextWindow = 200000    # optional, auto-detected for known models
+# maxTokens = 64000         # optional, auto-detected for known models
+
 # Password for HTTP Basic Auth. All endpoints except webhooks require this.
 # Change this to something secure. If removed or commented out, all endpoints
 # are open to the world.
