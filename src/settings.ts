@@ -150,11 +150,40 @@ export async function handlePutAllowlistRequest(
 
   const submittedNotes = (obj.notes ?? {}) as Record<string, string>;
 
+  // The agentmail field is optional for backward compatibility with clients that
+  // don't send it yet. When absent, preserve the existing stored entries rather
+  // than defaulting to [] which would silently wipe them.
+  const rawAgentmail = obj.agentmail !== undefined ? obj.agentmail : (getAllowlist().agentmail ?? []);
+  if (!Array.isArray(rawAgentmail) || !rawAgentmail.every((item) => typeof item === "string")) {
+    response.writeHead(400, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: "'agentmail' must be an array of strings" }));
+    return;
+  }
+
+  const trimmedAgentmail = (rawAgentmail as string[]).map((item) => item.trim().toLowerCase());
+  if (trimmedAgentmail.some((item) => item.length === 0)) {
+    response.writeHead(400, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: "'agentmail' must be an array of non-empty strings" }));
+    return;
+  }
+
+  const invalidAgentmail = trimmedAgentmail.find((item) => item !== "*" && !emailPattern.test(item));
+  if (invalidAgentmail !== undefined) {
+    response.writeHead(400, { "Content-Type": "application/json" });
+    response.end(
+      JSON.stringify({
+        error: `Invalid agentmail address "${invalidAgentmail}".`,
+      }),
+    );
+    return;
+  }
+
   const submitted: Allowlist = {
     signal: [...new Set(trimmedSignal)],
     telegram: [...new Set(obj.telegram as (number | string)[])],
     whatsapp: [...new Set(trimmedWhatsapp)],
     email: [...new Set(trimmedEmail)],
+    agentmail: [...new Set(trimmedAgentmail)],
     notes: submittedNotes,
   };
 
@@ -180,6 +209,11 @@ export async function handlePutAllowlistRequest(
       submitted.email.push(ownerEmail);
     }
   }
+  for (const ownerAgentmail of (ownerIdentities.agentmail ?? [])) {
+    if (!submitted.agentmail.includes(ownerAgentmail)) {
+      submitted.agentmail.push(ownerAgentmail);
+    }
+  }
 
   // Prune notes whose keys don't correspond to any entry in any service list.
   // Telegram entries are numbers in the array but string keys in the notes map.
@@ -188,6 +222,7 @@ export async function handlePutAllowlistRequest(
     ...submitted.telegram.map((entry) => String(entry)),
     ...submitted.whatsapp,
     ...submitted.email,
+    ...submitted.agentmail,
   ]);
   const prunedNotes: Record<string, string> = {};
   for (const [key, value] of Object.entries(submitted.notes)) {
@@ -339,6 +374,16 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
       </div>
     </div>
 
+    <div class="section">
+      <h2>Agentmail allowlist</h2>
+      <ul class="entry-list" id="agentmail-list"></ul>
+      <div class="add-row">
+        <input type="text" id="agentmail-input" placeholder="user@agentmail.io" />
+        <input type="text" id="agentmail-note-input" placeholder="Note (optional)" />
+        <button class="btn" onclick="addAgentmailEntry()">Add</button>
+      </div>
+    </div>
+
     <span id="status"></span>
   </div>
 
@@ -347,10 +392,12 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
     let telegramEntries = [];
     let whatsappEntries = [];
     let emailEntries = [];
+    let agentmailEntries = [];
     let ownerSignal = [];
     let ownerTelegram = [];
     let ownerWhatsapp = [];
     let ownerEmail = [];
+    let ownerAgentmail = [];
     let notes = {};
 
     function escapeHtml(text) {
@@ -440,11 +487,32 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
       }).join("");
     }
 
+    function renderAgentmailList() {
+      const list = document.getElementById("agentmail-list");
+      if (agentmailEntries.length === 0) {
+        list.innerHTML = '<li style="color:var(--color-text-muted);font-size:13px;">No entries.</li>';
+        return;
+      }
+      list.innerHTML = agentmailEntries.map((entry, index) => {
+        const isOwner = ownerAgentmail.includes(entry);
+        const note = notes[entry];
+        return \`<li>
+          <span class="entry-value">\${escapeHtml(entry)}</span>
+          \${note ? \`<span class="note-text">\${escapeHtml(note)}</span>\` : ""}
+          \${isOwner
+            ? '<span class="owner-label">(owner)</span>'
+            : \`<button class="btn btn-danger" onclick="removeAgentmailEntry(\${index})">Delete</button>\`
+          }
+        </li>\`;
+      }).join("");
+    }
+
     function isIdentifierInAnyList(key) {
       return signalEntries.includes(key) ||
         telegramEntries.map(String).includes(key) ||
         whatsappEntries.includes(key) ||
-        emailEntries.includes(key);
+        emailEntries.includes(key) ||
+        agentmailEntries.includes(key);
     }
 
     function removeSignalEntry(index) {
@@ -485,6 +553,16 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
         delete notes[entry];
       }
       renderEmailList();
+      saveAllowlist();
+    }
+
+    function removeAgentmailEntry(index) {
+      const entry = agentmailEntries[index];
+      agentmailEntries.splice(index, 1);
+      if (!isIdentifierInAnyList(entry)) {
+        delete notes[entry];
+      }
+      renderAgentmailList();
       saveAllowlist();
     }
 
@@ -606,6 +684,31 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
       saveAllowlist();
     }
 
+    function addAgentmailEntry() {
+      const input = document.getElementById("agentmail-input");
+      const noteInput = document.getElementById("agentmail-note-input");
+      const value = input.value.trim().toLowerCase();
+      if (!value) return;
+      if (value !== "*" && !/@[^@]+\\./.test(value)) {
+        setStatus("Invalid agentmail address.", true);
+        return;
+      }
+      if (agentmailEntries.includes(value)) {
+        setStatus("That agentmail address is already in the list.", true);
+        return;
+      }
+      const note = noteInput.value.trim();
+      if (note) {
+        notes[value] = note;
+      }
+      agentmailEntries.push(value);
+      input.value = "";
+      noteInput.value = "";
+      renderAgentmailList();
+      setStatus("", false);
+      saveAllowlist();
+    }
+
     function setStatus(text, isError) {
       const el = document.getElementById("status");
       el.textContent = text;
@@ -626,11 +729,13 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
         telegramEntries = data.allowlist.telegram.slice();
         whatsappEntries = data.allowlist.whatsapp.slice();
         emailEntries = data.allowlist.email.slice();
+        agentmailEntries = data.allowlist.agentmail.slice();
         notes = Object.assign({}, data.allowlist.notes);
         ownerSignal = data.ownerIdentities.signal.slice();
         ownerTelegram = data.ownerIdentities.telegram.slice();
         ownerWhatsapp = data.ownerIdentities.whatsapp.slice();
         ownerEmail = data.ownerIdentities.email.slice();
+        ownerAgentmail = data.ownerIdentities.agentmail.slice();
 
         document.getElementById("loading").style.display = "none";
         document.getElementById("content").style.display = "";
@@ -639,6 +744,7 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
         renderTelegramList();
         renderWhatsappList();
         renderEmailList();
+        renderAgentmailList();
       } catch (error) {
         document.getElementById("loading").style.display = "none";
         document.getElementById("content").style.display = "";
@@ -651,7 +757,7 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
         const response = await fetch("/api/settings/allowlist", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ signal: signalEntries, telegram: telegramEntries, whatsapp: whatsappEntries, email: emailEntries, notes }),
+          body: JSON.stringify({ signal: signalEntries, telegram: telegramEntries, whatsapp: whatsappEntries, email: emailEntries, agentmail: agentmailEntries, notes }),
         });
         const data = await response.json();
         if (response.ok) {
@@ -659,15 +765,18 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
           telegramEntries = data.allowlist.telegram.slice();
           whatsappEntries = data.allowlist.whatsapp.slice();
           emailEntries = data.allowlist.email.slice();
+          agentmailEntries = data.allowlist.agentmail.slice();
           notes = Object.assign({}, data.allowlist.notes);
           ownerSignal = data.ownerIdentities.signal.slice();
           ownerTelegram = data.ownerIdentities.telegram.slice();
           ownerWhatsapp = data.ownerIdentities.whatsapp.slice();
           ownerEmail = data.ownerIdentities.email.slice();
+          ownerAgentmail = data.ownerIdentities.agentmail.slice();
           renderSignalList();
           renderTelegramList();
           renderWhatsappList();
           renderEmailList();
+          renderAgentmailList();
           setStatus("", false);
         } else {
           setStatus(data.error || "Failed to save.", true);
@@ -703,6 +812,13 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
     });
     document.getElementById("email-note-input").addEventListener("keydown", (event) => {
       if (event.key === "Enter") addEmailEntry();
+    });
+
+    document.getElementById("agentmail-input").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") addAgentmailEntry();
+    });
+    document.getElementById("agentmail-note-input").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") addAgentmailEntry();
     });
 
     loadAllowlistData();

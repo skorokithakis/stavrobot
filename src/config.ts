@@ -44,15 +44,20 @@ export interface EmailConfig {
   webhookSecret: string;
 }
 
+export interface AgentmailConfig {
+  apiKey: string;
+}
+
 export interface OwnerConfig {
   name: string;
   signal?: string;
   telegram?: string;
   whatsapp?: string;
   email?: string;
+  agentmail?: string;
 }
 
-export const OWNER_CHANNELS: (keyof OwnerConfig)[] = ["signal", "telegram", "whatsapp", "email"];
+export const OWNER_CHANNELS: (keyof OwnerConfig)[] = ["signal", "telegram", "whatsapp", "email", "agentmail"];
 
 export interface Config {
   provider: string;
@@ -77,6 +82,7 @@ export interface Config {
   telegram?: TelegramConfig;
   whatsapp?: WhatsappConfig;
   email?: EmailConfig;
+  agentmail?: AgentmailConfig;
   owner: OwnerConfig;
 }
 

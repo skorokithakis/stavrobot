@@ -88,6 +88,22 @@ describe("loadAllowlist — malformed file", () => {
     expect(() => loadAllowlist(makeConfig())).toThrow("'email' must be an array of strings");
   });
 
+  it("throws when agentmail contains non-strings", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [], telegram: [], agentmail: [123] }));
+
+    const { loadAllowlist } = await import("./allowlist.js");
+    expect(() => loadAllowlist(makeConfig())).toThrow("'agentmail' must be an array of strings");
+  });
+
+  it("throws when agentmail is not an array", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [], telegram: [], agentmail: "user@agentmail.io" }));
+
+    const { loadAllowlist } = await import("./allowlist.js");
+    expect(() => loadAllowlist(makeConfig())).toThrow("'agentmail' must be an array of strings");
+  });
+
   it("throws when signal contains non-strings", async () => {
     mockExistsSync.mockReturnValue(true);
     mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [123], telegram: [] }));
@@ -368,6 +384,54 @@ describe("loadAllowlist", () => {
     // No write needed since nothing changed.
     expect(mockWriteFileSync).not.toHaveBeenCalled();
   });
+
+  it("defaults agentmail to [] when field is absent in existing allowlist.json", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: ["+1111111111"], telegram: [42] }));
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist } = await import("./allowlist.js");
+    const allowlist = loadAllowlist(makeConfig());
+
+    expect(allowlist.agentmail).toEqual([]);
+  });
+
+  it("auto-seeds owner agentmail identity when not already present", async () => {
+    mockExistsSync.mockReturnValue(false);
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist } = await import("./allowlist.js");
+    const config = makeConfig({ owner: { name: "Owner", agentmail: "owner@agentmail.io" } });
+    const allowlist = loadAllowlist(config);
+
+    expect(allowlist.agentmail).toContain("owner@agentmail.io");
+  });
+
+  it("normalizes owner agentmail to lowercase when seeding", async () => {
+    mockExistsSync.mockReturnValue(false);
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist } = await import("./allowlist.js");
+    const config = makeConfig({ owner: { name: "Owner", agentmail: "Owner@Agentmail.IO" } });
+    const allowlist = loadAllowlist(config);
+
+    expect(allowlist.agentmail).toContain("owner@agentmail.io");
+    expect(allowlist.agentmail).not.toContain("Owner@Agentmail.IO");
+  });
+
+  it("does not duplicate owner agentmail identity when already present in file", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [], telegram: [], agentmail: ["owner@agentmail.io"] }));
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist } = await import("./allowlist.js");
+    const config = makeConfig({ owner: { name: "Owner", agentmail: "owner@agentmail.io" } });
+    const allowlist = loadAllowlist(config);
+
+    expect(allowlist.agentmail.filter((e) => e === "owner@agentmail.io")).toHaveLength(1);
+    // No write needed since nothing changed.
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+  });
 });
 
 describe("getAllowlist", () => {
@@ -411,7 +475,7 @@ describe("saveAllowlist", () => {
     const config = makeConfig();
     loadAllowlist(config);
 
-    const newAllowlist = { signal: ["+5555555555"], telegram: [99], whatsapp: ["+7777777777"], email: [], notes: { "+5555555555": "Test note" } };
+    const newAllowlist = { signal: ["+5555555555"], telegram: [99], whatsapp: ["+7777777777"], email: [], agentmail: [], notes: { "+5555555555": "Test note" } };
     saveAllowlist(newAllowlist);
 
     const written = mockWriteFileSync.mock.calls[0][1] as string;
@@ -428,7 +492,7 @@ describe("saveAllowlist", () => {
     const { loadAllowlist, saveAllowlist } = await import("./allowlist.js");
     loadAllowlist(makeConfig());
 
-    saveAllowlist({ signal: ["+1111111111"], telegram: [], whatsapp: [], email: [], notes: { "+1111111111": "Work" } });
+    saveAllowlist({ signal: ["+1111111111"], telegram: [], whatsapp: [], email: [], agentmail: [], notes: { "+1111111111": "Work" } });
 
     const written = mockWriteFileSync.mock.calls[0][1] as string;
     const parsed = JSON.parse(written);
@@ -639,6 +703,63 @@ describe("isInAllowlist", () => {
 
     expect(isInAllowlist("email", "user@other.com")).toBe(false);
   });
+
+  it("returns true for an agentmail address in the allowlist", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [], telegram: [], agentmail: ["user@agentmail.io"] }));
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist, isInAllowlist } = await import("./allowlist.js");
+    loadAllowlist(makeConfig());
+
+    expect(isInAllowlist("agentmail", "user@agentmail.io")).toBe(true);
+  });
+
+  it("returns false for an agentmail address not in the allowlist", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [], telegram: [], agentmail: ["user@agentmail.io"] }));
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist, isInAllowlist } = await import("./allowlist.js");
+    loadAllowlist(makeConfig());
+
+    expect(isInAllowlist("agentmail", "other@agentmail.io")).toBe(false);
+  });
+
+  it("matches agentmail case-insensitively", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [], telegram: [], agentmail: ["user@agentmail.io"] }));
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist, isInAllowlist } = await import("./allowlist.js");
+    loadAllowlist(makeConfig());
+
+    expect(isInAllowlist("agentmail", "User@Agentmail.IO")).toBe(true);
+  });
+
+  it("returns true for any agentmail identifier when the allowlist contains '*'", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [], telegram: [], agentmail: ["*"] }));
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist, isInAllowlist } = await import("./allowlist.js");
+    loadAllowlist(makeConfig());
+
+    expect(isInAllowlist("agentmail", "anyone@agentmail.io")).toBe(true);
+    expect(isInAllowlist("agentmail", "other@test.org")).toBe(true);
+  });
+
+  it("returns true for an agentmail address matching a domain wildcard pattern", async () => {
+    mockExistsSync.mockReturnValue(true);
+    mockReadFileSync.mockReturnValue(JSON.stringify({ signal: [], telegram: [], agentmail: ["*@agentmail.io"] }));
+    mockWriteFileSync.mockImplementation(() => undefined);
+
+    const { loadAllowlist, isInAllowlist } = await import("./allowlist.js");
+    loadAllowlist(makeConfig());
+
+    expect(isInAllowlist("agentmail", "user@agentmail.io")).toBe(true);
+    expect(isInAllowlist("agentmail", "other@agentmail.io")).toBe(true);
+  });
 });
 
 describe("matchesEmailEntry", () => {
@@ -699,6 +820,7 @@ describe("getOwnerIdentities", () => {
     expect(identities.telegram).toEqual([]);
     expect(identities.whatsapp).toEqual([]);
     expect(identities.email).toEqual([]);
+    expect(identities.agentmail).toEqual([]);
   });
 
   it("returns the owner signal number when set", async () => {
@@ -739,5 +861,21 @@ describe("getOwnerIdentities", () => {
     const identities = getOwnerIdentities(config);
 
     expect(identities.email).toEqual(["owner@example.com"]);
+  });
+
+  it("returns the owner agentmail address when set", async () => {
+    const { getOwnerIdentities } = await import("./allowlist.js");
+    const config = makeConfig({ owner: { name: "Owner", agentmail: "owner@agentmail.io" } });
+    const identities = getOwnerIdentities(config);
+
+    expect(identities.agentmail).toEqual(["owner@agentmail.io"]);
+  });
+
+  it("normalizes owner agentmail to lowercase in getOwnerIdentities", async () => {
+    const { getOwnerIdentities } = await import("./allowlist.js");
+    const config = makeConfig({ owner: { name: "Owner", agentmail: "Owner@Agentmail.IO" } });
+    const identities = getOwnerIdentities(config);
+
+    expect(identities.agentmail).toEqual(["owner@agentmail.io"]);
   });
 });

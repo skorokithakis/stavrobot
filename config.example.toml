@@ -60,7 +60,7 @@ too formal.
 """
 
 # The owner of this bot. Used to seed the owner interlocutor record on startup.
-# name is required. signal, telegram, whatsapp, and email are the owner's personal
+# name is required. signal, telegram, whatsapp, email, and agentmail are the owner's personal
 # numbers/IDs/addresses — the ones the owner messages the bot from (not the bot's
 # own numbers). Include whichever channels the owner uses.
 [owner]
@@ -71,6 +71,7 @@ name = "Stavros"
 # email = "owner@example.com"          # specific address
 # email = "*@example.com"              # any address at this domain
 # email = "myuser+*@gmail.com"         # any plus-tag for this user
+# agentmail = "owner@example.com"
 
 # Signal integration. account is the bot's phone number (registered with
 # signal-cli — must be a separate number from the owner's).
@@ -146,6 +147,12 @@ botToken = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 # smtpUser = "bot@example.com"
 # smtpPassword = "your-smtp-password"
 # fromAddress = "bot@example.com"
+
+# Agentmail integration. Provides email inboxes for the agent via the
+# agentmail API. Create an account at https://agentmail.to to get an API key.
+# Inboxes are managed in the agentmail dashboard, not in this file.
+# [agentmail]
+# apiKey = "your-agentmail-api-key"
 
 # Enables the self-programming coder agent. Uses Claude Code headless, which
 # requires subscription auth (see README). The model must be a Claude Code

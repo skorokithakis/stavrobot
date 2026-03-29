@@ -11,7 +11,7 @@ It has all the nice features of an AI assistant, but focuses on sandboxing, isol
 - **Secure.** Everything runs in a container, your host OS is completely invisible to the AI. The AI doesn't see any secrets unless you want it to.
 - **Light.** Doesn't run one container per component. Plugins all run in a single container, separated by Unix permissions.
 - **Use any model you want.** Local, OpenRouter, Anthropic/OpenAI. Whatever [Pi](https://pi.dev) supports, the bot can use.
-- **Signal/Telegram/WhatsApp/Email integration.** Two-way messaging, with formatting, attachments, etc.
+- **Signal/Telegram/WhatsApp/Email/Agentmail integration.** Two-way messaging, with formatting, attachments, etc.
 - **Three-tier knowledge.** Remembers everything without blowing out its context.  Intelligently and transparently retrieves data from its memory.
 - **Low token usage.** Various optimizations have been made to be light on token usage. It even uses [TOON](https://github.com/toon-format/toon) internally.
 - **Plugins.** Install plugins and extend Stavrobot's capabilities by just giving it a git repo URL. Plugins are isolated from each other — each runs as a dedicated system user with no access to other plugins' files or configuration.
@@ -111,6 +111,14 @@ Email uses a Cloudflare Email Worker for inbound delivery and SMTP for outbound.
 2. Deploy the Cloudflare Email Worker (code in `config.example.toml`) and set the `WEBHOOK_URL` and `WEBHOOK_SECRET` environment variables on the worker.
 3. In Cloudflare Email Routing, add a rule to forward inbound mail to the worker.
 4. Add allowed sender addresses via the `/settings` web UI.
+
+### Agentmail setup
+
+1. Create an account at [agentmail.to](https://agentmail.to) and get an API key.
+2. Create one or more inboxes in the agentmail dashboard.
+3. Add an `[agentmail]` section to your `config.toml` with your API key.
+4. The webhook is registered automatically at `<publicHostname>/agentmail/webhook` on startup.
+5. Add allowed sender addresses via the `/settings` web UI.
 
 ### Running
 
@@ -234,7 +242,7 @@ https://github.com/orgs/stavrobot/repositories
 
 ## Architecture
 
-Four Docker containers: `app` (TypeScript server, exposes `POST /chat` on port 3000, handles Telegram webhooks at `POST /telegram/webhook`, handles inbound email webhooks at `POST /email/webhook`, and runs WhatsApp in-process via Baileys), `postgres` (PostgreSQL 17 for persistent state), `plugin-runner` (Node.js server — lists, inspects, and executes plugins, both locally created and git-installed), and `coder` (Claude Code headless agent for creating and modifying editable plugins). The main agent can create subagents, each with their own conversation history, system prompt, and tool whitelist. Interlocutors are contact records assigned to agents for inbound message routing.
+Four Docker containers: `app` (TypeScript server, exposes `POST /chat` on port 3000, handles Telegram webhooks at `POST /telegram/webhook`, handles inbound email webhooks at `POST /email/webhook`, handles agentmail webhooks at `POST /agentmail/webhook`, and runs WhatsApp in-process via Baileys), `postgres` (PostgreSQL 17 for persistent state), `plugin-runner` (Node.js server — lists, inspects, and executes plugins, both locally created and git-installed), and `coder` (Claude Code headless agent for creating and modifying editable plugins). The main agent can create subagents, each with their own conversation history, system prompt, and tool whitelist. Interlocutors are contact records assigned to agents for inbound message routing.
 
 ## License
 

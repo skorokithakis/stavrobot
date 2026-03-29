@@ -12,6 +12,8 @@ import { sendTelegramMessage } from "./telegram-api.js";
 import { internalFetch } from "./internal-fetch.js";
 import { getWhatsappSocket, e164ToJid, sendWhatsappTextMessage } from "./whatsapp-api.js";
 import { sendEmail } from "./email-api.js";
+import { sendAgentmailMessage, getAgentmailAttachmentUrl, listAgentmailInboxes, listAgentmailThreads, listAgentmailMessages, getAgentmailMessage, deleteAgentmailThread } from "./agentmail-api.js";
+import { saveAttachment } from "./uploads.js";
 import { TEMP_ATTACHMENTS_DIR } from "./temp-dir.js";
 import { log } from "./log.js";
 import { toolError, toolSuccess } from "./tool-result.js";
@@ -95,10 +97,10 @@ async function checkSubagentRecipientScope(
     [currentAgentId, serviceKey],
   );
 
-  // Email identities are stored as-is (add_identity does not lowercase them),
+  // Email and agentmail identities are stored as-is (add_identity does not lowercase them),
   // but the recipient has already been lowercased by the time we get here.
-  // Normalize both sides for email so the comparison is case-insensitive.
-  const normalize = serviceKey === "email" ? (s: string) => s.toLowerCase() : (s: string) => s;
+  // Normalize both sides for email and agentmail so the comparison is case-insensitive.
+  const normalize = serviceKey === "email" || serviceKey === "agentmail" ? (s: string) => s.toLowerCase() : (s: string) => s;
   const assignedIdentifiers = result.rows.map((row) => normalize(row.identifier));
   if (!assignedIdentifiers.includes(normalize(recipient))) {
     const errorMessage = `You can only message your assigned interlocutor. If you need to message someone else, ask the main agent (agent ${getMainAgentId()}) via send_agent_message.`;
@@ -556,6 +558,304 @@ export function createSendEmailTool(pool: pg.Pool, config: Config): AgentTool {
       await sendEmail(recipient, subject, message);
 
       return toolSuccess("Email sent successfully.");
+    },
+  };
+}
+
+// A small map of common file extensions to MIME types for agentmail attachments.
+// Falls back to application/octet-stream for unknown types.
+const MIME_TYPE_MAP: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".pdf": "application/pdf",
+  ".txt": "text/plain",
+  ".html": "text/html",
+  ".htm": "text/html",
+  ".csv": "text/csv",
+  ".json": "application/json",
+  ".xml": "application/xml",
+  ".zip": "application/zip",
+  ".mp3": "audio/mpeg",
+  ".mp4": "video/mp4",
+  ".ogg": "audio/ogg",
+  ".wav": "audio/wav",
+};
+
+export function createSendAgentmailTool(pool: pg.Pool, config: Config): AgentTool {
+  return {
+    name: "send_agentmail",
+    label: "Send agentmail",
+    description: "Send an email via AgentMail to a display name or email address. Sends plain text only.",
+    parameters: Type.Object({
+      recipient: Type.String({ description: "Display name of the recipient (e.g., \"Mom\") or email address (e.g., \"mom@example.com\")." }),
+      inboxId: Type.String({ description: "The AgentMail inbox ID to send from." }),
+      subject: Type.String({ description: "Email subject line." }),
+      message: Type.String({ description: "The email body (plain text)." }),
+      replyToMessageId: Type.Optional(Type.String({ description: "If set, sends as a reply to this message ID for threading." })),
+      attachmentPath: Type.Optional(Type.String({ description: "File path to an attachment under the temp directory (e.g., from manage_files write or a plugin tool)." })),
+    }),
+    execute: async (
+      toolCallId: string,
+      params: unknown
+    ): Promise<AgentToolResult<{ message: string }>> => {
+      const raw = params as {
+        recipient: string;
+        inboxId: string;
+        subject: string;
+        message: string;
+        replyToMessageId?: string;
+        attachmentPath?: string;
+      };
+
+      const recipientInput = raw.recipient;
+      const inboxId = raw.inboxId.trim();
+      const subject = raw.subject.trim();
+      const message = raw.message.trim();
+      const replyToMessageId = raw.replyToMessageId?.trim() || undefined;
+      const attachmentPath = raw.attachmentPath?.trim() || undefined;
+
+      const resolution = await resolveOutboundRecipient(pool, recipientInput, "agentmail", "agentmail", "email address", "send_agentmail", (s) => s.toLowerCase());
+      if ("content" in resolution) {
+        return resolution;
+      }
+
+      // Normalize to lowercase before the allowlist check.
+      const recipient = resolution.recipient.toLowerCase();
+
+      const scopeError = await checkSubagentRecipientScope(pool, recipient, "agentmail", "send_agentmail");
+      if (scopeError !== null) {
+        return scopeError;
+      }
+
+      // Hard gate: recipient must be in the allowlist.
+      if (!isInAllowlist("agentmail", recipient)) {
+        const errorMessage = `Error: recipient '${recipient}' is not in the agentmail allowlist.`;
+        log.warn("[stavrobot] send_agentmail rejected:", errorMessage);
+        return toolError(errorMessage);
+      }
+
+      const agentmailPreview = message.slice(0, 200);
+      log.info(`[stavrobot] message out: agentmail - ${recipient} - ${agentmailPreview}`);
+
+      if (attachmentPath !== undefined) {
+        const resolvedAttachmentPath = path.resolve(attachmentPath);
+        if (!resolvedAttachmentPath.startsWith(TEMP_ATTACHMENTS_DIR + "/")) {
+          return toolError("Error: attachmentPath must be under the temporary attachments directory.");
+        }
+
+        const fileBuffer = await fs.readFile(resolvedAttachmentPath);
+        const filename = path.basename(resolvedAttachmentPath);
+        const extension = path.extname(resolvedAttachmentPath).toLowerCase();
+        const contentType = MIME_TYPE_MAP[extension] ?? "application/octet-stream";
+
+        try {
+          await sendAgentmailMessage(inboxId, recipient, subject, message, replyToMessageId, [
+            { filename, content: fileBuffer.toString("base64"), contentType },
+          ]);
+        } finally {
+          // The path check above guarantees this is a temp file, so always delete it.
+          await fs.unlink(resolvedAttachmentPath);
+        }
+
+        return toolSuccess("Message sent successfully.");
+      }
+
+      await sendAgentmailMessage(inboxId, recipient, subject, message, replyToMessageId);
+
+      return toolSuccess("Message sent successfully.");
+    },
+  };
+}
+
+export function createManageAgentmailTool(pool: pg.Pool, config: Config): AgentTool {
+  return {
+    name: "manage_agentmail",
+    label: "Manage agentmail",
+    description: "Manage AgentMail inboxes — list inboxes, browse threads and messages, download attachments, and delete threads.",
+    parameters: Type.Object({
+      action: Type.Union([
+        Type.Literal("list_inboxes"),
+        Type.Literal("list_threads"),
+        Type.Literal("list_messages"),
+        Type.Literal("get_message"),
+        Type.Literal("delete_thread"),
+        Type.Literal("download_attachment"),
+      ], { description: "Action to perform: list_inboxes, list_threads, list_messages, get_message, delete_thread, or download_attachment." }),
+      inboxId: Type.Optional(Type.String({ description: "The inbox ID. Required for all actions except list_inboxes." })),
+      threadId: Type.Optional(Type.String({ description: "The thread ID. Required for delete_thread." })),
+      messageId: Type.Optional(Type.String({ description: "The message ID. Required for get_message and download_attachment." })),
+      attachmentId: Type.Optional(Type.String({ description: "The attachment ID. Required for download_attachment." })),
+      limit: Type.Optional(Type.Number({ description: "Maximum number of results to return. For list_threads and list_messages." })),
+      pageToken: Type.Optional(Type.String({ description: "Pagination token for list_threads and list_messages." })),
+    }),
+    execute: async (
+      toolCallId: string,
+      params: unknown
+    ): Promise<AgentToolResult<{ message: string } | { storedPath: string; filename: string; contentType: string; size: number }>> => {
+      const raw = params as {
+        action: string;
+        inboxId?: string;
+        threadId?: string;
+        messageId?: string;
+        attachmentId?: string;
+        limit?: number;
+        pageToken?: string;
+      };
+
+      const { action } = raw;
+
+      if (action === "list_inboxes") {
+        log.info("[stavrobot] manage_agentmail: listing inboxes");
+        const response = await listAgentmailInboxes();
+        const lines: string[] = [`Count: ${response.count}`];
+        for (const inbox of response.inboxes) {
+          const displayName = inbox.displayName !== undefined ? ` - ${inbox.displayName}` : "";
+          lines.push(`${inbox.inboxId} (${inbox.email})${displayName}`);
+        }
+        if (response.nextPageToken !== undefined) {
+          lines.push(`Next page token: ${response.nextPageToken}`);
+        }
+        return toolSuccess(lines.join("\n"));
+      }
+
+      if (action === "list_threads") {
+        if (raw.inboxId === undefined || raw.inboxId.trim() === "") {
+          return toolError("Error: inboxId is required for list_threads.");
+        }
+        const inboxId = raw.inboxId.trim();
+        log.info("[stavrobot] manage_agentmail: listing threads for inbox:", inboxId);
+        const response = await listAgentmailThreads(inboxId, { limit: raw.limit, pageToken: raw.pageToken });
+        const lines: string[] = [`Count: ${response.count}`];
+        for (const thread of response.threads) {
+          const subject = thread.subject ?? "(no subject)";
+          const senders = thread.senders.join(", ");
+          const preview = thread.preview !== undefined ? ` | Preview: ${thread.preview.slice(0, 100)}` : "";
+          lines.push(`Thread: ${thread.threadId} | Subject: ${subject} | Senders: ${senders} | Messages: ${thread.messageCount} | Timestamp: ${thread.timestamp.toISOString()}${preview}`);
+        }
+        if (response.nextPageToken !== undefined) {
+          lines.push(`Next page token: ${response.nextPageToken}`);
+        }
+        return toolSuccess(lines.join("\n"));
+      }
+
+      if (action === "list_messages") {
+        if (raw.inboxId === undefined || raw.inboxId.trim() === "") {
+          return toolError("Error: inboxId is required for list_messages.");
+        }
+        const inboxId = raw.inboxId.trim();
+        log.info("[stavrobot] manage_agentmail: listing messages for inbox:", inboxId);
+        const response = await listAgentmailMessages(inboxId, { limit: raw.limit, pageToken: raw.pageToken });
+        const lines: string[] = [`Count: ${response.count}`];
+        for (const message of response.messages) {
+          const subject = message.subject ?? "(no subject)";
+          const preview = message.preview !== undefined ? ` | Preview: ${message.preview.slice(0, 100)}` : "";
+          const attachmentCount = message.attachments !== undefined ? message.attachments.length : 0;
+          lines.push(`Message: ${message.messageId} | From: ${message.from} | Subject: ${subject} | Timestamp: ${message.timestamp.toISOString()} | Attachments: ${attachmentCount}${preview}`);
+        }
+        if (response.nextPageToken !== undefined) {
+          lines.push(`Next page token: ${response.nextPageToken}`);
+        }
+        return toolSuccess(lines.join("\n"));
+      }
+
+      if (action === "get_message") {
+        if (raw.inboxId === undefined || raw.inboxId.trim() === "") {
+          return toolError("Error: inboxId is required for get_message.");
+        }
+        if (raw.messageId === undefined || raw.messageId.trim() === "") {
+          return toolError("Error: messageId is required for get_message.");
+        }
+        const inboxId = raw.inboxId.trim();
+        const messageId = raw.messageId.trim();
+        log.info("[stavrobot] manage_agentmail: getting message:", messageId, "from inbox:", inboxId);
+        const message = await getAgentmailMessage(inboxId, messageId);
+        const lines: string[] = [
+          `Message ID: ${message.messageId}`,
+          `From: ${message.from}`,
+          `To: ${message.to.join(", ")}`,
+        ];
+        if (message.cc !== undefined && message.cc.length > 0) {
+          lines.push(`CC: ${message.cc.join(", ")}`);
+        }
+        lines.push(`Subject: ${message.subject ?? "(no subject)"}`);
+        lines.push(`Timestamp: ${message.timestamp.toISOString()}`);
+        const textContent = message.extractedText ?? message.text;
+        if (textContent !== undefined) {
+          lines.push(`\nText content:\n${textContent}`);
+        }
+        const htmlContent = message.extractedHtml ?? message.html;
+        if (htmlContent !== undefined) {
+          lines.push(`\nHTML content:\n${htmlContent}`);
+        }
+        if (message.attachments !== undefined && message.attachments.length > 0) {
+          lines.push(`\nAttachments:`);
+          for (const attachment of message.attachments) {
+            const filename = attachment.filename ?? "(no filename)";
+            const contentType = attachment.contentType ?? "unknown";
+            lines.push(`  ${attachment.attachmentId} | ${filename} | ${contentType} | ${attachment.size} bytes`);
+          }
+        }
+        return toolSuccess(lines.join("\n"));
+      }
+
+      if (action === "delete_thread") {
+        if (raw.inboxId === undefined || raw.inboxId.trim() === "") {
+          return toolError("Error: inboxId is required for delete_thread.");
+        }
+        if (raw.threadId === undefined || raw.threadId.trim() === "") {
+          return toolError("Error: threadId is required for delete_thread.");
+        }
+        const inboxId = raw.inboxId.trim();
+        const threadId = raw.threadId.trim();
+        log.info("[stavrobot] manage_agentmail: deleting thread:", threadId, "from inbox:", inboxId);
+        await deleteAgentmailThread(inboxId, threadId);
+        return toolSuccess(`Thread ${threadId} deleted.`);
+      }
+
+      if (action === "download_attachment") {
+        if (raw.inboxId === undefined || raw.inboxId.trim() === "") {
+          return toolError("Error: inboxId is required for download_attachment.");
+        }
+        if (raw.messageId === undefined || raw.messageId.trim() === "") {
+          return toolError("Error: messageId is required for download_attachment.");
+        }
+        if (raw.attachmentId === undefined || raw.attachmentId.trim() === "") {
+          return toolError("Error: attachmentId is required for download_attachment.");
+        }
+        const inboxId = raw.inboxId.trim();
+        const messageId = raw.messageId.trim();
+        const attachmentId = raw.attachmentId.trim();
+
+        const attachmentInfo = await getAgentmailAttachmentUrl(inboxId, messageId, attachmentId);
+        const { downloadUrl, filename: originalFilename, contentType: originalContentType, size } = attachmentInfo;
+
+        const response = await fetch(downloadUrl);
+        if (!response.ok) {
+          throw new Error(`Failed to download attachment: HTTP ${response.status}`);
+        }
+
+        const filename = originalFilename ?? attachmentId;
+        const contentType = originalContentType ?? "application/octet-stream";
+
+        const { storedPath } = await saveAttachment(
+          Buffer.from(await response.arrayBuffer()),
+          filename,
+          contentType,
+        );
+
+        log.info(`[stavrobot] manage_agentmail download_attachment: saved ${filename} (${contentType}, ${size} bytes) to ${storedPath}`);
+
+        const resultText = `Attachment saved.\nPath: ${storedPath}\nFilename: ${filename}\nContent type: ${contentType}\nSize: ${size} bytes`;
+        return {
+          content: [{ type: "text" as const, text: resultText }],
+          details: { storedPath, filename, contentType, size },
+        };
+      }
+
+      return toolError(`Error: unknown action '${action}'. Valid actions: list_inboxes, list_threads, list_messages, get_message, delete_thread, download_attachment.`);
     },
   };
 }
