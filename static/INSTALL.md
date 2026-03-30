@@ -81,5 +81,5 @@ Stavrobot supports more than just Telegram. Once the user is comfortable with th
 - **WhatsApp integration** — two-way messaging over WhatsApp via the Baileys library.
 - **Email integration** — inbound email via a Cloudflare Email Worker, outbound via SMTP.
 - **Claude Code (coder container)** — lets Stavrobot write and modify its own plugins using Claude Code with subscription auth.
-- **Skills** — plain-text instruction files that teach the bot new capabilities (gym tracking, meal planning, etc.). Tell the bot to fetch `https://stavrobot.stavros.io/bootstrap.md` to get started.
+- **Skills** — plain-text instruction files that teach the bot new capabilities (gym tracking, meal planning, etc.). Tell the bot to fetch `https://stavrobot.stavros.io/skills/bootstrap.md` to get started.
 - **Plugins** — extend the bot's capabilities. Browse available plugins at https://github.com/orgs/stavrobot/repositories.
