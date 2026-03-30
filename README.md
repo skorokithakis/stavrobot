@@ -198,7 +198,7 @@ creating tables, storing knowledge, making pages, or following specific workflow
 are not code; they are natural-language instructions the bot reads and follows.
 
 To install the skill system, tell the bot to fetch
-`https://stavrobot.stavros.io/bootstrap.md` and follow its instructions.
+`https://stavrobot.stavros.io/skills/bootstrap.md` and follow its instructions.
 
 A full list of available skills is at
 `https://stavrobot.stavros.io/skills/index.md`. To install a skill, just tell the bot to
