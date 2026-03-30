@@ -12,7 +12,7 @@ import type { FileAttachment } from "./uploads.js";
 import { getMainAgentId, isOwnerIdentity, resolveInterlocutor, loadAgent } from "./database.js";
 import { log } from "./log.js";
 
-const MAX_RETRIES = 3;
+export const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 30_000;
 
 // Sources that require allowlist + interlocutor lookup before routing.
@@ -198,6 +198,59 @@ async function resolveTargetAgent(
   };
 }
 
+// Extracts the human-readable message from a provider error string like:
+// `Agent error: "400 {"type":"error","error":{"type":"...","message":"..."}}"`.
+// Falls back to the raw error string if parsing fails.
+export function parseProviderErrorMessage(errorMessage: string): string {
+  const jsonMatch = /\d{3} (\{.+\})"?$/.exec(errorMessage);
+  if (jsonMatch !== null) {
+    try {
+      const parsed = JSON.parse(jsonMatch[1]) as unknown;
+      if (
+        parsed !== null &&
+        typeof parsed === "object" &&
+        "error" in parsed &&
+        parsed.error !== null &&
+        typeof parsed.error === "object" &&
+        "message" in parsed.error &&
+        typeof (parsed.error as Record<string, unknown>).message === "string"
+      ) {
+        return (parsed.error as Record<string, unknown>).message as string;
+      }
+    } catch {
+      // Fall through to return the raw error message.
+    }
+  }
+  return errorMessage;
+}
+
+async function sendErrorToSource(
+  source: string | undefined,
+  sender: string | undefined,
+  config: Config,
+  message: string,
+): Promise<void> {
+  if (source === "signal" && sender !== undefined) {
+    try {
+      await sendSignalMessage(sender, message);
+    } catch (sendError) {
+      log.error(`[stavrobot] Failed to send Signal error notification: ${sendError instanceof Error ? sendError.message : String(sendError)}`);
+    }
+  } else if (source === "telegram" && sender !== undefined) {
+    try {
+      await sendTelegramMessage(config.telegram!.botToken, sender, message);
+    } catch (sendError) {
+      log.error(`[stavrobot] Failed to send Telegram error notification: ${sendError instanceof Error ? sendError.message : String(sendError)}`);
+    }
+  } else if (source === "whatsapp" && sender !== undefined) {
+    try {
+      await sendWhatsappTextMessage(sender, message);
+    } catch (sendError) {
+      log.error(`[stavrobot] Failed to send WhatsApp error notification: ${sendError instanceof Error ? sendError.message : String(sendError)}`);
+    }
+  }
+}
+
 async function processQueue(): Promise<void> {
   processing = true;
   while (queue.length > 0) {
@@ -222,29 +275,13 @@ async function processQueue(): Promise<void> {
       } else if (error instanceof AuthError) {
         log.error(`[stavrobot] Auth failure, not retrying: ${errorMessage}`);
         const loginMessage = `Authentication required. Visit ${queueConfig!.publicHostname}/login to log in.`;
-        if (entry.source === "signal" && entry.sender !== undefined) {
-          try {
-            await sendSignalMessage(entry.sender, loginMessage);
-          } catch (sendError) {
-            log.error(`[stavrobot] Failed to send Signal login notification: ${sendError instanceof Error ? sendError.message : String(sendError)}`);
-          }
-        } else if (entry.source === "telegram" && entry.sender !== undefined) {
-          try {
-            await sendTelegramMessage(queueConfig!.telegram!.botToken, entry.sender, loginMessage);
-          } catch (sendError) {
-            log.error(`[stavrobot] Failed to send Telegram login notification: ${sendError instanceof Error ? sendError.message : String(sendError)}`);
-          }
-        } else if (entry.source === "whatsapp" && entry.sender !== undefined) {
-          try {
-            await sendWhatsappTextMessage(entry.sender, loginMessage);
-          } catch (sendError) {
-            log.error(`[stavrobot] Failed to send WhatsApp login notification: ${sendError instanceof Error ? sendError.message : String(sendError)}`);
-          }
-        }
+        await sendErrorToSource(entry.source, entry.sender, queueConfig!, loginMessage);
         entry.resolve(loginMessage);
       } else if (errorMessage.includes("400 {")) {
         log.error(`[stavrobot] Non-retryable API error (400 client error), not retrying: ${errorMessage}`);
-        entry.resolve("Something went wrong processing your message. Please try again.");
+        const userMessage = `Something went wrong: ${parseProviderErrorMessage(errorMessage)}`;
+        await sendErrorToSource(entry.source, entry.sender, queueConfig!, userMessage);
+        entry.resolve(userMessage);
       } else if (entry.retries < MAX_RETRIES) {
         const attempt = entry.retries + 1;
         log.info(`[stavrobot] Message failed (attempt ${attempt}/${MAX_RETRIES + 1}), retrying in ${RETRY_DELAY_MS / 1000}s: ${errorMessage}`);
@@ -252,7 +289,9 @@ async function processQueue(): Promise<void> {
         queue.push({ ...entry, retries: attempt });
       } else {
         log.error(`[stavrobot] Message failed after ${MAX_RETRIES + 1} attempts, giving up: ${errorMessage}`);
-        entry.reject(error);
+        const userMessage = `Something went wrong: ${parseProviderErrorMessage(errorMessage)}`;
+        await sendErrorToSource(entry.source, entry.sender, queueConfig!, userMessage);
+        entry.resolve(userMessage);
       }
     } finally {
       currentEntry = undefined;
