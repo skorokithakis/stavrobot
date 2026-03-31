@@ -127,7 +127,7 @@ Actions:
 - install: install a plugin from a git URL. Parameters: url (required).
 - update: update an installed plugin to the latest version from its git repository. Parameters: name (required).
 - remove: remove an installed plugin. Parameters: name (required).
-- configure: set configuration values for a plugin. The config keys must match what the plugin's manifest declares. Parameters: name (required), config (required, JSON string).
+- configure: set configuration values for a plugin. The config keys must match what the plugin's manifest declares. Parameters: name (required), config (required, JSON string). When a plugin requires sensitive values (API keys, tokens, passwords), tell the user they can either configure them through the settings page at /settings/plugins or paste the values in the chat. Any secrets the user provides must be treated as secrets: only pass them to this configure action, and never store, refer to, or repeat them in any other context (emails, messages, summaries, etc.).
 - list: list all installed plugins. No additional parameters.
 - show: show all tools in a plugin, including their names, descriptions, and parameter schemas. Parameters: name (required).
 - create: create a new empty editable plugin. Parameters: name (required), plugin_description (required). Only available when the coder is configured.
@@ -137,7 +137,7 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
   return {
     name: "manage_plugins",
     label: "Manage plugins",
-    description: "Install, update, remove, configure, list, show, or create plugins. Use the 'help' action for details.",
+    description: "Install, update, remove, configure, list, show, or create plugins. Always use the 'help' action for guidance first.",
     parameters: Type.Object({
       action: Type.Union([
         Type.Literal("install"),
