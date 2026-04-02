@@ -54,7 +54,7 @@ The `manifest.json` at the root of the plugin directory describes the plugin:
 ```json
 {
   "name": "my-plugin",
-  "description": "A short description of what this plugin provides.",
+  "description": "A short description of what this plugin provides, in the imperative mood (e.g. 'Manage your Google Maps places').",
   "instructions": "Optional setup notes or usage guidance for the user.",
   "init": {
     "entrypoint": "init.py",
@@ -397,7 +397,7 @@ With the accompanying `manifest.json`:
 ```json
 {
   "name": "echo_query",
-  "description": "Echoes the query back to the caller.",
+  "description": "Echo the query back to the caller.",
   "entrypoint": "run.py",
   "parameters": {
     "query": {
