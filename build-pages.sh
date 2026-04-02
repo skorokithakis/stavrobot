@@ -92,7 +92,7 @@ mkdir -p "$REPO_ROOT/static/plugins"
 		"new plugins in the future. Finally, create a cron entry to fire every Sunday" \
 		"at some point in the early morning (during the user's regular sleeping hours)" \
 		"to update the scratchpad entry from the plugin index. The cron entry should" \
-        "not message the user."
+		"not message the user."
 	echo ""
 	echo "| Name | Description | URL |"
 	echo "|------|-------------|-----|"
@@ -129,7 +129,7 @@ for repo in repos:
         html_url = repo["html_url"]
         default_branch = repo.get("default_branch") or "HEAD"
         print(f"{name}\t{description}\t{html_url}\t{default_branch}")
-' <<<"$repos_json"
+' <<<"$repos_json" | sort
 	)
 
 	for repo_line in "${plugin_repos[@]}"; do
