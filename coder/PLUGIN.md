@@ -354,6 +354,15 @@ const params = JSON.parse(input);
 
 The script must be executable (`chmod +x run.js`).
 
+### Node.js dependencies
+
+Plugins run as restricted system users without root permissions, so `npm install -g` will fail with a permission error. Use one of these approaches instead:
+
+- **CLI packages**: Use `npx <package>` to download and run a package without installing it globally. This is the simplest option when you just need to invoke a CLI tool.
+- **Library dependencies**: Run `npm install` (without `-g`) in the plugin directory from your init script. This creates a local `node_modules/` within the plugin's own directory, which the plugin user has write access to.
+
+Unlike Python's `uv`, which resolves inline dependencies automatically at runtime, Node.js requires an explicit install step. If your plugin needs npm library dependencies, use an init script to install them.
+
 ## Writing tools in other languages
 
 Any executable works — use a shebang line. Node.js and Python are available in the runtime environment. The script must be executable (`chmod +x`).
