@@ -125,7 +125,7 @@ Email uses a Cloudflare Email Worker for inbound delivery and SMTP for outbound.
 docker compose up --build
 ```
 
-The API is available at `http://localhost:10567/chat`. A Python CLI client (`client.py`) is included for interactive use.
+The API is available at `http://localhost:10567/chat`.
 
 ### Without Docker
 

@@ -17,8 +17,7 @@ state.
 
 Stavrobot is a TypeScript HTTP server that wraps an LLM-powered agent (Anthropic Claude
 by default) with access to a PostgreSQL database via a SQL execution tool. It exposes a
-single `POST /chat` endpoint. A Python CLI client (`client.py`) provides an interactive
-REPL. The project is containerized with Docker and docker-compose.
+single `POST /chat` endpoint. The project is containerized with Docker and docker-compose.
 
 ## Build, run, and test commands
 
@@ -128,18 +127,6 @@ both linting and formatting with good TypeScript ESM support).
 - Semicolons at end of statements.
 - 2-space indentation.
 
-## Code style: Python
-
-The Python code (`client.py`) is a standalone CLI client with no third-party dependencies.
-
-- All function signatures must be statically typed (parameters and return types).
-- Use built-in types for annotations (`list`, `dict`, `str`, etc.), not `typing` module
-  equivalents.
-- `snake_case` for functions and variables, `PascalCase` for classes.
-- Docstrings on all functions.
-- Use specific exception types in `except` clauses, never bare `except`.
-- Standard `if __name__ == "__main__":` entry point pattern.
-
 ## Configuration
 
 - Runtime config is loaded from `config.toml` (or path in `CONFIG_PATH` env var).
@@ -190,6 +177,14 @@ The Python code (`client.py`) is a standalone CLI client with no third-party dep
   an appropriate message describing the whole change. DO NOT SKIP THIS.
 - When a change fixes a GitHub issue, include `Fixes #<number>` in the commit message
   so the issue is closed automatically when pushed.
+
+## Branches
+
+`master` and `pages` are **separate, independent histories** with no common ancestor —
+they are not related branches and must never be merged. `master` is the application
+source code. `pages` is the documentation/GitHub Pages branch (skills, install guides,
+etc.) served via Cloudflare Pages at `stavrobot.stavros.io`. Changes to one branch have
+no effect on the other. Task tickets (`.tickets/`) only exist on `master`.
 
 ## Coder subsystem
 

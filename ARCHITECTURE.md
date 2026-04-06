@@ -345,7 +345,7 @@ is supported with a custom endpoint).
 
 | Source string | Origin |
 |---|---|
-| `undefined` | CLI (`client.py`) |
+| `undefined` | Direct HTTP call (no source header) |
 | `"signal"` | Signal bridge webhook |
 | `"telegram"` | Telegram webhook |
 | `"whatsapp"` | WhatsApp (Baileys) |
