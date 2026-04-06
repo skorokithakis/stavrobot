@@ -128,6 +128,8 @@ docker compose up --build
 
 The API is available at `http://localhost:10567/chat`.
 
+**Note:** Docker Compose only exposes the app on `localhost:10567`. To make it accessible externally (required for Telegram/Signal webhooks and the `publicHostname` setting), set up a reverse proxy (e.g. Nginx, Caddy) pointing to `localhost:10567`. You can also expose the port directly, but this is not recommended as traffic will be unencrypted.
+
 ### Without Docker
 
 Requires Node.js >= 20 and a running PostgreSQL instance.
