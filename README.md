@@ -91,6 +91,7 @@ Signal requires a **separate phone number** — not your personal one. A prepaid
 1. Message @BotFather on Telegram, create a new bot, and copy the token.
 2. Message @userinfobot on Telegram to get your user ID (this is used as the chat ID).
 3. Set `[telegram].botToken` in your config.
+3. Set the chat ID (*not your mobile phone number*) in `[owner].telegram` in your config.
 4. After first startup, add allowed chat IDs via the `/settings` web UI.
 5. The webhook is registered automatically when the app starts.
 
