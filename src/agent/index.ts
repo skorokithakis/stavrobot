@@ -409,7 +409,7 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
         maxTokens: config.maxTokens!,
       }
     : getModel(config.provider as any, config.model as any);
-  const tools = [createExecuteSqlTool(pool), createManageKnowledgeTool(pool), createSendSignalMessageTool(pool, config), createManageCronTool(pool), createRunPythonTool(), createManagePagesTool(pool), createManageUploadsTool(), createSearchTool(pool, config.embeddings), createManageFilesTool(), createManageInterlocutorsTool(pool), createManageAgentsTool(pool), createSendAgentMessageTool(pool, () => currentAgentId)];
+  const tools = [createExecuteSqlTool(pool), createManageKnowledgeTool(pool), createManageCronTool(pool), createRunPythonTool(), createManagePagesTool(pool), createManageUploadsTool(), createSearchTool(pool, config.embeddings), createManageFilesTool(), createManageInterlocutorsTool(pool), createManageAgentsTool(pool), createSendAgentMessageTool(pool, () => currentAgentId)];
   tools.push(
     createManagePluginsTool({ coderEnabled: config.coder !== undefined }),
     createRunPluginToolTool(),
@@ -418,6 +418,9 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
     tools.push(
       createRequestCodingTaskTool(),
     );
+  }
+  if (config.signal !== undefined) {
+    tools.push(createSendSignalMessageTool(pool, config));
   }
   if (config.telegram !== undefined) {
     tools.push(createSendTelegramMessageTool(pool, config));

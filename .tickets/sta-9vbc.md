@@ -232,3 +232,149 @@ This means:
 3. **Docker-compose complexity**: Container-per-channel means four containers (three net new since Signal bridge already exists). For stateless webhook channels like Telegram and email, a whole container feels heavyweight — they're just an HTTP handler and some API calls. Need to decide whether this operational cost is acceptable or if there's a lighter-weight model for stateless channels that doesn't compromise the architecture.
 
 4. **Owner identities**: `config.toml [owner]` currently has hardcoded per-channel fields (`owner.signal`, `owner.telegram`, `owner.whatsapp`, `owner.email`). These are used for: (a) auto-seeding the allowlist, (b) identifying owner messages to bypass allowlist/interlocutor gates, (c) routing owner messages to the main agent. Needs to become dynamic — e.g. `[owner.identities]` section with arbitrary channel names as keys like `telegram = "12345"`, `signal = "+1234"`.
+
+**2026-04-06T23:13:55Z**
+
+## Full impact analysis (2026-04-07)
+
+### Secrets per channel
+
+- **Telegram**: `botToken` only. Webhook secret is a random UUID regenerated every startup (never persisted). Runtime: stateless. Webhook inbound, HTTP API outbound. No persistent connections.
+- **Email**: `webhookSecret`, `smtpHost`, `smtpPort`, `smtpUser`, `smtpPassword`, `fromAddress`. Runtime: nodemailer SMTP transport (connection pool, created once). No persistent inbound connection.
+- **Signal**: `account` (phone number), shared `password` for inter-container auth. Runtime: heavy. signal-cli subprocess with persistent SSE stream, on-disk registration data. Already a separate container.
+- **WhatsApp**: Just `[whatsapp]` section presence in config. No explicit secrets. Runtime: heaviest. Baileys WebSocket in-process, multi-file auth state on disk, QR code pairing flow, reconnection with exponential backoff, monkey-patches `console.info`/`console.warn` globally.
+
+### Current coupling points
+
+**queue.ts**: `GATED_SOURCES`/`INTERACTIVE_SOURCES` hardcoded. `sendErrorToSource()` directly imports and calls per-channel send functions (new coupling since ticket was written).
+
+**send-tools.ts**: Four separate tool factories with duplicated shared logic (recipient resolution, subagent scoping, allowlist check). Channel-specific send at the end.
+
+**agent/index.ts**: `send_signal_message` always registered (anomaly). Others conditional on config.
+
+**config.ts**: Per-channel typed interfaces. Hardcoded `owner.signal/telegram/whatsapp/email` fields.
+
+**allowlist.ts**: Hardcoded per-channel arrays, different types, per-channel matching logic.
+
+**index.ts**: Hardcoded webhook routes, startup init for Telegram/WhatsApp/Email.
+
+**Settings UI**: Four hardcoded allowlist sections.
+
+### What moves out of the app
+
+Files that move to channel containers: `telegram.ts`, `telegram-api.ts`, `whatsapp.ts`, `whatsapp-api.ts`, `email.ts`, `email-api.ts`.
+
+Files that need refactoring: `send-tools.ts` (tools become HTTP calls or unified), `queue.ts` (`sendErrorToSource` uses generic send, gated/interactive sources become dynamic), `config.ts` (channel interfaces shrink), `allowlist.ts` (dynamic structure, uniform glob matching), `index.ts` (remove webhook routes and startup init), `agent/index.ts` (tool registration changes), settings UI (dynamic sections).
+
+Removable dependencies: `@whiskeysockets/baileys` (+ `@hapi/boom`, `qrcode-terminal`), `nodemailer`, `mailparser`, `marked`.
+
+### Non-obvious complications
+
+- Subagent send scoping (`checkSubagentRecipientScope()`) queries the DB. If send tools move to channels, channels need DB access or the check stays in the app.
+- Attachment handling varies: Telegram/WhatsApp download media to app filesystem; Signal sends base64 in JSON. Extracted channels would need the base64-in-JSON pattern.
+- WhatsApp console monkey-patching moves out (positive side effect).
+- Telegram webhook registration (calling Telegram API with `setWebhook`) moves to channel container.
+
+### Lighter-weight options
+
+**(A) Only extract stateful channels.** WhatsApp gets its own container (like Signal). Telegram and Email stay in the app behind a cleaner internal interface. Biggest win for least overhead.
+
+**(B) Single channel gateway.** One new container hosts all non-Signal adapters. Isolates channel code from app, but Baileys crash takes down Telegram/Email too.
+
+**(C) Two tiers: extract WhatsApp only.** Keep Signal as-is, extract WhatsApp into its own container, keep stateless channels (Telegram, Email) in the app. Surgical extraction of the most problematic channel.
+
+**(D) Full container-per-channel.** Original proposal. Maximum isolation, maximum operational overhead (3 net new containers).
+
+**2026-04-07T00:30:50Z**
+
+## Discussion update (2026-04-07)
+
+### Goal clarified
+
+The primary goal is pluggability: a uniform interface where adding a new channel means deploying a new container and configuring it, not touching app code. All channel code must come out of the app.
+
+### Decision: refactor Signal bridge to conform
+
+Signal bridge will be refactored to speak the same protocol as new channels. No special cases.
+
+### Decision: channel-runner model (option 3)
+
+Container-per-channel is too heavy operationally (separate Dockerfiles, builds, service definitions). Instead:
+
+- **channel-runner**: a single Node.js container that loads channel adapters as modules. Hosts stateless channels (Telegram, Email) and potentially others. One Dockerfile, one service definition.
+- **WhatsApp bridge**: dedicated container because Baileys is heavy, crash-prone, and has complex lifecycle (QR code pairing, reconnection, persistent WebSocket). Isolating it protects stateless channels from Baileys instability.
+- **Signal bridge**: existing container, refactored to speak the standard channel protocol.
+
+From the app's perspective, all three look identical — the app talks to channel endpoints via the standard protocol. The packaging is an operational concern.
+
+Total container count: 9 (today: 7, adding channel-runner + whatsapp-bridge). Signal bridge already exists and gets refactored in place.
+
+### Open question: still need to decide
+
+1. Config delivery mechanism (how channels get their secrets).
+2. Registration persistence (what happens when app restarts).
+3. Whether the channel-runner should be a generic multi-channel host (loads adapters dynamically) or just a static container that happens to bundle Telegram + Email.
+
+**2026-04-07T00:37:56Z**
+
+## Decisions from discussion (2026-04-07)
+
+### Decision: config delivery via shared config.toml (option a)
+
+Channels read their config from `config.toml`, mounted read-only into the container (same pattern Signal bridge already uses). Channel sections live under `[channels.telegram]`, `[channels.email]`, etc. One file for the user to manage. Channels that don't need secrets (e.g. WhatsApp currently has none) just don't read a config section.
+
+### Decision: no registration protocol, convention-based discovery
+
+The app knows which channels exist from its own `config.toml` (which `[channels.*]` sections are defined). Channel send URLs are derived from docker-compose service names by convention (e.g. `http://channel-runner:3010/send/telegram`). No registration endpoint, no persistence question, no heartbeat.
+
+Tradeoff: adding a new channel type requires a config section + docker-compose service definition. But both are needed regardless of discovery model.
+
+This eliminates open questions #1, #2, and #3 from the original ticket.
+
+### Decision: static channel-runner (for now)
+
+Channel-runner bundles its adapters as compiled-in modules, not dynamically loaded. Telegram and Email are built into the channel-runner image. No plugin-like dynamic loading system. YAGNI — if needed later, it builds on top.
+
+### Tentative (not yet approved): channel-runner model
+
+Still under discussion. The proposal is: one channel-runner container for stateless channels (Telegram, Email), a separate WhatsApp bridge container for Baileys, and Signal bridge refactored to the standard protocol. The user has not yet approved the channel-runner approach specifically — the alternative is still container-per-channel for all of them.
+
+**2026-04-07T00:42:53Z**
+
+## Revised design direction (2026-04-07)
+
+### Key insight: pluggability doesn't require extraction
+
+The original design assumed all channels must be extracted into separate containers. Revised approach: define a uniform channel interface that can be satisfied both in-process (internal adapter) and over HTTP (external container). The app routes all inbound/outbound through this interface regardless of where the channel runs.
+
+### Revised architecture
+
+**Built-in channels** (Telegram, Email, WhatsApp): stay in the app process, refactored behind the channel interface. No new containers.
+
+**External channel** (Signal): stays as a separate container (signal-cli requires a JRE). Refactored to speak the standard channel protocol instead of its current bespoke one.
+
+**Future external channels**: deployed as separate containers, same protocol. Adding a new channel means deploying a container and adding a config section. No app code changes.
+
+**Override capability** (future, not now): if an external channel is configured with the same name as a built-in, the external one wins. This lets users replace built-in channels (e.g. swap in a custom email adapter). YAGNI for now but the architecture supports it naturally.
+
+### What this replaces
+
+- No channel-runner container.
+- No extraction of Telegram, Email, or WhatsApp into separate containers.
+- Signal bridge stays where it is, gets refactored to conform to the protocol.
+- Container count unchanged (7 services).
+
+### What still needs to happen
+
+1. Define the channel interface contract (inbound and outbound).
+2. Refactor built-in channels (Telegram, Email, WhatsApp) to implement the interface as in-process adapters.
+3. Refactor Signal bridge to speak the standard protocol over HTTP.
+4. Unify send tools into a single `send()` tool that dispatches through the interface.
+5. Make `GATED_SOURCES`, `INTERACTIVE_SOURCES`, `sendErrorToSource()`, allowlist, owner identities, and settings UI all dynamic (driven by registered channels instead of hardcoded names).
+6. Update config.toml structure for dynamic channel sections and owner identities.
+
+### Superseded decisions
+
+- 'Container per channel' (decision #2 from original ticket) — replaced by 'uniform interface, channels can be internal or external'.
+- 'Channel-runner model' (tentative) — dropped, not needed.
+- 'Registration protocol' — still not needed for built-in channels. External channels discovered via config.toml convention. No dynamic registration endpoint.
