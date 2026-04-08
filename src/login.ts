@@ -7,19 +7,36 @@ import type { Config } from "./config.js";
 import { log } from "./log.js";
 import { getBaseStyles } from "./theme.js";
 
-// Module-level state for the pending prompt resolver. Safe because this is a
-// single-user bot — only one login flow runs at a time.
+// Module-level state for the pending prompt resolver and rejecter. Safe because
+// this is a single-user bot — only one login flow runs at a time.
 let pendingPromptResolver: ((value: string) => void) | null = null;
-
-// Module-level state for the active login flow. Used to cancel an in-progress
-// flow when a new SSE connection arrives, so the library's callback server on
-// port 53692 is closed before the new flow tries to bind the same port.
-let loginAbortReject: ((error: Error) => void) | null = null;
-let activeLoginPromise: Promise<void> | null = null;
+// Rejecting this causes the library's provider.login() to throw, which triggers
+// its internal cleanup (cancelWait, closing the callback server). Only used for
+// timeout cancellation — disconnects must not cancel the flow.
+let pendingPromptReject: ((error: Error) => void) | null = null;
+// Set to true when the timeout fires before the library has called onPrompt or
+// onManualCodeInput, so those callbacks can reject immediately when they do run.
 let loginCancelled = false;
+
+// Module-level state for the active login flow.
+let activeLoginPromise: Promise<void> | null = null;
 // Monotonically increasing counter so stale disconnect handlers from an old
 // flow cannot accidentally clear state that belongs to a newer flow.
 let loginFlowCounter = 0;
+
+// The current SSE response to write events to. Swapped on reconnection without
+// restarting the underlying provider.login() call.
+let activeResponse: http.ServerResponse | null = null;
+let activeIsConnected = false;
+
+// Stored so a reconnecting client can be replayed to the same point in the flow.
+let lastAuthEvent: { url: string; instructions: string | undefined } | null = null;
+let lastPromptMessage: string | null = null;
+
+// Cleared when the flow completes or times out.
+let flowTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
+const FLOW_TIMEOUT_MS = 5 * 60 * 1000;
 
 function buildLoginPageHtml(providerName: string): string {
   return `<!DOCTYPE html>
@@ -152,6 +169,31 @@ function sendSseEvent(response: http.ServerResponse, eventName: string, data: un
   response.write(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
+// Writes an SSE event to the active connection if one is alive.
+function sendActiveSseEvent(eventName: string, data: unknown): void {
+  if (activeResponse !== null && activeIsConnected) {
+    sendSseEvent(activeResponse, eventName, data);
+  }
+}
+
+function clearFlowState(flowId: number): void {
+  if (flowId !== loginFlowCounter) {
+    return;
+  }
+  if (flowTimeoutHandle !== null) {
+    clearTimeout(flowTimeoutHandle);
+    flowTimeoutHandle = null;
+  }
+  activeLoginPromise = null;
+  activeResponse = null;
+  activeIsConnected = false;
+  lastAuthEvent = null;
+  lastPromptMessage = null;
+  pendingPromptResolver = null;
+  pendingPromptReject = null;
+  loginCancelled = false;
+}
+
 export function serveLoginPage(response: http.ServerResponse, config: Config): void {
   const provider = getOAuthProvider(config.provider);
   const providerName = provider !== undefined ? provider.name : config.provider;
@@ -188,57 +230,61 @@ export async function handleLoginEvents(
     return;
   }
 
-  // If a login flow is already running, cancel it and wait for it to finish so
-  // the library's callback server on port 53692 is closed before we try to bind
-  // the same port again. The cancellation works by rejecting the onManualCodeInput
-  // Promise, which causes the library's catch handler to call server.cancelWait(),
-  // which unblocks server.waitForCode(), which then throws and reaches the
-  // finally { server.server.close() } block.
-  if (activeLoginPromise !== null) {
-    log.debug("[stavrobot] handleLoginEvents: cancelling previous login flow");
-    if (loginAbortReject !== null) {
-      loginAbortReject(new Error("Login cancelled: new login flow started"));
-    } else {
-      // onManualCodeInput has not been called yet; set the flag so it rejects
-      // immediately when it is called.
-      loginCancelled = true;
-    }
-    try {
-      await activeLoginPromise;
-    } catch {
-      // Expected: the previous flow was cancelled.
-    }
-    // Give the OS a moment to release the port before the new flow binds it.
-    await new Promise<void>((resolve) => setTimeout(resolve, 100));
-  }
-
   response.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
   });
 
-  let isConnected = true;
+  // If a flow is already running, attach this new SSE connection to it instead
+  // of restarting. This handles page reloads: the browser's EventSource
+  // reconnects automatically, and we replay the stored state so the user sees
+  // the same auth URL and prompt they saw before the reload.
+  if (activeLoginPromise !== null) {
+    log.debug("[stavrobot] handleLoginEvents: attaching new SSE connection to existing flow");
+
+    activeResponse = response;
+    activeIsConnected = true;
+    const thisResponse = response;
+
+    request.on("close", () => {
+      log.debug("[stavrobot] handleLoginEvents: reconnected client disconnected");
+      if (thisResponse === activeResponse) {
+        activeIsConnected = false;
+      }
+    });
+
+    // Replay stored state so the reconnected client catches up.
+    if (lastAuthEvent !== null) {
+      sendSseEvent(response, "auth", { url: lastAuthEvent.url, instructions: lastAuthEvent.instructions });
+    }
+    if (lastPromptMessage !== null) {
+      if (pendingPromptResolver !== null) {
+        // The prompt is still waiting for user input.
+        sendSseEvent(response, "prompt", { message: lastPromptMessage });
+      } else {
+        // The prompt was already answered; the flow is waiting for the provider.
+        sendSseEvent(response, "progress", { message: "Waiting for authorization..." });
+      }
+    }
+
+    return;
+  }
+
   loginFlowCounter += 1;
   const flowId = loginFlowCounter;
 
+  activeResponse = response;
+  activeIsConnected = true;
+
   request.on("close", () => {
     log.debug(`[stavrobot] handleLoginEvents: client disconnected (flow ${flowId})`);
-    isConnected = false;
-    pendingPromptResolver = null;
-    // Only cancel the active flow if this disconnect belongs to the current flow.
-    // A stale handler from an old flow must not clear state for a newer flow.
-    if (flowId === loginFlowCounter && loginAbortReject !== null) {
-      log.debug(`[stavrobot] handleLoginEvents: aborting login flow ${flowId} on disconnect`);
-      loginAbortReject(new Error("Login cancelled: client disconnected"));
+    if (flowId === loginFlowCounter) {
+      activeIsConnected = false;
     }
   });
 
   log.debug(`[stavrobot] handleLoginEvents: starting login flow ${flowId} for provider "${config.provider}"`);
-
-  // Reset cancellation state for this new flow.
-  loginCancelled = false;
-  loginAbortReject = null;
 
   // These are assigned synchronously inside the Promise constructor, so they
   // are always non-null by the time the try block runs. TypeScript cannot infer
@@ -250,28 +296,52 @@ export async function handleLoginEvents(
     rejectActiveLogin = reject;
   });
 
+  // Cancel the flow if no client reconnects within the timeout window. This
+  // prevents the library's callback server from staying open indefinitely when
+  // the user abandons the login page.
+  flowTimeoutHandle = setTimeout(() => {
+    if (flowId === loginFlowCounter && activeLoginPromise !== null) {
+      log.warn(`[stavrobot] handleLoginEvents: flow ${flowId} timed out after ${FLOW_TIMEOUT_MS / 1000}s`);
+      if (pendingPromptReject !== null) {
+        // The library is currently blocked waiting for user input. Rejecting its
+        // promise causes it to call cancelWait() and close the callback server.
+        // The resulting throw propagates to the catch block, which calls
+        // rejectActiveLogin and runs clearFlowState via finally.
+        pendingPromptReject(new Error("Login flow timed out"));
+      } else {
+        // The library hasn't called onPrompt/onManualCodeInput yet (or has
+        // already moved past it). Mark the flow cancelled so those callbacks
+        // reject immediately if they are called, and also reject the wrapper
+        // promise directly so the flow doesn't hang.
+        loginCancelled = true;
+        rejectActiveLogin(new Error("Login flow timed out"));
+      }
+    }
+  }, FLOW_TIMEOUT_MS);
+
   try {
     const credentials = await provider.login({
       onAuth: (info) => {
         log.debug("[stavrobot] handleLoginEvents: onAuth called, sending auth event");
-        if (isConnected) {
-          sendSseEvent(response, "auth", { url: info.url, instructions: info.instructions });
-        }
+        lastAuthEvent = { url: info.url, instructions: info.instructions };
+        sendActiveSseEvent("auth", { url: info.url, instructions: info.instructions });
       },
       onPrompt: (prompt) => {
         log.debug("[stavrobot] handleLoginEvents: onPrompt called, sending prompt event");
-        return new Promise<string>((resolve) => {
-          pendingPromptResolver = resolve;
-          if (isConnected) {
-            sendSseEvent(response, "prompt", { message: prompt.message });
+        return new Promise<string>((resolve, reject) => {
+          if (loginCancelled) {
+            reject(new Error("Login flow timed out"));
+            return;
           }
+          lastPromptMessage = prompt.message;
+          pendingPromptResolver = resolve;
+          pendingPromptReject = reject;
+          sendActiveSseEvent("prompt", { message: prompt.message });
         });
       },
       onProgress: (message) => {
         log.debug("[stavrobot] handleLoginEvents: onProgress:", message);
-        if (isConnected) {
-          sendSseEvent(response, "progress", { message });
-        }
+        sendActiveSseEvent("progress", { message });
       },
       // Races against the provider's local callback server. In a remote deployment
       // the browser redirect hits localhost on the container, not the user's machine,
@@ -280,23 +350,20 @@ export async function handleLoginEvents(
       onManualCodeInput: () => {
         log.debug("[stavrobot] handleLoginEvents: onManualCodeInput called, sending prompt event");
         return new Promise<string>((resolve, reject) => {
-          // If the flow was already cancelled before onManualCodeInput was called,
-          // reject immediately so the library closes its callback server.
           if (loginCancelled) {
-            reject(new Error("Login cancelled: new login flow started"));
+            reject(new Error("Login flow timed out"));
             return;
           }
-          loginAbortReject = reject;
+          const message = "Paste the authorization code or full redirect URL from your browser:";
+          lastPromptMessage = message;
           pendingPromptResolver = resolve;
-          if (isConnected) {
-            sendSseEvent(response, "prompt", { message: "Paste the authorization code or full redirect URL from your browser:" });
-          }
+          pendingPromptReject = reject;
+          sendActiveSseEvent("prompt", { message });
         });
       },
     });
 
     log.debug("[stavrobot] handleLoginEvents: login succeeded, saving credentials");
-    pendingPromptResolver = null;
 
     const authFile = config.authFile;
     let existingCredentials: Record<string, OAuthCredentials> = {};
@@ -317,28 +384,23 @@ export async function handleLoginEvents(
 
     log.debug("[stavrobot] handleLoginEvents: credentials written to", authFile);
 
-    if (isConnected) {
-      sendSseEvent(response, "success", {});
-      response.end();
+    if (activeIsConnected && activeResponse !== null) {
+      sendSseEvent(activeResponse, "success", {});
+      activeResponse.end();
     }
 
     resolveActiveLogin();
   } catch (error) {
-    pendingPromptResolver = null;
     const message = error instanceof Error ? error.message : String(error);
     log.error("[stavrobot] handleLoginEvents: login failed:", message);
-    if (isConnected) {
-      sendSseEvent(response, "error_event", { message });
-      response.end();
+    if (activeIsConnected && activeResponse !== null) {
+      sendSseEvent(activeResponse, "error_event", { message });
+      activeResponse.end();
     }
     rejectActiveLogin(error);
   } finally {
     // Clean up module-level state so a future flow starts fresh.
-    if (flowId === loginFlowCounter) {
-      loginAbortReject = null;
-      activeLoginPromise = null;
-      loginCancelled = false;
-    }
+    clearFlowState(flowId);
   }
 }
 
@@ -383,6 +445,7 @@ export async function handleLoginRespond(
   log.debug("[stavrobot] handleLoginRespond: resolving pending prompt");
   const resolver = pendingPromptResolver;
   pendingPromptResolver = null;
+  pendingPromptReject = null;
   resolver(value);
 
   response.writeHead(200, { "Content-Type": "application/json" });
