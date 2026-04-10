@@ -265,7 +265,7 @@ async function processQueue(): Promise<void> {
         entry.resolve("");
         continue;
       }
-      const response = await handlePrompt(queueAgent!, queuePool!, entry.message, queueConfig!, routing, entry.source, entry.attachments);
+      const response = await handlePrompt(queueAgent!, queuePool!, entry.message, queueConfig!, routing, entry.source, entry.attachments, entry.retries > 0);
       entry.resolve(response);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

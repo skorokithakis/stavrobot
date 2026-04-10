@@ -4,7 +4,7 @@ import { complete } from "@mariozechner/pi-ai";
 import type { Pool } from "pg";
 import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool, injectAutoSearchBlock, pendingAutoSearchBlocks, handlePrompt, createAgent, escalatingSummarize, selectCompactionCutIndex, isTurnBoundary } from "./agent/index.js";
 import { getApiKey } from "./auth.js";
-import { loadMessages, loadAllMemories, loadAllScratchpadTitles, getMainAgentId } from "./database.js";
+import { loadMessages, loadAllMemories, loadAllScratchpadTitles, getMainAgentId, saveMessage } from "./database.js";
 import { runSearch } from "./search.js";
 import { internalFetch } from "./internal-fetch.js";
 
@@ -113,6 +113,9 @@ const { FakeAgent } = vi.hoisted(() => {
     public tools: unknown[] = [];
     // Set this before calling prompt() to make it throw.
     public promptError: Error | undefined = undefined;
+    // Steered messages to emit as message_end events during prompt().
+    public steeringMessages: unknown[] = [];
+    private listeners: Array<(e: unknown) => void> = [];
 
     constructor(opts?: { transformContext?: (messages: unknown[]) => Promise<unknown[]> }) {
       this.transformContextFn = opts?.transformContext;
@@ -132,8 +135,17 @@ const { FakeAgent } = vi.hoisted(() => {
       this.tools = t;
     }
 
-    subscribe(_fn: (e: unknown) => void): () => void {
-      return () => {};
+    subscribe(fn: (e: unknown) => void): () => void {
+      this.listeners.push(fn);
+      return () => {
+        this.listeners = this.listeners.filter((l) => l !== fn);
+      };
+    }
+
+    emit(event: unknown): void {
+      for (const listener of this.listeners) {
+        listener(event);
+      }
     }
 
     appendMessage(_m: unknown): void {}
@@ -151,6 +163,16 @@ const { FakeAgent } = vi.hoisted(() => {
           : message;
         this.capturedContextMessages = await this.transformContextFn([...this.messages, userMessage]);
       }
+      // Fire message_end for the initial prompt message (mirrors the real agent-loop).
+      const promptMessage = typeof message === "string"
+        ? { role: "user", content: [{ type: "text", text: message }], timestamp: Date.now() }
+        : message;
+      this.emit({ type: "message_end", message: promptMessage });
+      // Fire message_end for any queued steered messages.
+      for (const steered of this.steeringMessages) {
+        this.emit({ type: "message_end", message: steered });
+      }
+      this.steeringMessages = [];
     }
   }
 
@@ -1348,6 +1370,158 @@ describe("selectCompactionCutIndex", () => {
     ];
     const result = selectCompactionCutIndex(messages, 300);
     expect(result).toBe(2);
+  });
+});
+
+describe("handlePrompt — user message persistence", () => {
+  const mockSaveMessage = vi.mocked(saveMessage);
+
+  function setupCommonMocks(): void {
+    vi.clearAllMocks();
+    vi.mocked(loadMessages).mockResolvedValue([]);
+    vi.mocked(loadAllMemories).mockResolvedValue([]);
+    vi.mocked(loadAllScratchpadTitles).mockResolvedValue([]);
+    vi.mocked(getMainAgentId).mockReturnValue(1);
+    vi.mocked(internalFetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ plugins: [] }),
+    } as unknown as Response);
+    vi.mocked(getApiKey).mockResolvedValue("test-key");
+    vi.mocked(runSearch).mockResolvedValue({ tableResults: [], messages: [] });
+    mockSaveMessage.mockResolvedValue(42);
+  }
+
+  it("saves the user message before agent.prompt() so it persists even when prompt throws", async () => {
+    setupCommonMocks();
+
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+    fakeAgent.promptError = new Error("model unreachable");
+
+    let caughtError: unknown;
+    try {
+      await handlePrompt(agent, makePool(), "hello", minimalConfig, mainAgentRouting);
+    } catch (error) {
+      caughtError = error;
+    }
+
+    expect(caughtError).toBeInstanceOf(Error);
+    // saveMessage must have been called with a user message before the error.
+    const userSave = mockSaveMessage.mock.calls.find(
+      (call) => (call[1] as { role: string }).role === "user",
+    );
+    expect(userSave).toBeDefined();
+  });
+
+  it("does not save the user message again on a retry (isRetry: true)", async () => {
+    setupCommonMocks();
+
+    const agent = await createAgent(minimalConfig, makePool());
+
+    await handlePrompt(agent, makePool(), "hello", minimalConfig, mainAgentRouting, undefined, undefined, true);
+
+    const userSaves = mockSaveMessage.mock.calls.filter(
+      (call) => (call[1] as { role: string }).role === "user",
+    );
+    expect(userSaves).toHaveLength(0);
+  });
+
+  it("saves the user message exactly once on a non-retry (isRetry: false)", async () => {
+    setupCommonMocks();
+
+    const agent = await createAgent(minimalConfig, makePool());
+
+    await handlePrompt(agent, makePool(), "hello", minimalConfig, mainAgentRouting, undefined, undefined, false);
+
+    const userSaves = mockSaveMessage.mock.calls.filter(
+      (call) => (call[1] as { role: string }).role === "user",
+    );
+    expect(userSaves).toHaveLength(1);
+  });
+
+  it("inserts the auto-search embedding into message_embeddings when available", async () => {
+    setupCommonMocks();
+    // Return a query embedding so the embedding insert path is exercised.
+    vi.mocked(runSearch).mockResolvedValue({
+      tableResults: [],
+      messages: [],
+      queryEmbedding: [0.1, 0.2, 0.3],
+    });
+
+    const pool = makePool();
+    const agent = await createAgent(minimalConfig, pool);
+
+    await handlePrompt(agent, pool, "find something", minimalConfig, mainAgentRouting, "signal");
+
+    const mockQuery = vi.mocked(pool.query as (...args: unknown[]) => unknown);
+    const embeddingInsert = mockQuery.mock.calls.find(
+      (call) => typeof call[0] === "string" && (call[0] as string).includes("message_embeddings"),
+    );
+    expect(embeddingInsert).toBeDefined();
+  });
+
+  it("does not insert an embedding on retry even when auto-search returns one", async () => {
+    setupCommonMocks();
+    vi.mocked(runSearch).mockResolvedValue({
+      tableResults: [],
+      messages: [],
+      queryEmbedding: [0.1, 0.2, 0.3],
+    });
+
+    const pool = makePool();
+    const agent = await createAgent(minimalConfig, pool);
+
+    await handlePrompt(agent, pool, "find something", minimalConfig, mainAgentRouting, "signal", undefined, true);
+
+    const mockQuery = vi.mocked(pool.query as (...args: unknown[]) => unknown);
+    const embeddingInsert = mockQuery.mock.calls.find(
+      (call) => typeof call[0] === "string" && (call[0] as string).includes("message_embeddings"),
+    );
+    expect(embeddingInsert).toBeUndefined();
+  });
+
+  it("saves steered user messages that arrive as message_end events during prompt()", async () => {
+    setupCommonMocks();
+
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+
+    // Queue a steered message to be emitted during prompt().
+    const steeredMessage = {
+      role: "user",
+      content: [{ type: "text", text: "steered message" }],
+      timestamp: Date.now(),
+    };
+    fakeAgent.steeringMessages = [steeredMessage];
+
+    await handlePrompt(agent, makePool(), "initial message", minimalConfig, mainAgentRouting);
+
+    const userSaves = mockSaveMessage.mock.calls.filter(
+      (call) => (call[1] as { role: string }).role === "user",
+    );
+    // Exactly two user saves: the initial message (pre-prompt) and the steered message (subscriber).
+    expect(userSaves).toHaveLength(2);
+    // The steered message must be saved without sender metadata (no senderIdentityId/senderAgentId).
+    const steeredSave = userSaves[1];
+    expect((steeredSave[1] as { content: unknown }).content).toEqual(steeredMessage.content);
+    expect(steeredSave[3]).toBeUndefined();
+    expect(steeredSave[4]).toBeUndefined();
+  });
+
+  it("does not save the initial message_end event from the agent-loop as a duplicate", async () => {
+    setupCommonMocks();
+
+    const agent = await createAgent(minimalConfig, makePool());
+
+    // No steered messages — only the initial prompt fires a message_end event.
+    await handlePrompt(agent, makePool(), "hello", minimalConfig, mainAgentRouting);
+
+    const userSaves = mockSaveMessage.mock.calls.filter(
+      (call) => (call[1] as { role: string }).role === "user",
+    );
+    // Exactly one user save: the pre-prompt save. The message_end for the initial
+    // prompt must be skipped by the subscriber.
+    expect(userSaves).toHaveLength(1);
   });
 });
 

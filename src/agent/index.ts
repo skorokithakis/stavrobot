@@ -685,7 +685,8 @@ export async function handlePrompt(
   config: Config,
   routing: RoutingResult,
   source?: string,
-  attachments?: FileAttachment[]
+  attachments?: FileAttachment[],
+  isRetry: boolean = false
 ): Promise<string> {
   pendingAutoSearchBlocks.delete(agent);
 
@@ -800,9 +801,42 @@ export async function handlePrompt(
     // not cover the rare case where a token expires mid-conversation between tool calls.
     await getApiKey(config);
 
-    // Track whether the first user message has been saved so we can attach sender
-    // metadata only to that message.
-    let firstUserMessageSaved = false;
+    // Build the user message in the same shape the agent will use so the DB row
+    // matches what the agent sends to the LLM (text + any image blocks).
+    const userAgentMessage = imageContents.length > 0
+      ? {
+          role: "user" as const,
+          content: [{ type: "text" as const, text: messageToSend }, ...imageContents],
+          timestamp: Date.now(),
+        }
+      : {
+          role: "user" as const,
+          content: messageToSend,
+          timestamp: Date.now(),
+        };
+
+    // Save the user message before calling agent.prompt() so it is persisted
+    // even if the model is unreachable and all retries fail. On retries we skip
+    // the save to avoid duplicate rows — the first attempt already wrote the row.
+    if (!isRetry) {
+      const savedUserMessageId = await saveMessage(pool, userAgentMessage, agentId, senderIdentityId, senderAgentId);
+      if (autoSearchEmbedding !== undefined) {
+        const vectorLiteral = `[${autoSearchEmbedding.join(",")}]`;
+        await pool.query(
+          "INSERT INTO message_embeddings (message_id, embedding) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+          [savedUserMessageId, vectorLiteral],
+        );
+        log.debug(`[stavrobot] auto-search embedding stored for message ${savedUserMessageId}`);
+      }
+    }
+
+    // The initial user message is pre-saved above. The agent-loop still fires a
+    // message_end event for it, which must be skipped to avoid a duplicate row.
+    // Steered messages injected mid-run also arrive as user message_end events
+    // and must be persisted. This flag starts false; the first user event sets
+    // it to true (skipping the save) and all subsequent user events are steered
+    // messages that get saved without sender metadata.
+    let initialPromptEventConsumed = false;
 
     const unsubscribe = agent.subscribe((event) => {
       if (event.type === "message_end") {
@@ -818,22 +852,13 @@ export async function handlePrompt(
           message.role === "assistant" ||
           message.role === "toolResult"
         ) {
-          // Only the inbound user message carries sender metadata. Assistant and
-          // toolResult messages are produced by the agent itself and have no
-          // external sender.
-          if (message.role === "user" && !firstUserMessageSaved) {
-            firstUserMessageSaved = true;
-            saveChain = saveChain.then(async () => {
-              const messageId = await saveMessage(pool, message, agentId, senderIdentityId, senderAgentId);
-              if (autoSearchEmbedding !== undefined) {
-                const vectorLiteral = `[${autoSearchEmbedding.join(",")}]`;
-                await pool.query(
-                  "INSERT INTO message_embeddings (message_id, embedding) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-                  [messageId, vectorLiteral],
-                );
-                log.debug(`[stavrobot] auto-search embedding stored for message ${messageId}`);
-              }
-            });
+          if (message.role === "user" && !initialPromptEventConsumed) {
+            // The initial prompt message_end event: already pre-saved above, skip it.
+            initialPromptEventConsumed = true;
+          } else if (message.role === "user") {
+            // Steered messages injected mid-run: save without sender metadata since
+            // they come from the same owner session already established above.
+            saveChain = saveChain.then(() => saveMessage(pool, message, agentId));
           } else {
             saveChain = saveChain.then(() => saveMessage(pool, message, agentId));
           }
