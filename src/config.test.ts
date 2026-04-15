@@ -251,28 +251,28 @@ name = "Stavros"
   });
 });
 
-describe("loadConfig compactionTokenThreshold", () => {
-  it("defaults to 80000 when the key is omitted from the TOML", async () => {
+describe("loadConfig contextTokensK", () => {
+  it("is undefined when the key is omitted from the TOML", async () => {
     setupMocks(BASE_TOML);
     const { loadConfig } = await import("./config.js");
     const config = loadConfig();
-    expect(config.compactionTokenThreshold).toBe(80000);
+    expect(config.contextTokensK).toBeUndefined();
   });
 
   it("uses the value from TOML when the key is present", async () => {
-    const tomlWithThreshold = `
+    const tomlWithContextTokensK = `
 provider = "anthropic"
 model = "claude-sonnet-4-20250514"
 apiKey = "test-key"
 publicHostname = "https://example.com"
-compactionTokenThreshold = 50000
+contextTokensK = 50
 
 [owner]
 name = "Stavros"
 `;
-    setupMocks(tomlWithThreshold);
+    setupMocks(tomlWithContextTokensK);
     const { loadConfig } = await import("./config.js");
     const config = loadConfig();
-    expect(config.compactionTokenThreshold).toBe(50000);
+    expect(config.contextTokensK).toBe(50);
   });
 });

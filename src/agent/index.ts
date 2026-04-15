@@ -37,6 +37,9 @@ import {
   serializeMessagesForSummary,
   escalatingSummarize,
   selectCompactionCutIndex,
+  TRUNCATION_BUDGET_FRACTION,
+  COMPACTION_THRESHOLD_FRACTION,
+  COMPACTION_KEEP_FRACTION,
 } from "./compaction.js";
 import {
   filterToolsForSubagent,
@@ -68,6 +71,9 @@ export {
   injectAutoSearchBlock,
   serializeMessagesForSummary,
   escalatingSummarize,
+  TRUNCATION_BUDGET_FRACTION,
+  COMPACTION_THRESHOLD_FRACTION,
+  COMPACTION_KEEP_FRACTION,
 } from "./compaction.js";
 export {
   filterToolsForSubagent,
@@ -77,6 +83,10 @@ export {
   formatPluginListSection,
 } from "./plugins.js";
 export type { PluginEntry } from "./plugins.js";
+
+// Maps each Agent instance to its derived compaction threshold (in tokens).
+// Set once in createAgent and read in triggerCompactionIfNeeded via handlePrompt.
+const agentCompactionThresholds = new WeakMap<Agent, number>();
 
 // A simple boolean flag to prevent concurrent compaction runs. If a compaction
 // is already in progress when another request triggers the threshold, we skip
@@ -436,7 +446,16 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
     ? `${config.baseSystemPrompt}\n\n${config.customPrompt}`
     : config.baseSystemPrompt) + buildPromptSuffix(config.publicHostname);
 
-  const tokenBudget = Math.floor(model.contextWindow * 0.8);
+  const MIN_CONTEXT_TOKENS = 10000;
+  const rawEffectiveContext = config.contextTokensK !== undefined
+    ? Math.min(config.contextTokensK * 1000, model.contextWindow)
+    : model.contextWindow;
+  const effectiveContext = Math.max(rawEffectiveContext, MIN_CONTEXT_TOKENS);
+  const tokenBudget = Math.floor(effectiveContext * TRUNCATION_BUDGET_FRACTION);
+  const compactionThreshold = Math.floor(effectiveContext * COMPACTION_THRESHOLD_FRACTION);
+  const keepBudget = Math.floor(compactionThreshold * COMPACTION_KEEP_FRACTION);
+
+  log.info(`[stavrobot] Context budget: effectiveContext=${effectiveContext / 1000}k, truncationBudget=${tokenBudget / 1000}k, compactionThreshold=${compactionThreshold / 1000}k, keepBudget=${keepBudget / 1000}k`);
 
   // Declare agent as Agent | undefined so the transformContext closure can
   // safely guard against the (theoretical) case where it fires before the
@@ -461,6 +480,7 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
     },
   });
   agentRef = agent;
+  agentCompactionThresholds.set(agent, compactionThreshold);
 
   return agent;
 }
@@ -600,8 +620,8 @@ async function processAttachments(attachments: FileAttachment[]): Promise<{ reso
   return { resolvedMessage, imageContents };
 }
 
-function triggerCompactionIfNeeded(agent: Agent, pool: pg.Pool, agentId: number, config: Config): void {
-  if (estimateTokens(agent.state.messages) <= config.compactionTokenThreshold || compactionInProgress) {
+function triggerCompactionIfNeeded(agent: Agent, pool: pg.Pool, agentId: number, config: Config, compactionThreshold: number): void {
+  if (estimateTokens(agent.state.messages) <= compactionThreshold || compactionInProgress) {
     return;
   }
 
@@ -614,7 +634,7 @@ function triggerCompactionIfNeeded(agent: Agent, pool: pg.Pool, agentId: number,
 
   void (async () => {
     try {
-      const cutIndexOrNull = selectCompactionCutIndex(currentMessages, config.compactionTokenThreshold);
+      const cutIndexOrNull = selectCompactionCutIndex(currentMessages, compactionThreshold);
       if (cutIndexOrNull === null) {
         log.warn("[stavrobot] Compaction skipped: no safe cut point found (no user messages or all messages fit within the keep budget).");
         return;
@@ -933,7 +953,8 @@ export async function handlePrompt(
         .join("")
     : "";
 
-  triggerCompactionIfNeeded(agent, pool, agentId, config);
+  const compactionThreshold = agentCompactionThresholds.get(agent) ?? Math.floor(agent.state.model.contextWindow * COMPACTION_THRESHOLD_FRACTION);
+  triggerCompactionIfNeeded(agent, pool, agentId, config, compactionThreshold);
 
   return responseText;
 }

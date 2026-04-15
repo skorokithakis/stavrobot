@@ -147,6 +147,13 @@ export function isTurnBoundary(messages: AgentMessage[], index: number): boolean
   return false;
 }
 
+// Fraction of effective context used as the pre-send truncation budget.
+export const TRUNCATION_BUDGET_FRACTION = 0.8;
+// Fraction of effective context at which compaction is triggered.
+export const COMPACTION_THRESHOLD_FRACTION = 0.6;
+// Fraction of the compaction threshold to keep after compaction.
+export const COMPACTION_KEEP_FRACTION = 0.5;
+
 // Selects the index of the first message to keep after compaction, or null if
 // no safe cut point exists. The cut always lands on a turn-boundary user message
 // so the compacted slice never ends mid-tool-use/tool-result pair.
@@ -158,7 +165,7 @@ export function isTurnBoundary(messages: AgentMessage[], index: number): boolean
 // there are no turn-boundary user messages at all, null is returned and
 // compaction is skipped.
 export function selectCompactionCutIndex(messages: AgentMessage[], compactionTokenThreshold: number): number | null {
-  const keepTokenBudget = compactionTokenThreshold * 0.5;
+  const keepTokenBudget = compactionTokenThreshold * COMPACTION_KEEP_FRACTION;
   let accumulatedTokens = 0;
   let cutIndex = messages.length;
   for (let i = messages.length - 1; i >= 0; i--) {

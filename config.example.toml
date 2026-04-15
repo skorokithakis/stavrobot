@@ -46,10 +46,10 @@ authFile = "/app/data/auth.json"
 # The public HTTPS URL where this server is reachable (no trailing slash).
 publicHostname = "https://example.com"
 
-# Estimated token count at which conversation history is compacted into a summary.
-# Uses a character/3 heuristic. Increase to keep more history in context; decrease
-# to compact sooner and reduce API costs.
-# compactionTokenThreshold = 80000
+# Maximum context size in thousands of tokens. Defaults to the model's full context
+# window. Average token usage is roughly half this value due to the compaction sawtooth.
+# Reduce to lower API costs; increase (up to the model limit) to keep more history.
+# contextTokensK = 100
 
 # Optional additional instructions appended to the base system prompt.
 # The base prompt is in system-prompt.txt and always applies.

@@ -70,7 +70,7 @@ export interface Config {
   compactionBulletPrompt: string;
   baseAgentPrompt: string;
   customPrompt?: string;
-  compactionTokenThreshold: number;
+  contextTokensK?: number;
   coder?: CoderConfig;
   embeddings?: EmbeddingsConfig;
   signal?: SignalConfig;
@@ -96,10 +96,6 @@ export function loadConfig(): Config {
 
   log.info(`[stavrobot] Loading agent prompt from ${AGENT_PROMPT_PATH}`);
   config.baseAgentPrompt = fs.readFileSync(AGENT_PROMPT_PATH, "utf-8").trimEnd();
-
-  if (config.compactionTokenThreshold === undefined) {
-    config.compactionTokenThreshold = 80000;
-  }
 
   if (config.apiKey === undefined && config.authFile === undefined) {
     throw new Error("Config must specify either apiKey or authFile.");
