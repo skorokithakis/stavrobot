@@ -466,9 +466,10 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
     : config.baseSystemPrompt) + buildPromptSuffix(config.publicHostname);
 
   const MIN_CONTEXT_TOKENS = 10000;
+  const DEFAULT_CONTEXT_TOKENS = 50000;
   const rawEffectiveContext = config.contextTokensK !== undefined
     ? Math.min(config.contextTokensK * 1000, model.contextWindow)
-    : model.contextWindow;
+    : Math.min(DEFAULT_CONTEXT_TOKENS, model.contextWindow);
   const effectiveContext = Math.max(rawEffectiveContext, MIN_CONTEXT_TOKENS);
   const tokenBudget = Math.floor(effectiveContext * TRUNCATION_BUDGET_FRACTION);
   const compactionThreshold = Math.floor(effectiveContext * COMPACTION_THRESHOLD_FRACTION);
