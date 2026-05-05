@@ -422,6 +422,9 @@ export async function loadLatestCompaction(pool: pg.Pool, agentId: number): Prom
 }
 
 export async function saveCompaction(pool: pg.Pool, summary: string, upToMessageId: number, agentId: number): Promise<void> {
+  if (summary.trim().length === 0) {
+    throw new Error("saveCompaction: summary must not be empty or whitespace-only");
+  }
   await pool.query(
     "INSERT INTO compactions (summary, up_to_message_id, agent_id) VALUES ($1, $2, $3)",
     [summary, upToMessageId, agentId],

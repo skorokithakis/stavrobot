@@ -435,9 +435,13 @@ export async function escalatingSummarize(
 ): Promise<string> {
   const inputLength = inputText.length;
 
+  // Use a model variant with reasoning disabled so the summarizer produces
+  // only text output, not thinking blocks that waste the output budget.
+  const summaryModel: Model<Api> = { ...model, reasoning: false };
+
   // Level 1: use the existing compaction prompt.
   const level1Response = await complete(
-    model,
+    summaryModel,
     {
       systemPrompt: config.compactionPrompt,
       messages: [
@@ -462,18 +466,19 @@ export async function escalatingSummarize(
     .map((block) => block.text)
     .join("");
 
-  if (level1Text.length < inputLength) {
+  if (level1Text.trim().length > 0 && level1Text.length < inputLength) {
     return level1Text;
   }
 
   // Level 2: bullet-point prompt targeting half the input's estimated token count.
   const targetTokens = Math.round(inputLength / 3 / 2);
-  log.info(`[stavrobot] Compaction level 1 failed (summary ${level1Text.length} chars >= input ${inputLength} chars), attempting level 2 bullet-point summary (target: ${targetTokens} tokens).`);
+  const level1NonTextBlocks = level1Response.content.filter((block) => block.type !== "text").length;
+  log.info(`[stavrobot] Compaction level 1 failed (textLength=${level1Text.length}, input=${inputLength}, stopReason=${level1Response.stopReason}, nonTextBlocks=${level1NonTextBlocks}), attempting level 2 bullet-point summary (target: ${targetTokens} tokens).`);
 
   const bulletPrompt = config.compactionBulletPrompt.replace("{target}", String(targetTokens));
 
   const level2Response = await complete(
-    model,
+    summaryModel,
     {
       systemPrompt: bulletPrompt,
       messages: [
@@ -498,12 +503,13 @@ export async function escalatingSummarize(
     .map((block) => block.text)
     .join("");
 
-  if (level2Text.length < inputLength) {
+  if (level2Text.trim().length > 0 && level2Text.length < inputLength) {
     return level2Text;
   }
 
   // Level 3: deterministic truncation — no LLM call.
-  log.info(`[stavrobot] Compaction level 2 failed (summary ${level2Text.length} chars >= input ${inputLength} chars), falling back to level 3 truncation.`);
+  const level2NonTextBlocks = level2Response.content.filter((block) => block.type !== "text").length;
+  log.info(`[stavrobot] Compaction level 2 failed (textLength=${level2Text.length}, input=${inputLength}, stopReason=${level2Response.stopReason}, nonTextBlocks=${level2NonTextBlocks}), falling back to level 3 truncation.`);
 
   const suffix = "\n[truncated due to compaction failure]";
   // Guarantee the result is strictly shorter than the input. If the input is
