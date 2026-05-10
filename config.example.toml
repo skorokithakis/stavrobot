@@ -50,9 +50,10 @@ authFile = "/app/data/auth.json"
 # The public HTTPS URL where this server is reachable (no trailing slash).
 publicHostname = "https://example.com"
 
-# Maximum context size in thousands of tokens. Defaults to the model's full context
-# window. Average token usage is roughly half this value due to the compaction sawtooth.
-# Reduce to lower API costs; increase (up to the model limit) to keep more history.
+# Maximum context size in thousands of tokens. Defaults to 50 (50k tokens), capped at
+# the model's full context window. Average token usage is roughly half this value due
+# to the compaction sawtooth. Reduce to lower API costs; increase (up to the model
+# limit) to keep more history.
 # contextTokensK = 100
 
 # Optional additional instructions appended to the base system prompt.
