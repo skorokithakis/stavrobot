@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { TextContent, ImageContent } from "@mariozechner/pi-ai";
+import type { TextContent, ImageContent } from "@earendil-works/pi-ai";
 import { createManageUploadsTool } from "./upload-tools.js";
 import { TEMP_ATTACHMENTS_DIR } from "./temp-dir.js";
 

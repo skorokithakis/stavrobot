@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type pg from "pg";
-import type { Agent } from "@mariozechner/pi-agent-core";
+import type { Agent } from "@earendil-works/pi-agent-core";
 import type { Config } from "./config.js";
 import { AuthError, invalidateCredentials } from "./auth.js";
 import { AbortError } from "./errors.js";

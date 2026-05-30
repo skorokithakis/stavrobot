@@ -1,6 +1,6 @@
 import fs from "fs";
 import pg from "pg";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { loadPostgresConfig, OWNER_CHANNELS } from "./config.js";
 import { encodeToToon } from "./toon.js";
 import type { OwnerConfig } from "./config.js";

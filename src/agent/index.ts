@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import pg from "pg";
-import { Type, getModel, type Model, type Api, type TextContent, type ImageContent, type AssistantMessage, type ToolCall } from "@mariozechner/pi-ai";
-import { Agent, type AgentTool, type AgentToolResult, type AgentMessage, type ThinkingLevel } from "@mariozechner/pi-agent-core";
+import { Type, getModel, type Model, type Api, type TextContent, type ImageContent, type AssistantMessage, type ToolCall } from "@earendil-works/pi-ai";
+import { Agent, type AgentTool, type AgentToolResult, type AgentMessage, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Config } from "../config.js";
 import type { FileAttachment } from "../uploads.js";
 import { getApiKey } from "../auth.js";

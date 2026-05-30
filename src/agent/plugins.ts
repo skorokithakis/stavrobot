@@ -1,4 +1,4 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { internalFetch } from "../internal-fetch.js";
 import { log } from "../log.js";
 import { toolError } from "../tool-result.js";

@@ -17,7 +17,7 @@ password = "change-me"
 # Authentication: use exactly one of apiKey or authFile.
 # apiKey: a static Anthropic API key.
 # authFile: path to an auth.json with OAuth credentials (for Claude Pro/Max
-#   subscriptions). Generate it by running `npx @mariozechner/pi-coding-agent`,
+#   subscriptions). Generate it by running `npx @earendil-works/pi-coding-agent`,
 #   then using the /login command and choosing "Anthropic".
 # apiKey = "your-api-key-here"
 authFile = "/app/data/auth.json"

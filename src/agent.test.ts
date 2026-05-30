@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, type MockedFunction, beforeEach } from "vitest";
-import type { Agent, AgentMessage, AgentTool, AgentToolResult } from "@mariozechner/pi-agent-core";
-import { complete } from "@mariozechner/pi-ai";
+import type { Agent, AgentMessage, AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import { complete } from "@earendil-works/pi-ai";
 import type { Pool } from "pg";
 import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool, injectAutoSearchBlock, pendingAutoSearchBlocks, handlePrompt, createAgent, escalatingSummarize, selectCompactionCutIndex, isTurnBoundary } from "./agent/index.js";
 import { getApiKey } from "./auth.js";
@@ -69,7 +69,7 @@ vi.mock("./whatsapp-api.js", () => ({
 vi.mock("./email-api.js", () => ({ sendEmail: vi.fn() }));
 vi.mock("./temp-dir.js", () => ({ TEMP_ATTACHMENTS_DIR: "/tmp/attachments" }));
 vi.mock("./errors.js", () => ({ AbortError: class AbortError extends Error {} }));
-vi.mock("@mariozechner/pi-ai", () => ({
+vi.mock("@earendil-works/pi-ai", () => ({
   Type: {
     Object: vi.fn().mockReturnValue({}),
     String: vi.fn().mockReturnValue({}),
@@ -179,7 +179,7 @@ const { FakeAgent } = vi.hoisted(() => {
   return { FakeAgent };
 });
 
-vi.mock("@mariozechner/pi-agent-core", () => ({
+vi.mock("@earendil-works/pi-agent-core", () => ({
   Agent: FakeAgent,
 }));
 

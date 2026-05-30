@@ -17,7 +17,7 @@ vi.mock("fs");
 import fs from "fs";
 import { resolveInterlocutor, seedOwner, seedCronEntries, upsertPage, deletePage, getPageByPath, getPageQueryByPath, readPage, listPageVersions, restorePageVersion, readScratchpad, saveMessage } from "./database.js";
 import type { OwnerConfig } from "./config.js";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 // Seed the owner so getOwnerInterlocutorId() doesn't throw. The mock pool
 // returns a stable owner ID of 42 for all tests in this file.

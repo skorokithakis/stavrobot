@@ -1,8 +1,8 @@
 import http from "http";
 import fs from "fs";
 import path from "path";
-import { getOAuthProvider, getOAuthProviders } from "@mariozechner/pi-ai/oauth";
-import type { OAuthCredentials } from "@mariozechner/pi-ai/oauth";
+import { getOAuthProvider, getOAuthProviders } from "@earendil-works/pi-ai/oauth";
+import type { OAuthCredentials } from "@earendil-works/pi-ai/oauth";
 import type { Config } from "./config.js";
 import { log } from "./log.js";
 import { getBaseStyles } from "./theme.js";
@@ -19,10 +19,13 @@ let pendingPromptReject: ((error: Error) => void) | null = null;
 let loginCancelled = false;
 
 // Module-level state for the active login flow.
-let activeLoginPromise: Promise<void> | null = null;
+let loginFlowActive = false;
 // Monotonically increasing counter so stale disconnect handlers from an old
 // flow cannot accidentally clear state that belongs to a newer flow.
 let loginFlowCounter = 0;
+// Per-flow AbortController so the library's provider.login() can be cancelled
+// on timeout, including for device-code flows that poll in the background.
+let activeFlowController: AbortController | null = null;
 
 // The current SSE response to write events to. Swapped on reconnection without
 // restarting the underlying provider.login() call.
@@ -31,6 +34,7 @@ let activeIsConnected = false;
 
 // Stored so a reconnecting client can be replayed to the same point in the flow.
 let lastAuthEvent: { url: string; instructions: string | undefined } | null = null;
+let lastDeviceCodeInfo: { userCode: string; verificationUri: string; intervalSeconds?: number; expiresInSeconds?: number } | null = null;
 let lastPromptMessage: string | null = null;
 
 // Cleared when the flow completes or times out.
@@ -80,6 +84,8 @@ function buildLoginPageHtml(providerName: string): string {
     #status { margin-top: 20px; color: var(--color-text-secondary); }
     #prompt-section { display: none; }
     #auth-section { display: none; }
+    #device-code-section { display: none; }
+    .code-display { font-size: 1.4em; font-family: monospace; background: var(--color-surface); padding: 12px; border-radius: 6px; border: 1px solid var(--color-border); text-align: center; font-weight: bold; margin-bottom: 16px; }
     ol { color: var(--color-text-secondary); margin-bottom: 16px; padding-left: 20px; }
     li { margin-bottom: 8px; }
   </style>
@@ -95,6 +101,16 @@ function buildLoginPageHtml(providerName: string): string {
       <li>Log in with your account.</li>
       <li>After logging in, you may see an error page. This is normal — just copy the entire URL from your browser's address bar.</li>
       <li>Come back to this tab and paste the URL into the box below.</li>
+    </ol>
+  </div>
+  <div id="device-code-section">
+    <p id="device-code-verification-uri"></p>
+    <p>Enter this code:</p>
+    <div class="code-display" id="device-code-user-code"></div>
+    <ol>
+      <li>Click the link above to open the verification page in a new tab.</li>
+      <li>Enter the code shown above when prompted.</li>
+      <li>Come back to this tab — login will proceed automatically once completed.</li>
     </ol>
   </div>
   <div id="prompt-section">
@@ -121,6 +137,21 @@ function buildLoginPageHtml(providerName: string): string {
       container.appendChild(link);
       const instructionsEl = document.getElementById("auth-instructions");
       instructionsEl.textContent = data.instructions || "";
+    });
+
+    evtSource.addEventListener("device_code", function(event) {
+      const data = JSON.parse(event.data);
+      document.getElementById("status").textContent = "";
+      const section = document.getElementById("device-code-section");
+      section.style.display = "block";
+      const uriContainer = document.getElementById("device-code-verification-uri");
+      const link = document.createElement("a");
+      link.href = data.verificationUri;
+      link.target = "_blank";
+      link.textContent = "Open this link to verify";
+      uriContainer.innerHTML = "";
+      uriContainer.appendChild(link);
+      document.getElementById("device-code-user-code").textContent = data.userCode;
     });
 
     evtSource.addEventListener("prompt", function(event) {
@@ -190,10 +221,15 @@ function clearFlowState(flowId: number): void {
     clearTimeout(flowTimeoutHandle);
     flowTimeoutHandle = null;
   }
-  activeLoginPromise = null;
+  if (activeFlowController !== null) {
+    activeFlowController.abort();
+    activeFlowController = null;
+  }
+  loginFlowActive = false;
   activeResponse = null;
   activeIsConnected = false;
   lastAuthEvent = null;
+  lastDeviceCodeInfo = null;
   lastPromptMessage = null;
   pendingPromptResolver = null;
   pendingPromptReject = null;
@@ -246,7 +282,7 @@ export async function handleLoginEvents(
   // of restarting. This handles page reloads: the browser's EventSource
   // reconnects automatically, and we replay the stored state so the user sees
   // the same auth URL and prompt they saw before the reload.
-  if (activeLoginPromise !== null) {
+  if (loginFlowActive) {
     log.debug("[stavrobot] handleLoginEvents: attaching new SSE connection to existing flow");
 
     activeResponse = response;
@@ -264,6 +300,9 @@ export async function handleLoginEvents(
     if (lastAuthEvent !== null) {
       sendSseEvent(response, "auth", { url: lastAuthEvent.url, instructions: lastAuthEvent.instructions });
     }
+    if (lastDeviceCodeInfo !== null) {
+      sendSseEvent(response, "device_code", lastDeviceCodeInfo);
+    }
     if (lastPromptMessage !== null) {
       if (pendingPromptResolver !== null) {
         // The prompt is still waiting for user input.
@@ -279,6 +318,7 @@ export async function handleLoginEvents(
 
   loginFlowCounter += 1;
   const flowId = loginFlowCounter;
+  loginFlowActive = true;
 
   activeResponse = response;
   activeIsConnected = true;
@@ -292,45 +332,66 @@ export async function handleLoginEvents(
 
   log.debug(`[stavrobot] handleLoginEvents: starting login flow ${flowId} for provider "${config.provider}"`);
 
-  // These are assigned synchronously inside the Promise constructor, so they
-  // are always non-null by the time the try block runs. TypeScript cannot infer
-  // this, so we use non-null assertions at the call sites.
-  let resolveActiveLogin!: () => void;
-  let rejectActiveLogin!: (error: unknown) => void;
-  activeLoginPromise = new Promise<void>((resolve, reject) => {
-    resolveActiveLogin = resolve;
-    rejectActiveLogin = reject;
-  });
+  // Per-flow AbortController so we can cancel provider.login() on timeout.
+  // This is captured in the timeout closure below; clearFlowState resets the
+  // module-level reference and aborts any leftover controller.
+  const flowController = new AbortController();
+  activeFlowController = flowController;
 
   // Cancel the flow if no client reconnects within the timeout window. This
   // prevents the library's callback server from staying open indefinitely when
   // the user abandons the login page.
   flowTimeoutHandle = setTimeout(() => {
-    if (flowId === loginFlowCounter && activeLoginPromise !== null) {
+    if (flowId === loginFlowCounter && loginFlowActive) {
       log.warn(`[stavrobot] handleLoginEvents: flow ${flowId} timed out after ${FLOW_TIMEOUT_MS / 1000}s`);
+      // Abort the library's provider.login() so it stops polling in the
+      // background (device-code) and closes the callback server. This works
+      // regardless of whether a prompt is pending.
+      flowController.abort();
       if (pendingPromptReject !== null) {
         // The library is currently blocked waiting for user input. Rejecting its
         // promise causes it to call cancelWait() and close the callback server.
-        // The resulting throw propagates to the catch block, which calls
-        // rejectActiveLogin and runs clearFlowState via finally.
+        // The resulting throw propagates to the catch block, which sends an
+        // error event, then runs clearFlowState via finally.
         pendingPromptReject(new Error("Login flow timed out"));
       } else {
         // The library hasn't called onPrompt/onManualCodeInput yet (or has
         // already moved past it). Mark the flow cancelled so those callbacks
-        // reject immediately if they are called, and also reject the wrapper
-        // promise directly so the flow doesn't hang.
+        // reject immediately if they are called. flowController.abort() above
+        // has already cancelled provider.login(), which will throw and trigger
+        // cleanup via the catch/finally blocks.
+        //
+        // Known limitation: cancellation here relies on the provider honouring
+        // the abort signal. The built-in device-code providers (GitHub Copilot,
+        // OpenAI Codex) forward it, and prompt-based providers (Anthropic, the
+        // default) settle via pendingPromptReject above. A hypothetical provider
+        // that polls in the background without a pending prompt AND ignores the
+        // signal would not settle provider.login() here, leaving the flow
+        // running until it completes. We do not race/detach provider.login()
+        // because that would leak its callback server — the abort signal is the
+        // library's public cancellation contract and we rely on it.
         loginCancelled = true;
-        rejectActiveLogin(new Error("Login flow timed out"));
       }
     }
   }, FLOW_TIMEOUT_MS);
 
   try {
     const credentials = await provider.login({
+      signal: flowController.signal,
       onAuth: (info) => {
         log.debug("[stavrobot] handleLoginEvents: onAuth called, sending auth event");
         lastAuthEvent = { url: info.url, instructions: info.instructions };
         sendActiveSseEvent("auth", { url: info.url, instructions: info.instructions });
+      },
+      onDeviceCode: (info) => {
+        log.debug("[stavrobot] handleLoginEvents: onDeviceCode called, sending device_code event");
+        lastDeviceCodeInfo = {
+          userCode: info.userCode,
+          verificationUri: info.verificationUri,
+          intervalSeconds: info.intervalSeconds,
+          expiresInSeconds: info.expiresInSeconds,
+        };
+        sendActiveSseEvent("device_code", lastDeviceCodeInfo);
       },
       onPrompt: (prompt) => {
         log.debug("[stavrobot] handleLoginEvents: onPrompt called, sending prompt event");
@@ -367,6 +428,20 @@ export async function handleLoginEvents(
           sendActiveSseEvent("prompt", { message });
         });
       },
+      // This is a single-user bot in a remote browser (SSE) flow. For providers
+      // that offer a choice of login methods, deterministically pick the browser
+      // method, which maps to the onAuth/onPrompt/onManualCodeInput path above.
+      onSelect: async (prompt) => {
+        const options = prompt.options.map((o) => o.id).join(", ");
+        log.debug(`[stavrobot] handleLoginEvents: onSelect called, options: [${options}]`);
+        const browserOption = prompt.options.find((o) => o.id === "browser");
+        if (browserOption !== undefined) {
+          log.debug("[stavrobot] handleLoginEvents: onSelect picking 'browser'");
+          return "browser";
+        }
+        log.debug(`[stavrobot] handleLoginEvents: onSelect no 'browser' option, picking first: ${prompt.options[0].id}`);
+        return prompt.options[0].id;
+      },
     });
 
     log.debug("[stavrobot] handleLoginEvents: login succeeded, saving credentials");
@@ -394,8 +469,6 @@ export async function handleLoginEvents(
       sendSseEvent(activeResponse, "success", {});
       activeResponse.end();
     }
-
-    resolveActiveLogin();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log.error("[stavrobot] handleLoginEvents: login failed:", message);
@@ -403,7 +476,6 @@ export async function handleLoginEvents(
       sendSseEvent(activeResponse, "error_event", { message });
       activeResponse.end();
     }
-    rejectActiveLogin(error);
   } finally {
     // Clean up module-level state so a future flow starts fresh.
     clearFlowState(flowId);

@@ -1,6 +1,6 @@
 import fs from "fs";
-import type { OAuthCredentials } from "@mariozechner/pi-ai/oauth";
-import { getOAuthProvider } from "@mariozechner/pi-ai/oauth";
+import type { OAuthCredentials } from "@earendil-works/pi-ai/oauth";
+import { getOAuthProvider } from "@earendil-works/pi-ai/oauth";
 import type { Config } from "./config.js";
 import { log } from "./log.js";
 

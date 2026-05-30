@@ -1,7 +1,7 @@
 # Architecture
 
 Stavrobot is a single-user LLM-powered assistant (Anthropic Claude by default) exposed
-as an HTTP server. It wraps the `@mariozechner/pi-agent-core` Agent class, persists
+as an HTTP server. It wraps the `@earendil-works/pi-agent-core` Agent class, persists
 conversation history in PostgreSQL, and extends the agent with a plugin system that runs
 arbitrary scripts in isolated Unix user accounts.
 
@@ -34,7 +34,7 @@ External caller (Telegram / Signal / WhatsApp / email / CLI)
   → processQueue  (single-threaded, serialises all turns)
   → resolveTargetAgent  (allowlist + interlocutor lookup)
   → handlePrompt  (src/agent.ts)
-  → Agent.prompt  (@mariozechner/pi-agent-core)
+  → Agent.prompt  (@earendil-works/pi-agent-core)
   → tool callbacks (execute_sql, manage_plugins, run_plugin_tool, …)
   → response string returned to caller
 ```
@@ -267,12 +267,12 @@ provider = "anthropic"          # any KnownProvider string from pi-ai
 model    = "claude-sonnet-4-20250514"
 ```
 
-`getModel(provider, model)` from `@mariozechner/pi-ai` looks up the model in a static
+`getModel(provider, model)` from `@earendil-works/pi-ai` looks up the model in a static
 registry (`models.generated.js`). The registry maps `(provider, modelId)` to a `Model`
 object that carries `api`, `baseUrl`, `contextWindow`, `maxTokens`, and optional `compat`
 overrides.
 
-### Supported providers (from pi-ai v0.60.0 `KnownProvider` type)
+### Supported providers (from pi-ai `KnownProvider` type)
 
 `amazon-bedrock`, `anthropic`, `google`, `google-gemini-cli`, `google-antigravity`,
 `google-vertex`, `openai`, `azure-openai-responses`, `openai-codex`, `github-copilot`,
@@ -300,7 +300,7 @@ Exactly one of these must be set in `config.toml`:
 - `apiKey = "..."` — static API key, passed directly to the provider.
 - `authFile = "/path/to/auth.json"` — OAuth credentials file (for Claude Pro/Max
   subscriptions). The file is read and refreshed by `src/auth.ts` using
-  `getOAuthProvider(config.provider)` from `@mariozechner/pi-ai/oauth`.
+  `getOAuthProvider(config.provider)` from `@earendil-works/pi-ai/oauth`.
 
 The `getApiKey(config)` function in `src/auth.ts` resolves whichever is configured and
 returns a plain string. This string is passed to the `Agent` constructor as

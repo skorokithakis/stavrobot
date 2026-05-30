@@ -232,7 +232,7 @@ changes.  This file is the plugin authoring guide used by the coder agent.
 ## Context7
 
 - The LLM agent library used in this project is from the Pi mono repo. The Context7
-  library ID is `/badlogic/pi-mono`.
+  library ID is `/earendil-works/pi`.
 
 ## Deployment model
 

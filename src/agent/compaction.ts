@@ -1,7 +1,7 @@
-import { complete, type TextContent, type ImageContent, type ThinkingContent, type ToolCall } from "@mariozechner/pi-ai";
-import type { Model, Api } from "@mariozechner/pi-ai";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import { Agent } from "@mariozechner/pi-agent-core";
+import { complete, type TextContent, type ImageContent, type ThinkingContent, type ToolCall } from "@earendil-works/pi-ai";
+import type { Model, Api } from "@earendil-works/pi-ai";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { Agent } from "@earendil-works/pi-agent-core";
 import type { Config } from "../config.js";
 import type { SearchResults } from "../search.js";
 import { extractText } from "../embeddings.js";
