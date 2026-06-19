@@ -73,7 +73,7 @@ describe("createRunPluginToolTool", () => {
     );
     const result = await tool.execute("call-2", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
     const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe('The run of tool "mytool" (plugin "myplugin") returned:\n```\nkey: value\n```');
+    expect(text).toBe('The run of tool "mytool" (plugin "myplugin") returned:\n```\nGCF profile=generic\nkey=value\n\n```');
   });
 
   it("formats a failed sync result with error message", async () => {
@@ -431,7 +431,7 @@ describe("createManagePluginsTool", () => {
       mockFetch(200, JSON.stringify({ name: "myplugin" }));
       const result = await tool.execute("call-4", { action: "install", url: "https://example.com/plugin.git" });
       const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("name: myplugin");
+      expect(text).toBe("GCF profile=generic\nname=myplugin\n");
     });
 
     it("returns an error when url is missing", async () => {

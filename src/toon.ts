@@ -1,5 +1,5 @@
-import { encode } from "@toon-format/toon";
+import { encodeGeneric } from "@blackwell-systems/gcf";
 
 export function encodeToToon(value: unknown): string {
-  return encode(value, { indent: 2, delimiter: "," });
+  return encodeGeneric(value);
 }

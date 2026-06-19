@@ -15,7 +15,7 @@
     "@iarna/toml": "^2.2.5",
     "@earendil-works/pi-agent-core": "^0.78.0",
     "@earendil-works/pi-ai": "^0.78.0",
-    "@toon-format/toon": "^2.1.0",
+    "@blackwell-systems/gcf": "^2.1.2",
     "@types/qrcode-terminal": "^0.12.2",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "busboy": "^1.6.0",
