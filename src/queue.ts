@@ -251,6 +251,41 @@ async function sendErrorToSource(
   }
 }
 
+function escapeTelegramHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+async function sendTextResponseToSource(
+  source: string | undefined,
+  sender: string | undefined,
+  config: Config,
+  message: string,
+): Promise<void> {
+  const text = message.trim();
+  if (text === "" || sender === undefined) {
+    return;
+  }
+
+  if (source === "signal") {
+    const sendResult = await sendSignalMessage(sender, text);
+    if (sendResult === "rate_limited") {
+      log.warn("[stavrobot] Failed to auto-send Signal response: rate limited");
+    }
+  } else if (source === "telegram") {
+    if (config.telegram === undefined) {
+      log.warn("[stavrobot] Failed to auto-send Telegram response: Telegram is not configured.");
+      return;
+    }
+    log.info(`[stavrobot] message out: telegram - ${sender} - ${text.slice(0, 200)}`);
+    await sendTelegramMessage(config.telegram.botToken, sender, escapeTelegramHtml(text));
+  } else if (source === "whatsapp") {
+    await sendWhatsappTextMessage(sender, text);
+  }
+}
+
 async function processQueue(): Promise<void> {
   processing = true;
   while (queue.length > 0) {
@@ -266,6 +301,7 @@ async function processQueue(): Promise<void> {
         continue;
       }
       const response = await handlePrompt(queueAgent!, queuePool!, entry.message, queueConfig!, routing, entry.source, entry.attachments, entry.retries > 0);
+      await sendTextResponseToSource(entry.source, entry.sender, queueConfig!, response);
       entry.resolve(response);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

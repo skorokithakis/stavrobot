@@ -210,6 +210,44 @@ describe("processQueue non-retryable 400 error handling", () => {
   });
 });
 
+describe("successful external text replies", () => {
+  it("auto-sends a successful text response back to Telegram", async () => {
+    const configWithTelegram = { ...stubConfig, telegram: { botToken: "bot-token" } } as unknown as Config;
+    initializeQueue(stubAgent, stubPool, configWithTelegram);
+    mockIsOwnerIdentity.mockReturnValue(true);
+    mockHandlePrompt.mockResolvedValueOnce("Hello <Diego> & welcome");
+
+    const result = await enqueueMessage("hi", "telegram", "987654321");
+
+    expect(result).toBe("Hello <Diego> & welcome");
+    expect(mockSendTelegramMessage).toHaveBeenCalledOnce();
+    expect(mockSendTelegramMessage).toHaveBeenCalledWith("bot-token", "987654321", "Hello &lt;Diego&gt; &amp; welcome");
+  });
+
+  it("does not auto-send empty text responses", async () => {
+    const configWithTelegram = { ...stubConfig, telegram: { botToken: "bot-token" } } as unknown as Config;
+    initializeQueue(stubAgent, stubPool, configWithTelegram);
+    mockIsOwnerIdentity.mockReturnValue(true);
+    mockHandlePrompt.mockResolvedValueOnce("   ");
+
+    const result = await enqueueMessage("hi", "telegram", "987654321");
+
+    expect(result).toBe("   ");
+    expect(mockSendTelegramMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-send CLI text responses", async () => {
+    mockHandlePrompt.mockResolvedValueOnce("Hello");
+
+    const result = await enqueueMessage("hi");
+
+    expect(result).toBe("Hello");
+    expect(mockSendTelegramMessage).not.toHaveBeenCalled();
+    expect(mockSendSignalMessage).not.toHaveBeenCalled();
+    expect(mockSendWhatsappTextMessage).not.toHaveBeenCalled();
+  });
+});
+
 describe("parseProviderErrorMessage", () => {
   it("extracts the message field from a 400 provider error JSON", () => {
     const raw = 'Agent error: "400 {"type":"error","error":{"type":"invalid_request_error","message":"orphaned tool_result"}}"';
