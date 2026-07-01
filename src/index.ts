@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "crypto";
 import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -82,7 +83,12 @@ export function checkBasicAuth(request: http.IncomingMessage, password: string):
   // The Basic auth format is "username:password". We ignore the username.
   const colonIndex = decoded.indexOf(":");
   const providedPassword = colonIndex === -1 ? decoded : decoded.slice(colonIndex + 1);
-  return providedPassword === password;
+  // Compare sha256 digests rather than the raw passwords so the lengths passed to
+  // timingSafeEqual are always equal (it throws on length mismatch) and the
+  // comparison runs in constant time to avoid timing-based password recovery.
+  const providedDigest = createHash("sha256").update(providedPassword).digest();
+  const expectedDigest = createHash("sha256").update(password).digest();
+  return timingSafeEqual(providedDigest, expectedDigest);
 }
 
 export async function readRequestBody(

@@ -2,7 +2,7 @@ import type pg from "pg";
 import type { Agent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Config } from "./config.js";
 import { handlePrompt, formatUserMessage } from "./agent/index.js";
-import { AbortError } from "./errors.js";
+import { AbortError, TurnProgressPersistedError } from "./errors.js";
 import { AuthError, invalidateCredentials } from "./auth.js";
 import { isInAllowlist } from "./allowlist.js";
 import { sendSignalMessage } from "./signal.js";
@@ -277,6 +277,24 @@ async function processQueue(): Promise<void> {
         const loginMessage = `Authentication required. Visit ${queueConfig!.publicHostname}/login to log in.`;
         await sendErrorToSource(entry.source, entry.sender, queueConfig!, loginMessage);
         entry.resolve(loginMessage);
+      } else if (error instanceof TurnProgressPersistedError) {
+        // The turn already persisted assistant/toolResult messages before
+        // failing. Retrying would reload them and replay every tool side
+        // effect, so treat this as terminal like retry exhaustion. A wrapped
+        // 401 is handled the same as the plain 401 branch below: invalidate the
+        // stale credentials and prompt re-login, without retrying.
+        if (errorMessage.includes("401 ")) {
+          log.error(`[stavrobot] Auth failure (401) after progress was persisted, not retrying: ${errorMessage}`);
+          invalidateCredentials(queueConfig!);
+          const loginMessage = `Authentication required. Visit ${queueConfig!.publicHostname}/login to log in.`;
+          await sendErrorToSource(entry.source, entry.sender, queueConfig!, loginMessage);
+          entry.resolve(loginMessage);
+        } else {
+          log.error(`[stavrobot] Turn failed after progress was persisted, not retrying: ${errorMessage}`);
+          const userMessage = `Something went wrong: ${parseProviderErrorMessage(errorMessage)}`;
+          await sendErrorToSource(entry.source, entry.sender, queueConfig!, userMessage);
+          entry.resolve(userMessage);
+        }
       } else if (errorMessage.includes("401 ")) {
         log.error(`[stavrobot] Auth failure (401), not retrying: ${errorMessage}`);
         invalidateCredentials(queueConfig!);

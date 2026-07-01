@@ -47,6 +47,8 @@ services:
 
   python-runner:
     build: ./python-runner
+    mem_limit: 1g
+    pids_limit: 256
     environment:
       TZ: ${TZ:-UTC}
     restart: unless-stopped
@@ -55,11 +57,11 @@ services:
 
   plugin-runner:
     build: ./plugin-runner
+    mem_limit: 1g
+    pids_limit: 256
     environment:
       TZ: ${TZ:-UTC}
     restart: unless-stopped
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
       - ./data/main:/root/config:ro
       - ./data/plugins:/plugins
@@ -68,6 +70,8 @@ services:
   coder:
     build: ./coder
     profiles: ["coder"]
+    mem_limit: 4g
+    pids_limit: 512
     environment:
       TZ: ${TZ:-UTC}
     restart: unless-stopped

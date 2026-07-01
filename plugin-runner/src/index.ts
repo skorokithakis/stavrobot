@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "crypto";
 import http from "http";
 import fs from "fs";
 import path from "path";
@@ -421,11 +422,16 @@ async function handleRequest(
 
   const authHeader = request.headers["authorization"];
   const expectedCredentials = Buffer.from(`:${appPassword}`).toString("base64");
-  if (
-    typeof authHeader !== "string" ||
-    !authHeader.startsWith("Basic ") ||
-    authHeader.slice("Basic ".length) !== expectedCredentials
-  ) {
+  const providedCredentials =
+    typeof authHeader === "string" && authHeader.startsWith("Basic ")
+      ? authHeader.slice("Basic ".length)
+      : "";
+  // Compare sha256 digests so the buffers passed to timingSafeEqual are always
+  // the same length (it throws on length mismatch) and the comparison runs in
+  // constant time to avoid timing-based credential recovery.
+  const providedDigest = createHash("sha256").update(providedCredentials).digest();
+  const expectedDigest = createHash("sha256").update(expectedCredentials).digest();
+  if (!timingSafeEqual(providedDigest, expectedDigest)) {
     response.writeHead(401, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ error: "Unauthorized" }));
     return;

@@ -33,7 +33,7 @@ External caller (Telegram / Signal / WhatsApp / email / CLI)
   → enqueueMessage  (src/queue.ts)
   → processQueue  (single-threaded, serialises all turns)
   → resolveTargetAgent  (allowlist + interlocutor lookup)
-  → handlePrompt  (src/agent.ts)
+  → handlePrompt  (src/agent/index.ts)
   → Agent.prompt  (@earendil-works/pi-agent-core)
   → tool callbacks (execute_sql, manage_plugins, run_plugin_tool, …)
   → response string returned to caller
@@ -44,7 +44,20 @@ turn via `Agent.steer()` rather than queued. Non-owner messages are always queue
 
 The queue is a plain in-memory array (`queue: QueueEntry[]`) with a single `processing`
 boolean flag. It is strictly single-threaded — only one `handlePrompt` call runs at a
-time. Retries: up to 3 attempts with a 30-second delay between them.
+time. `handlePrompt` additionally enforces this with a module-level `handlePromptInProgress`
+flag that throws if re-entered, turning any future queue re-entrancy bug into a loud
+failure instead of silent state corruption.
+
+Retries: up to 3 attempts with a 30-second delay between them. A turn that fails *before*
+any message beyond the initial user row is persisted is retried normally. A turn that
+fails *after* the subscribe callback has persisted an assistant or toolResult message
+throws `TurnProgressPersistedError` from `handlePrompt`; the queue treats this as
+terminal (no retry) because reloading the persisted messages would replay every tool
+side effect that already ran (duplicate outbound messages, duplicate external calls).
+The same applies to other non-retryable failures: `AbortError`, `AuthError`, and
+HTTP 400/401 provider errors bypass the retry loop and resolve with a user-facing
+message. Only 400 and 401 are special-cased; other 4xx errors (e.g. 429 rate
+limits, 403 forbidden) follow the normal retry path.
 
 ---
 
@@ -75,13 +88,19 @@ is sent before the init script runs. The source is `plugin:<plugin>/init`.
 All three callback paths re-enter the queue via `POST /chat` with Basic Auth using the
 app password. The `source` field routes them to the main agent's conversation.
 
+Each callback path (`postCallback` in the plugin-runner, `post_result` in the coder)
+retries the POST with growing backoff (5s, 15s, 30s, 60s, 120s between attempts) on
+network errors and non-2xx responses, so a brief app restart does not silently lose an
+async result. There is no persistent outbox: if every retry fails, the result is logged
+as an error and discarded.
+
 ---
 
 ## Agent setup (src/agent/index.ts)
 
 The single `Agent` instance is created in `createAgent()` and shared across all
-conversations. Per-turn, `handlePrompt()` swaps the conversation history via
-`agent.replaceMessages()` and sets the system prompt via `agent.setSystemPrompt()`.
+conversations. Per-turn, `handlePrompt()` swaps the conversation history and system
+prompt by assigning `agent.state.messages` and `agent.state.systemPrompt` directly.
 
 ### Main agent identity
 
@@ -120,7 +139,7 @@ every `Agent.prompt()` call.
 
 ---
 
-## Built-in tools (src/agent.ts)
+## Built-in tools (src/agent/index.ts)
 
 | Tool name | Always present | Conditional |
 |---|---|---|

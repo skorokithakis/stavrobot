@@ -3,7 +3,7 @@ import type pg from "pg";
 import type { Agent } from "@earendil-works/pi-agent-core";
 import type { Config } from "./config.js";
 import { AuthError, invalidateCredentials } from "./auth.js";
-import { AbortError } from "./errors.js";
+import { AbortError, TurnProgressPersistedError } from "./errors.js";
 import type { RoutingResult } from "./queue.js";
 import { parseProviderErrorMessage } from "./queue.js";
 
@@ -161,6 +161,56 @@ describe("processQueue non-retryable 400 error handling", () => {
   it("resolves with the auth message, invalidates credentials, and does not retry on a 401 API error", async () => {
     mockHandlePrompt.mockRejectedValueOnce(
       new Error('Agent error: "401 {"type":"error","error":{"type":"authentication_error","message":"Invalid authentication credentials"}}"'),
+    );
+
+    const result = await enqueueMessage("hello");
+
+    expect(result).toContain("Authentication required");
+    expect(mockHandlePrompt).toHaveBeenCalledTimes(1);
+    expect(mockInvalidateCredentials).toHaveBeenCalledOnce();
+    expect(mockInvalidateCredentials).toHaveBeenCalledWith(stubConfig);
+  });
+
+  it("does not retry and resolves with the parsed message when handlePrompt throws TurnProgressPersistedError", async () => {
+    // Simulate a turn that already persisted tool results before failing: handlePrompt
+    // signals this by throwing TurnProgressPersistedError so the queue cannot retry.
+    mockHandlePrompt.mockRejectedValueOnce(
+      new TurnProgressPersistedError(
+        'Agent error: "500 {"type":"error","error":{"type":"internal_error","message":"provider overloaded"}}"',
+      ),
+    );
+
+    const result = await enqueueMessage("hello");
+
+    expect(result).toBe("Something went wrong: provider overloaded");
+    // Exactly one attempt — the persisted-progress guard suppresses the retry loop.
+    expect(mockHandlePrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends the TurnProgressPersistedError message to the originating channel", async () => {
+    // Use owner identity so the message bypasses the allowlist gate and reaches handlePrompt.
+    mockIsOwnerIdentity.mockReturnValue(true);
+    mockHandlePrompt.mockRejectedValueOnce(
+      new TurnProgressPersistedError(
+        'Agent error: "500 {"type":"error","error":{"type":"internal_error","message":"provider overloaded"}}"',
+      ),
+    );
+
+    await enqueueMessage("hello", "signal", "+1234567890");
+
+    expect(mockSendSignalMessage).toHaveBeenCalledOnce();
+    expect(mockSendSignalMessage).toHaveBeenCalledWith("+1234567890", "Something went wrong: provider overloaded");
+  });
+
+  it("invalidates credentials and resolves with the login message when TurnProgressPersistedError wraps a 401", async () => {
+    // A mid-turn 401 that only surfaces after progress was persisted is wrapped
+    // in TurnProgressPersistedError. The queue must still detect the 401 and take
+    // the invalidate + login path (rather than a generic failure message), and
+    // must not retry.
+    mockHandlePrompt.mockRejectedValueOnce(
+      new TurnProgressPersistedError(
+        'Agent error: "401 {"type":"error","error":{"type":"authentication_error","message":"Invalid authentication credentials"}}"',
+      ),
     );
 
     const result = await enqueueMessage("hello");

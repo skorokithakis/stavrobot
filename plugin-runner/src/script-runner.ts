@@ -7,6 +7,13 @@ export const ASYNC_TIMEOUT_MS = 300_000; // 5 minutes for async scripts.
 const APP_INTERNAL_URL = "http://app:3000/chat";
 export const MAX_FILE_TRANSPORT_BYTES = 25 * 1024 * 1024; // 25MB
 
+// Delays before each retry of postCallback, in milliseconds. The initial attempt
+// is immediate and each entry here is one additional retry, so the whole array
+// is consumed. The app may be briefly unreachable during a restart and there is
+// no persistent outbox, so without these retries an async plugin tool result
+// would be silently lost forever.
+const CALLBACK_RETRY_DELAYS_MS = [5_000, 15_000, 30_000, 60_000, 120_000];
+
 // The plugins directory is needed to derive the plugin name from a cwd path.
 const PLUGINS_DIR = "/plugins";
 
@@ -82,28 +89,54 @@ function mimeTypeFromFilename(filename: string): string {
 
 export async function postCallback(source: string, message: string, files?: TransportedFile[]): Promise<void> {
   console.log(`[stavrobot-plugin-runner] Posting callback from "${source}" to ${APP_INTERNAL_URL}`);
-  try {
-    const body: Record<string, unknown> = { source, message };
-    if (files !== undefined && files.length > 0) {
-      body.files = files.map((file) => ({
-        data: file.data,
-        filename: file.filename,
-        mimeType: mimeTypeFromFilename(file.filename),
-      }));
+
+  const body: Record<string, unknown> = { source, message };
+  if (files !== undefined && files.length > 0) {
+    body.files = files.map((file) => ({
+      data: file.data,
+      filename: file.filename,
+      mimeType: mimeTypeFromFilename(file.filename),
+    }));
+  }
+  const credentials = Buffer.from(`:${appPassword}`).toString("base64");
+
+  // postCallback is the boundary between the plugin-runner and the app: there is
+  // no caller that can recover from a delivery failure, so we retry here on any
+  // network error or non-2xx response before logging a final give-up error.
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    try {
+      const response = await fetch(APP_INTERNAL_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Basic ${credentials}`,
+        },
+        body: JSON.stringify(body),
+      });
+      if (response.ok) {
+        console.log(`[stavrobot-plugin-runner] Callback posted (attempt ${attempt}), status: ${response.status}`);
+        return;
+      }
+      console.error(
+        `[stavrobot-plugin-runner] Callback from "${source}" got non-2xx status ${response.status} on attempt ${attempt}`,
+      );
+    } catch (error) {
+      const message_ = error instanceof Error ? error.message : String(error);
+      console.error(`[stavrobot-plugin-runner] Callback from "${source}" failed on attempt ${attempt}: ${message_}`);
     }
-    const credentials = Buffer.from(`:${appPassword}`).toString("base64");
-    const response = await fetch(APP_INTERNAL_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Basic ${credentials}`,
-      },
-      body: JSON.stringify(body),
-    });
-    console.log(`[stavrobot-plugin-runner] Callback posted, status: ${response.status}`);
-  } catch (error) {
-    const message_ = error instanceof Error ? error.message : String(error);
-    console.error(`[stavrobot-plugin-runner] Failed to post callback from "${source}": ${message_}`);
+
+    const delayIndex = attempt - 1;
+    if (delayIndex >= CALLBACK_RETRY_DELAYS_MS.length) {
+      console.error(
+        `[stavrobot-plugin-runner] Giving up on callback from "${source}" after ${attempt} attempts`,
+      );
+      return;
+    }
+    const delayMs = CALLBACK_RETRY_DELAYS_MS[delayIndex];
+    console.log(`[stavrobot-plugin-runner] Retrying callback from "${source}" in ${delayMs / 1000}s`);
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
 }
 

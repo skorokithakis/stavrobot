@@ -1,13 +1,16 @@
 """HTTP server that receives coding task requests and spawns claude -p as a subprocess."""
 
 import base64
+import hmac
 import http.server
 import json
 import os
 import re
 import shutil
 import subprocess
+import time
 import tomllib
+import urllib.error
 import urllib.request
 from threading import Thread
 from http import HTTPStatus
@@ -21,6 +24,13 @@ TASK_TIMEOUT_SECONDS = 600
 MAX_USERNAME_LENGTH = 32
 CODER_CREDENTIALS_PATH = "/home/coder/.claude/.credentials.json"
 PLUGIN_NAME_RE = re.compile(r"^[a-z0-9-]+$")
+
+# Delays before each retry of post_result, in seconds. The initial attempt is
+# immediate and each entry here is one additional retry, so the whole array is
+# consumed. The app may be briefly unreachable during a restart and there is no
+# persistent outbox, so without these retries a coding task result would be
+# silently lost forever.
+CALLBACK_RETRY_DELAYS_SECONDS = [5, 15, 30, 60, 120]
 
 
 def load_config() -> tuple[str, str, str | None, str | None]:
@@ -136,7 +146,13 @@ def make_auth_header() -> str:
 
 
 def post_result(message: str) -> None:
-    """Post the coding task result back to the main app's internal /chat endpoint."""
+    """Post the coding task result back to the main app's internal /chat endpoint.
+
+    Retries on network errors and non-2xx responses with growing backoff. The
+    caller (run_coding_task) runs in a daemon thread and its outer except would
+    swallow any URLError that escaped here, so retries must live inside this
+    function for the result to actually be delivered.
+    """
     body = json.dumps({
         "message": message,
         "source": "coder",
@@ -148,14 +164,32 @@ def post_result(message: str) -> None:
         "Authorization": make_auth_header(),
     }
 
-    request = urllib.request.Request(
-        APP_CHAT_URL,
-        data=body,
-        headers=headers,
-        method="POST",
-    )
-    with urllib.request.urlopen(request) as response:
-        print(f"[stavrobot-coder] Result posted, HTTP {response.status}")
+    attempt = 0
+    while True:
+        attempt += 1
+        request = urllib.request.Request(
+            APP_CHAT_URL,
+            data=body,
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request) as response:
+                status = response.status
+            print(f"[stavrobot-coder] Result posted (attempt {attempt}), HTTP {status}")
+            return
+        except urllib.error.HTTPError as error:
+            print(f"[stavrobot-coder] Result got HTTP {error.code} on attempt {attempt}: {error.reason}")
+        except urllib.error.URLError as error:
+            print(f"[stavrobot-coder] Result post failed on attempt {attempt}: {error.reason}")
+
+        delay_index = attempt - 1
+        if delay_index >= len(CALLBACK_RETRY_DELAYS_SECONDS):
+            print(f"[stavrobot-coder] Giving up on result post after {attempt} attempts")
+            return
+        delay = CALLBACK_RETRY_DELAYS_SECONDS[delay_index]
+        print(f"[stavrobot-coder] Retrying result post in {delay}s")
+        time.sleep(delay)
 
 
 def run_coding_task(task_id: str, message: str, plugin: str) -> None:
@@ -291,7 +325,9 @@ def check_auth(auth_header: str | None) -> bool:
         return False
     # The format is ":password" (empty username).
     _, _, provided_password = decoded.partition(":")
-    return provided_password == PASSWORD
+    # compare_digest raises TypeError on non-ASCII str values, so compare the
+    # UTF-8 encoded bytes directly.
+    return hmac.compare_digest(provided_password.encode("utf-8"), PASSWORD.encode("utf-8"))
 
 
 class RequestHandler(http.server.BaseHTTPRequestHandler):

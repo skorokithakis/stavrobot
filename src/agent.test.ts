@@ -4,9 +4,10 @@ import { complete } from "@earendil-works/pi-ai";
 import type { Pool } from "pg";
 import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool, injectAutoSearchBlock, pendingAutoSearchBlocks, handlePrompt, createAgent, escalatingSummarize, selectCompactionCutIndex, isTurnBoundary } from "./agent/index.js";
 import { getApiKey } from "./auth.js";
-import { loadMessages, loadAllMemories, loadAllScratchpadTitles, getMainAgentId, saveMessage } from "./database.js";
+import { loadMessages, loadAllMemories, loadAllScratchpadTitles, getMainAgentId, saveMessage, loadAgent } from "./database.js";
 import { runSearch } from "./search.js";
 import { internalFetch } from "./internal-fetch.js";
+import { TurnProgressPersistedError } from "./errors.js";
 
 // Mock all heavy dependencies so the module loads without real infrastructure.
 vi.mock("./database.js", () => ({
@@ -40,7 +41,15 @@ vi.mock("./log.js", () => ({
 }));
 vi.mock("./allowlist.js", () => ({ isInAllowlist: vi.fn() }));
 vi.mock("./uploads.js", () => ({}));
-vi.mock("./auth.js", () => ({ getApiKey: vi.fn() }));
+vi.mock("./auth.js", () => ({
+  getApiKey: vi.fn(),
+  AuthError: class AuthError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = "AuthError";
+    }
+  },
+}));
 vi.mock("./queue.js", () => ({}));
 vi.mock("./scheduler.js", () => ({ reloadScheduler: vi.fn() }));
 vi.mock("./plugin-tools.js", () => ({
@@ -68,7 +77,20 @@ vi.mock("./whatsapp-api.js", () => ({
 }));
 vi.mock("./email-api.js", () => ({ sendEmail: vi.fn() }));
 vi.mock("./temp-dir.js", () => ({ TEMP_ATTACHMENTS_DIR: "/tmp/attachments" }));
-vi.mock("./errors.js", () => ({ AbortError: class AbortError extends Error {} }));
+vi.mock("./errors.js", () => ({
+  AbortError: class AbortError extends Error {
+    constructor() {
+      super("Agent aborted.");
+      this.name = "AbortError";
+    }
+  },
+  TurnProgressPersistedError: class TurnProgressPersistedError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = "TurnProgressPersistedError";
+    }
+  },
+}));
 vi.mock("@earendil-works/pi-ai", () => ({
   Type: {
     Object: vi.fn().mockReturnValue({}),
@@ -108,31 +130,45 @@ const { FakeAgent } = vi.hoisted(() => {
   class FakeAgent {
     private transformContextFn?: (messages: unknown[]) => Promise<unknown[]>;
     public capturedContextMessages: unknown[] | undefined;
-    public messages: unknown[] = [];
-    public error: unknown = undefined;
-    public tools: unknown[] = [];
+    // State is a single mutable object so assignments from the code under test
+    // (agent.state.tools = ..., agent.state.messages = ...) persist, mirroring
+    // the real Agent. A getter returning a fresh object each call would
+    // silently swallow such mutations and hide regressions like a filtered tool
+    // list leaking into the next turn.
+    public state: {
+      tools: unknown[];
+      messages: unknown[];
+      systemPrompt: string;
+      model: { contextWindow: number };
+      errorMessage: string | undefined;
+    };
     // Set this before calling prompt() to make it throw.
     public promptError: Error | undefined = undefined;
+    // Events emitted before promptError is thrown. Lets a test model a turn
+    // that streams an assistant message_end (persisting progress) and then
+    // fails mid-stream.
+    public eventsBeforeError: unknown[] = [];
     // Steered messages to emit as message_end events during prompt().
     public steeringMessages: unknown[] = [];
     private listeners: Array<(e: unknown) => void> = [];
 
-    constructor(opts?: { transformContext?: (messages: unknown[]) => Promise<unknown[]> }) {
+    constructor(opts?: {
+      initialState?: {
+        tools?: unknown[];
+        messages?: unknown[];
+        systemPrompt?: string;
+        model?: unknown;
+      };
+      transformContext?: (messages: unknown[]) => Promise<unknown[]>;
+    }) {
       this.transformContextFn = opts?.transformContext;
-    }
-
-    get state(): { tools: unknown[]; messages: unknown[]; error: unknown } {
-      return { tools: this.tools, messages: this.messages, error: this.error };
-    }
-
-    replaceMessages(ms: unknown[]): void {
-      this.messages = ms;
-    }
-
-    setSystemPrompt(_v: string): void {}
-
-    setTools(t: unknown[]): void {
-      this.tools = t;
+      this.state = {
+        tools: opts?.initialState?.tools ?? [],
+        messages: opts?.initialState?.messages ?? [],
+        systemPrompt: opts?.initialState?.systemPrompt ?? "",
+        model: (opts?.initialState?.model as { contextWindow: number }) ?? { contextWindow: 200000 },
+        errorMessage: undefined,
+      };
     }
 
     subscribe(fn: (e: unknown) => void): () => void {
@@ -148,10 +184,11 @@ const { FakeAgent } = vi.hoisted(() => {
       }
     }
 
-    appendMessage(_m: unknown): void {}
-
     async prompt(message: unknown): Promise<void> {
       if (this.promptError !== undefined) {
+        for (const event of this.eventsBeforeError) {
+          this.emit(event);
+        }
         throw this.promptError;
       }
       if (this.transformContextFn !== undefined) {
@@ -161,7 +198,7 @@ const { FakeAgent } = vi.hoisted(() => {
         const userMessage = typeof message === "string"
           ? { role: "user", content: message, timestamp: Date.now() }
           : message;
-        this.capturedContextMessages = await this.transformContextFn([...this.messages, userMessage]);
+        this.capturedContextMessages = await this.transformContextFn([...this.state.messages, userMessage]);
       }
       // Fire message_end for the initial prompt message (mirrors the real agent-loop).
       const promptMessage = typeof message === "string"
@@ -1522,6 +1559,172 @@ describe("handlePrompt — user message persistence", () => {
     // Exactly one user save: the pre-prompt save. The message_end for the initial
     // prompt must be skipped by the subscriber.
     expect(userSaves).toHaveLength(1);
+  });
+});
+
+describe("handlePrompt — TurnProgressPersistedError wrapping", () => {
+  const mockSaveMessage = vi.mocked(saveMessage);
+
+  function setupCommonMocks(): void {
+    vi.clearAllMocks();
+    vi.mocked(loadMessages).mockResolvedValue([]);
+    vi.mocked(loadAllMemories).mockResolvedValue([]);
+    vi.mocked(loadAllScratchpadTitles).mockResolvedValue([]);
+    vi.mocked(getMainAgentId).mockReturnValue(1);
+    vi.mocked(internalFetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ plugins: [] }),
+    } as unknown as Response);
+    vi.mocked(getApiKey).mockResolvedValue("test-key");
+    vi.mocked(runSearch).mockResolvedValue({ tableResults: [], messages: [] });
+    mockSaveMessage.mockResolvedValue(42);
+  }
+
+  it("wraps a prompt() throw in TurnProgressPersistedError when an assistant message was already persisted", async () => {
+    setupCommonMocks();
+
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+
+    // Model a turn that streams an assistant message_end (which the subscribe
+    // callback persists, setting progressPersistedThisTurn) and then throws.
+    const assistantMessageEnd = {
+      type: "message_end",
+      message: assistantMessage([{ type: "text", text: "partial response" }]),
+    };
+    fakeAgent.eventsBeforeError = [assistantMessageEnd];
+    fakeAgent.promptError = new Error("stream failed mid-turn");
+
+    let caughtError: unknown;
+    try {
+      await handlePrompt(agent, makePool(), "hello", minimalConfig, mainAgentRouting);
+    } catch (error) {
+      caughtError = error;
+    }
+
+    expect(caughtError).toBeInstanceOf(TurnProgressPersistedError);
+    // The wrapped error preserves the original message so the queue can surface it.
+    expect((caughtError as Error).message).toBe("stream failed mid-turn");
+    // The assistant message must have been persisted before the throw.
+    const assistantSaves = mockSaveMessage.mock.calls.filter(
+      (call) => (call[1] as { role: string }).role === "assistant",
+    );
+    expect(assistantSaves).toHaveLength(1);
+  });
+
+  it("does not wrap a prompt() throw when no progress was persisted", async () => {
+    setupCommonMocks();
+
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+
+    // prompt() throws before any assistant/toolResult message_end fires, so no
+    // progress was persisted and the error must escape unwrapped (retryable).
+    fakeAgent.eventsBeforeError = [];
+    fakeAgent.promptError = new Error("model unreachable");
+
+    let caughtError: unknown;
+    try {
+      await handlePrompt(agent, makePool(), "hello", minimalConfig, mainAgentRouting);
+    } catch (error) {
+      caughtError = error;
+    }
+
+    expect(caughtError).not.toBeInstanceOf(TurnProgressPersistedError);
+    expect((caughtError as Error).message).toBe("model unreachable");
+  });
+});
+
+describe("handlePrompt — subagent tool restoration", () => {
+  const mockLoadAgent = vi.mocked(loadAgent);
+
+  function setupCommonMocks(): void {
+    vi.clearAllMocks();
+    vi.mocked(loadMessages).mockResolvedValue([]);
+    vi.mocked(loadAllMemories).mockResolvedValue([]);
+    vi.mocked(loadAllScratchpadTitles).mockResolvedValue([]);
+    vi.mocked(getMainAgentId).mockReturnValue(1);
+    vi.mocked(internalFetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ plugins: [] }),
+    } as unknown as Response);
+    vi.mocked(runSearch).mockResolvedValue({ tableResults: [], messages: [] });
+    vi.mocked(saveMessage).mockResolvedValue(42);
+  }
+
+  it("restores the full tool list when getApiKey throws after the subagent swap", async () => {
+    setupCommonMocks();
+
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+    const fullTools = fakeAgent.state.tools;
+    // Sanity check: createAgent populated a real, multi-tool list.
+    expect(fullTools.length).toBeGreaterThan(1);
+
+    // A subagent whose allowedTools filters the full list down to one tool.
+    mockLoadAgent.mockResolvedValue({
+      id: 2,
+      name: "restricted",
+      systemPrompt: "You are a restricted subagent.",
+      allowedTools: ["manage_cron"],
+      allowedPlugins: [],
+      createdAt: new Date(),
+    });
+
+    // getApiKey runs after the tool swap but before the inner try/finally, so
+    // this is the failure path that the old (inner-only) restoration missed.
+    vi.mocked(getApiKey).mockImplementation(async () => {
+      // The filtered list is now in place and is a different, smaller array.
+      expect(fakeAgent.state.tools).not.toBe(fullTools);
+      expect(fakeAgent.state.tools.length).toBeLessThan(fullTools.length);
+      throw new Error("auth failed");
+    });
+
+    const subagentRouting = {
+      agentId: 2,
+      senderIdentityId: undefined,
+      senderAgentId: undefined,
+      senderLabel: "test-user",
+      isMainAgent: false,
+    };
+
+    await expect(
+      handlePrompt(agent, makePool(), "hello", minimalConfig, subagentRouting),
+    ).rejects.toThrow("auth failed");
+
+    // The outer finally must have restored the exact full-tool-list reference.
+    expect(fakeAgent.state.tools).toBe(fullTools);
+  });
+
+  it("does not swap tools for a subagent with wildcard allowedTools", async () => {
+    setupCommonMocks();
+
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+    const fullTools = fakeAgent.state.tools;
+
+    mockLoadAgent.mockResolvedValue({
+      id: 2,
+      name: "wildcard",
+      systemPrompt: "You are a wildcard subagent.",
+      allowedTools: ["*"],
+      allowedPlugins: [],
+      createdAt: new Date(),
+    });
+    vi.mocked(getApiKey).mockResolvedValue("test-key");
+
+    const subagentRouting = {
+      agentId: 2,
+      senderIdentityId: undefined,
+      senderAgentId: undefined,
+      senderLabel: "test-user",
+      isMainAgent: false,
+    };
+
+    await handlePrompt(agent, makePool(), "hello", minimalConfig, subagentRouting);
+
+    // Wildcard means no swap happened, so the list is unchanged throughout.
+    expect(fakeAgent.state.tools).toBe(fullTools);
   });
 });
 

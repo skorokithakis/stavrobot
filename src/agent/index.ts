@@ -4,7 +4,7 @@ import { Type, getModel, type Model, type Api, type TextContent, type ImageConte
 import { Agent, type AgentTool, type AgentToolResult, type AgentMessage, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Config } from "../config.js";
 import type { FileAttachment } from "../uploads.js";
-import { getApiKey } from "../auth.js";
+import { getApiKey, AuthError } from "../auth.js";
 import { executeSql, loadMessages, saveMessage, saveCompaction, loadLatestCompaction, loadAllMemories, upsertMemory, deleteMemory, upsertScratchpad, deleteScratchpad, readScratchpad, createCronEntry, updateCronEntry, deleteCronEntry, listCronEntries, loadAllScratchpadTitles, getMainAgentId, loadAgent, type Memory, type Agent as AgentRow } from "../database.js";
 import type { RoutingResult } from "../queue.js";
 import { reloadScheduler } from "../scheduler.js";
@@ -19,7 +19,7 @@ import { createSearchTool, runSearch } from "../search.js";
 import { createManageUploadsTool } from "../upload-tools.js";
 import { encodeToToon } from "../toon.js";
 import { log } from "../log.js";
-import { AbortError } from "../errors.js";
+import { AbortError, TurnProgressPersistedError } from "../errors.js";
 import { toolError, toolSuccess } from "../tool-result.js";
 import { createSendSignalMessageTool, createSendTelegramMessageTool, createSendWhatsappMessageTool, createSendEmailTool } from "../send-tools.js";
 import { currentAgentId, setCurrentAgentId } from "../agent-context.js";
@@ -50,7 +50,7 @@ import {
   type PluginEntry,
 } from "./plugins.js";
 export { TEMP_ATTACHMENTS_DIR } from "../temp-dir.js";
-export { AbortError } from "../errors.js";
+export { AbortError, TurnProgressPersistedError } from "../errors.js";
 export { createSendSignalMessageTool, createSendTelegramMessageTool, createSendWhatsappMessageTool, createSendEmailTool } from "../send-tools.js";
 
 // Re-export everything from the extracted modules so external importers that
@@ -92,6 +92,12 @@ const agentCompactionThresholds = new WeakMap<Agent, number>();
 // is already in progress when another request triggers the threshold, we skip
 // rather than queue, because queuing would compact already-compacted messages.
 let compactionInProgress = false;
+
+// Re-entrancy guard for handlePrompt. The single shared Agent instance is only
+// safe to drive one turn at a time; the queue serialises turns, but if that
+// invariant ever breaks we want a loud failure rather than two interleaved
+// turns corrupting agent.state. Set on entry, cleared in a finally block.
+let handlePromptInProgress = false;
 
 // Set to the agent ID whose compaction just finished. The next handlePrompt
 // call for that agent checks this and reloads messages from the DB. Stored as
@@ -718,7 +724,31 @@ function triggerCompactionIfNeeded(agent: Agent, pool: pg.Pool, agentId: number,
   })();
 }
 
-export async function handlePrompt(
+export function handlePrompt(
+  agent: Agent,
+  pool: pg.Pool,
+  userMessage: string | undefined,
+  config: Config,
+  routing: RoutingResult,
+  source?: string,
+  attachments?: FileAttachment[],
+  isRetry: boolean = false
+): Promise<string> {
+  // The single shared Agent instance is only safe to drive one turn at a time.
+  // The queue serialises turns so this re-entrancy check should never fire; if
+  // it does, the queue's single-threading invariant has broken and we want to
+  // fail loud rather than let two turns corrupt agent.state concurrently.
+  if (handlePromptInProgress) {
+    throw new Error("handlePrompt re-entered while another turn is still in progress; this is a queue bug.");
+  }
+  handlePromptInProgress = true;
+  return runHandlePrompt(agent, pool, userMessage, config, routing, source, attachments, isRetry)
+    .finally(() => {
+      handlePromptInProgress = false;
+    });
+}
+
+async function runHandlePrompt(
   agent: Agent,
   pool: pg.Pool,
   userMessage: string | undefined,
@@ -774,6 +804,12 @@ export async function handlePrompt(
 
   let saveChain: Promise<unknown> = Promise.resolve();
 
+  // Tracks whether the subscribe callback persisted any message beyond the
+  // initial user row this turn. Declared out here (rather than next to the
+  // subscriber) so the post-prompt error handler can read it: if a turn fails
+  // after persisting progress, the queue must not retry it.
+  let progressPersistedThisTurn = false;
+
   let resolvedMessage = userMessage;
 
   let imageContents: ImageContent[] = [];
@@ -812,17 +848,26 @@ export async function handlePrompt(
     }
   }
 
-  // The try/finally starts here — after the auto-search block may have been
-  // set — so that pendingAutoSearchBlocks.delete(agent) runs on every exit
-  // path, including exceptions thrown by getApiKey, setTools, or subscribe
-  // before agent.prompt is reached.
+  // Capture the full tool list before any subagent filtering. The outer
+  // finally restores it on every exit path: the shared Agent instance outlives
+  // a single turn, and if a subagent's restricted list were left in place after
+  // an exception (getApiKey, saveMessage, the embedding insert, or subscribe can
+  // all throw after the swap but before the inner try), the next turn would run
+  // with the wrong tools.
+  const fullTools = agent.state.tools;
+  let toolsWereSwapped = false;
+
+  // This try/catch/finally wraps the entire turn body so that ANY error
+  // escaping after the subscribe callback persisted progress is wrapped in
+  // TurnProgressPersistedError (see the catch block). The finally deletes the
+  // pending auto-search block on every exit path, including exceptions thrown
+  // by getApiKey, setTools, or subscribe before agent.prompt is reached.
   try {
     const messageToSend = formatUserMessage(resolvedMessage ?? "", source, senderLabel);
 
     // Filter tools for subagents based on their allowed_tools list. The main
     // agent always gets the full tool set. For subagents, we temporarily swap
-    // the tool list before the prompt and restore it after.
-    const fullTools = agent.state.tools;
+    // the tool list here and restore it in the outer finally.
     if (!isMainAgent) {
       const allowedTools = subagentRow?.allowedTools ?? [];
       const allowedPlugins = subagentRow?.allowedPlugins ?? [];
@@ -830,6 +875,7 @@ export async function handlePrompt(
       if (!allowedTools.includes("*")) {
         const filteredTools = filterToolsForSubagent(fullTools, allowedTools, allowedPlugins);
         agent.state.tools = filteredTools;
+        toolsWereSwapped = true;
       }
     }
 
@@ -894,12 +940,22 @@ export async function handlePrompt(
           if (message.role === "user" && !initialPromptEventConsumed) {
             // The initial prompt message_end event: already pre-saved above, skip it.
             initialPromptEventConsumed = true;
-          } else if (message.role === "user") {
-            // Steered messages injected mid-run: save without sender metadata since
-            // they come from the same owner session already established above.
-            saveChain = saveChain.then(() => saveMessage(pool, message, agentId));
           } else {
-            saveChain = saveChain.then(() => saveMessage(pool, message, agentId));
+            // Any persisted message here represents progress beyond the initial
+            // user row: a steered user message, an assistant turn, or a tool
+            // result. Steered messages are saved without sender metadata because
+            // they come from the same owner session already established above.
+            progressPersistedThisTurn = true;
+            // Attach a no-op rejection handler to each appended link so Node's
+            // default unhandled-rejection behaviour does not crash the process
+            // while agent.prompt() is still running (a turn can take minutes, so
+            // a save may reject long before the finally observes the chain). The
+            // real handling happens at `await saveChain` in the finally below,
+            // which still rethrows the first failure; the no-op catch only
+            // marks the intermediate link as observed.
+            const next = saveChain.then(() => saveMessage(pool, message, agentId));
+            void next.catch(() => {});
+            saveChain = next;
           }
         }
       }
@@ -912,67 +968,88 @@ export async function handlePrompt(
         await agent.prompt(messageToSend);
       }
     } finally {
-      // Restore the full tool list if it was filtered for a subagent.
-      if (!isMainAgent) {
-        agent.state.tools = fullTools;
-      }
       unsubscribe();
       await saveChain;
     }
+
+    if (agent.state.errorMessage) {
+      const errorJson = JSON.stringify(agent.state.errorMessage);
+      // Check if the error was caused by an intentional abort by looking at the
+      // last assistant message's stopReason. agent.state.error is a plain string
+      // (the error message), not the message object, so we must inspect the
+      // conversation history instead.
+      const wasAborted = agent.state.messages.some((message) => {
+        if (message.role !== "assistant") return false;
+        const assistantMessage = message as unknown as AssistantMessage;
+        return assistantMessage.stopReason === "aborted";
+      });
+      // Remove error/aborted assistant messages from in-memory state so the next
+      // prompt starts clean. These messages are stripped by the library's
+      // transformMessages anyway, but leaving them in state can orphan adjacent
+      // toolResult messages and cause 400 errors on subsequent prompts.
+      const cleanedMessages = agent.state.messages.filter((message) => {
+        if (message.role !== "assistant") return true;
+        const assistantMessage = message as unknown as AssistantMessage;
+        return assistantMessage.stopReason !== "error" && assistantMessage.stopReason !== "aborted";
+      });
+      agent.state.messages = cleanedMessages;
+      if (wasAborted) {
+        log.info("[stavrobot] Agent aborted.");
+        const cancellationMessage = {
+          role: "user" as const,
+          content: [{ type: "text" as const, text: "[The user cancelled the previous request with /stop.]" }],
+          timestamp: Date.now(),
+        };
+        agent.state.messages = [...agent.state.messages, cancellationMessage];
+        await saveMessage(pool, cancellationMessage, agentId);
+        throw new AbortError();
+      }
+      log.error("[stavrobot] Agent error:", errorJson);
+      // Throw a plain Error here. The outer catch wraps it in
+      // TurnProgressPersistedError when progress was already persisted, so a
+      // retry would not replay tool side effects.
+      throw new Error(`Agent error: ${errorJson}`);
+    }
+
+    const lastAssistantMessage = agent.state.messages
+      .slice()
+      .reverse()
+      .find((message) => message.role === "assistant");
+
+    const responseText = lastAssistantMessage
+      ? lastAssistantMessage.content
+          .filter((block): block is TextContent => block.type === "text")
+          .map((block) => block.text)
+          .join("")
+      : "";
+
+    const compactionThreshold = agentCompactionThresholds.get(agent) ?? Math.floor(agent.state.model.contextWindow * COMPACTION_THRESHOLD_FRACTION);
+    triggerCompactionIfNeeded(agent, pool, agentId, config, compactionThreshold);
+
+    return responseText;
+  } catch (error) {
+    // Any error escaping the turn after the subscribe callback persisted a
+    // message beyond the initial user row must not be retried: reloading that
+    // progress would replay every tool side effect (duplicate outbound
+    // messages, duplicate external calls). Wrap such errors so the queue can
+    // tell them apart from a clean failure. AbortError is excluded because an
+    // abort is a clean resolution with nothing to replay. AuthError is excluded
+    // because the queue already handles it without retrying and wrapping it
+    // would replace the login prompt with a generic failure message.
+    if (progressPersistedThisTurn && !(error instanceof AbortError) && !(error instanceof AuthError)) {
+      const originalMessage = error instanceof Error ? error.message : String(error);
+      throw new TurnProgressPersistedError(originalMessage);
+    }
+    throw error;
   } finally {
+    // Restore the full tool list if it was filtered for a subagent. This lives
+    // in the outer finally rather than the inner one so exceptions thrown
+    // before the inner try (getApiKey, saveMessage, embedding insert, subscribe)
+    // still restore the tools. Without this, the shared Agent instance would
+    // keep the subagent's filtered tools for the next turn.
+    if (toolsWereSwapped) {
+      agent.state.tools = fullTools;
+    }
     pendingAutoSearchBlocks.delete(agent);
   }
-
-  if (agent.state.errorMessage) {
-    const errorJson = JSON.stringify(agent.state.errorMessage);
-    // Check if the error was caused by an intentional abort by looking at the
-    // last assistant message's stopReason. agent.state.error is a plain string
-    // (the error message), not the message object, so we must inspect the
-    // conversation history instead.
-    const wasAborted = agent.state.messages.some((message) => {
-      if (message.role !== "assistant") return false;
-      const assistantMessage = message as unknown as AssistantMessage;
-      return assistantMessage.stopReason === "aborted";
-    });
-    // Remove error/aborted assistant messages from in-memory state so the next
-    // prompt starts clean. These messages are stripped by the library's
-    // transformMessages anyway, but leaving them in state can orphan adjacent
-    // toolResult messages and cause 400 errors on subsequent prompts.
-    const cleanedMessages = agent.state.messages.filter((message) => {
-      if (message.role !== "assistant") return true;
-      const assistantMessage = message as unknown as AssistantMessage;
-      return assistantMessage.stopReason !== "error" && assistantMessage.stopReason !== "aborted";
-    });
-    agent.state.messages = cleanedMessages;
-    if (wasAborted) {
-      log.info("[stavrobot] Agent aborted.");
-      const cancellationMessage = {
-        role: "user" as const,
-        content: [{ type: "text" as const, text: "[The user cancelled the previous request with /stop.]" }],
-        timestamp: Date.now(),
-      };
-      agent.state.messages = [...agent.state.messages, cancellationMessage];
-      await saveMessage(pool, cancellationMessage, agentId);
-      throw new AbortError();
-    }
-    log.error("[stavrobot] Agent error:", errorJson);
-    throw new Error(`Agent error: ${errorJson}`);
-  }
-
-  const lastAssistantMessage = agent.state.messages
-    .slice()
-    .reverse()
-    .find((message) => message.role === "assistant");
-
-  const responseText = lastAssistantMessage
-    ? lastAssistantMessage.content
-        .filter((block): block is TextContent => block.type === "text")
-        .map((block) => block.text)
-        .join("")
-    : "";
-
-  const compactionThreshold = agentCompactionThresholds.get(agent) ?? Math.floor(agent.state.model.contextWindow * COMPACTION_THRESHOLD_FRACTION);
-  triggerCompactionIfNeeded(agent, pool, agentId, config, compactionThreshold);
-
-  return responseText;
 }
