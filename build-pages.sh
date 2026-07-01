@@ -112,8 +112,7 @@ plugin_names=()
 plugin_descriptions=()
 plugin_urls=()
 plugin_slugs=()
-plugin_repo_names=()
-plugin_branches=()
+plugin_readme_urls=()
 
 if [ -n "$repos_json" ]; then
 	# Extract names, descriptions, html_urls, and default_branches for plugin-* repos.
@@ -148,14 +147,19 @@ for repo in repos:
 		plugin_descriptions+=("$repo_description")
 		plugin_urls+=("$repo_url")
 		plugin_slugs+=("$plugin_slug")
-		plugin_repo_names+=("$repo_name")
-		plugin_branches+=("$repo_branch")
-	done
-
-	for i in "${!plugin_names[@]}"; do
-		echo "| ${plugin_names[$i]} | ${plugin_descriptions[$i]} | ${plugin_urls[$i]} |" >>"$REPO_ROOT/static/plugins/index.md"
+		plugin_readme_urls+=("https://raw.githubusercontent.com/stavrobot/${repo_name}/${repo_branch}/README.md")
 	done
 fi
+
+plugin_names+=("apple-reminders")
+plugin_descriptions+=("Manage Apple Reminders through a macOS remindctl host bridge.")
+plugin_urls+=("https://github.com/diegopetrucci/stavrobot-apple-reminders-plugin")
+plugin_slugs+=("apple-reminders")
+plugin_readme_urls+=("https://raw.githubusercontent.com/diegopetrucci/stavrobot-apple-reminders-plugin/main/README.md")
+
+for i in "${!plugin_names[@]}"; do
+	echo "| ${plugin_names[$i]} | ${plugin_descriptions[$i]} | ${plugin_urls[$i]} |" >>"$REPO_ROOT/static/plugins/index.md"
+done
 
 # Generate Zola content files for the plugins section.
 # Remove first to prevent ghost pages from deleted or renamed plugins.
@@ -171,7 +175,7 @@ template = "plugins/list.html"
 ZOLA_EOF
 
 for i in "${!plugin_names[@]}"; do
-	readme="$(curl -sf "https://raw.githubusercontent.com/stavrobot/${plugin_repo_names[$i]}/${plugin_branches[$i]}/README.md")" || true
+	readme="$(curl -sf "${plugin_readme_urls[$i]}")" || true
 
 	{
 		echo '+++'
