@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, type MockedFunction, beforeEach } from "vitest";
 import type { Agent, AgentMessage, AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import { complete } from "@earendil-works/pi-ai";
+import { complete } from "@earendil-works/pi-ai/compat";
 import type { Pool } from "pg";
 import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool, injectAutoSearchBlock, pendingAutoSearchBlocks, handlePrompt, createAgent, escalatingSummarize, selectCompactionCutIndex, isTurnBoundary } from "./agent/index.js";
 import { getApiKey } from "./auth.js";
@@ -103,8 +103,12 @@ vi.mock("@earendil-works/pi-ai", () => ({
     Array: vi.fn().mockReturnValue({}),
     Record: vi.fn().mockReturnValue({}),
   },
-  getModel: vi.fn().mockReturnValue({ contextWindow: 200000 }),
+}));
+vi.mock("@earendil-works/pi-ai/compat", () => ({
   complete: vi.fn(),
+}));
+vi.mock("@earendil-works/pi-ai/providers/all", () => ({
+  getBuiltinModel: vi.fn().mockReturnValue({ contextWindow: 200000 }),
 }));
 // makeMinimalTool is hoisted so it can be used in vi.mock factories below.
 // Tool factory mocks need to return a valid AgentTool so createAgent can call

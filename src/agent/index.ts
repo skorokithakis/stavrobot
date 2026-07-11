@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import pg from "pg";
-import { Type, getModel, type Model, type Api, type TextContent, type ImageContent, type AssistantMessage, type ToolCall } from "@earendil-works/pi-ai";
+import { Type, type Model, type Api, type TextContent, type ImageContent, type AssistantMessage, type ToolCall } from "@earendil-works/pi-ai";
+import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 import { Agent, type AgentTool, type AgentToolResult, type AgentMessage, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Config } from "../config.js";
 import type { FileAttachment } from "../uploads.js";
@@ -414,7 +415,7 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
   const DEFAULT_CONTEXT_WINDOW = 200000;
   const DEFAULT_MAX_TOKENS = 8192;
   const knownModel = config.baseUrl === undefined
-    ? getModel(config.provider as any, config.model as any)
+    ? getBuiltinModel(config.provider as any, config.model as any)
     : undefined;
   const model: Model<Api> = config.baseUrl !== undefined
     ? {

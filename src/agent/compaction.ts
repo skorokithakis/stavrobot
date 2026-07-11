@@ -1,4 +1,5 @@
-import { complete, type TextContent, type ImageContent, type ThinkingContent, type ToolCall } from "@earendil-works/pi-ai";
+import { complete } from "@earendil-works/pi-ai/compat";
+import { type TextContent, type ImageContent, type ThinkingContent, type ToolCall } from "@earendil-works/pi-ai";
 import type { Model, Api } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { Agent } from "@earendil-works/pi-agent-core";
