@@ -27,6 +27,8 @@ let mainAgentId: number | null = null;
 let ownerIdentitySet: Set<string> = new Set();
 // Owner email patterns (may include wildcards) for use with matchesEmailEntry.
 let ownerEmailEntries: string[] = [];
+// Owner agentmail patterns (may include wildcards) for use with matchesEmailEntry.
+let ownerAgentmailEntries: string[] = [];
 
 export function getOwnerInterlocutorId(): number {
   if (ownerInterlocutorId === null) {
@@ -45,6 +47,9 @@ export function getMainAgentId(): number {
 export function isOwnerIdentity(service: string, identifier: string): boolean {
   if (service === "email") {
     return ownerEmailEntries.some((entry) => matchesEmailEntry(identifier, entry));
+  }
+  if (service === "agentmail") {
+    return ownerAgentmailEntries.some((entry) => matchesEmailEntry(identifier, entry));
   }
   return ownerIdentitySet.has(`${service}:${identifier}`);
 }
@@ -102,7 +107,7 @@ export async function seedOwner(pool: pg.Pool, ownerConfig: OwnerConfig): Promis
   for (const channel of OWNER_CHANNELS) {
     const value = ownerConfig[channel];
     if (value !== undefined) {
-      const identifier = channel === "email" ? value.toLowerCase() : value;
+      const identifier = (channel === "email" || channel === "agentmail") ? value.toLowerCase() : value;
       identities.push({ service: channel, identifier });
     }
   }
@@ -125,6 +130,9 @@ export async function seedOwner(pool: pg.Pool, ownerConfig: OwnerConfig): Promis
   ownerIdentitySet = new Set(identities.map(({ service, identifier }) => `${service}:${identifier}`));
   ownerEmailEntries = identities
     .filter(({ service }) => service === "email")
+    .map(({ identifier }) => identifier);
+  ownerAgentmailEntries = identities
+    .filter(({ service }) => service === "agentmail")
     .map(({ identifier }) => identifier);
 
   return ownerId;

@@ -17,12 +17,12 @@ const RETRY_DELAY_MS = 30_000;
 
 // Sources that require allowlist + interlocutor lookup before routing.
 // All other external sources route directly to the main agent.
-const GATED_SOURCES: string[] = ["signal", "telegram", "whatsapp", "email"];
+const GATED_SOURCES: string[] = ["signal", "telegram", "whatsapp", "email", "agentmail"];
 
 // Channels where the owner interacts in real-time. Used to decide whether an
 // incoming message while the agent is busy should steer the running turn
 // instead of being queued behind it.
-const INTERACTIVE_SOURCES: string[] = ["signal", "telegram", "whatsapp", "email"];
+const INTERACTIVE_SOURCES: string[] = ["signal", "telegram", "whatsapp", "email", "agentmail"];
 
 function isInteractiveOwnerMessage(source: string | undefined, sender: string | undefined): boolean {
   if (source === undefined) {
@@ -248,6 +248,10 @@ async function sendErrorToSource(
     } catch (sendError) {
       log.error(`[stavrobot] Failed to send WhatsApp error notification: ${sendError instanceof Error ? sendError.message : String(sendError)}`);
     }
+  } else if (source === "agentmail" && sender !== undefined) {
+    // Agentmail replies require an inboxId to know which address to send from, which
+    // we don't have in this context, so we can't send an error notification back yet.
+    log.warn("[stavrobot] Cannot send agentmail error notification, no inbox context available.");
   }
 }
 
