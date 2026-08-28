@@ -12,6 +12,7 @@ It has all the nice features of an AI assistant, but focuses on sandboxing, isol
 - **Light.** Doesn't run one container per component. Plugins all run in a single container, separated by Unix permissions.
 - **Use any model you want.** Local, OpenRouter, Anthropic/OpenAI. Whatever [Pi](https://pi.dev) supports, the bot can use.
 - **Signal/Telegram/WhatsApp/Email integration.** Two-way messaging, with formatting, attachments, etc.
+- **Pebble Index integration.** Ring recordings can be queued directly for the agent.
 - **Three-tier knowledge.** Remembers everything without blowing out its context.  Intelligently and transparently retrieves data from its memory.
 - **Low token usage.** Various optimizations have been made to be light on token usage. It even uses [TOON](https://github.com/toon-format/toon) internally.
 - **Plugins.** Install plugins and extend Stavrobot's capabilities by just giving it a git repo URL. Plugins are isolated from each other — each runs as a dedicated system user with no access to other plugins' files or configuration.
@@ -119,6 +120,14 @@ Email uses a Cloudflare Email Worker for inbound delivery and SMTP for outbound.
 2. Deploy the Cloudflare Email Worker (code in `config.example.toml`) and set the `WEBHOOK_URL` and `WEBHOOK_SECRET` environment variables on the worker.
 3. In Cloudflare Email Routing, add a rule to forward inbound mail to the worker.
 4. Add allowed sender addresses via the `/settings` web UI.
+
+### Pebble Index setup
+
+Configure Pebble Index to send ring webhooks to `POST /pebble-index/webhook` with HTTP
+Basic authentication using Stavrobot's configured password. The multipart request must
+include `recordedAt` (epoch milliseconds) and `client`, and can include a `transcription`
+and an `audio/mp4` `audio` file. Audio recordings are queued for the agent as `.m4a`
+attachments.
 
 ### Running
 

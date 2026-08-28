@@ -184,7 +184,7 @@ both linting and formatting with good TypeScript ESM support).
 they are not related branches and must never be merged. `master` is the application
 source code. `pages` is the documentation/GitHub Pages branch (skills, install guides,
 etc.) served via Cloudflare Pages at `stavrobot.stavros.io`. Changes to one branch have
-no effect on the other. Task tickets (`.tickets/`) only exist on `master`.
+no effect on the other.
 
 ## Coder subsystem
 
@@ -281,9 +281,3 @@ changes.  This file is the plugin authoring guide used by the coder agent.
 - No emojis unless explicitly requested.
 - If unsure what to do, stop and ask for instructions rather than guessing.
 - When adding new features, present a plan and ask for confirmation before implementing.
-- When implementing a feature that involves an architectural decision made during
-  discussion with the user, record it in `DECISIONLOG.md` at the project root. Only
-  record decisions that come from user discussion, not decisions you make yourself. Update
-  this file whenever a new decision is implemented.
-- When finishing a feature, think whether any non-obvious decisions should be put in
-  DECISIONLOG.md or in comments in the code.

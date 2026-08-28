@@ -27,17 +27,19 @@ and `coder` containers share `./data/plugins` and `./cache/plugins`.
 ## Message flow
 
 ```
-External caller (Telegram / Signal / WhatsApp / email / CLI)
+External caller (Telegram / Signal / WhatsApp / email / Pebble Index / CLI)
   → POST /chat  (or webhook endpoint)
-  → handleChatRequest  (src/index.ts)
+  → request handler  (src/index.ts)
   → enqueueMessage  (src/queue.ts)
   → processQueue  (single-threaded, serialises all turns)
   → resolveTargetAgent  (allowlist + interlocutor lookup)
   → handlePrompt  (src/agent/index.ts)
   → Agent.prompt  (@earendil-works/pi-agent-core)
   → tool callbacks (execute_sql, manage_plugins, run_plugin_tool, …)
-  → response string returned to caller
+  → response string returned to synchronous callers
 ```
+
+Webhook handlers acknowledge the request before their queued message is processed.
 
 Owner messages arriving while a turn is in progress are **steered** into the running
 turn via `Agent.steer()` rather than queued. Non-owner messages are always queued.
@@ -256,6 +258,8 @@ Migrations are additive `ALTER TABLE … ADD COLUMN IF NOT EXISTS` statements.
   - `POST /email/webhook`
   - `GET /pages/*` (per-row `is_public` check inside the handler)
   - `GET /api/pages/*/queries/*` (per-page `is_public` check inside the handler)
+- `POST /pebble-index/webhook` requires Basic Auth. It accepts a multipart Pebble Index
+  ring recording and queues it directly for the main agent.
 - `plugin-runner` and `coder` also enforce Basic Auth on all endpoints.
 - Outbound callbacks from `plugin-runner` and `coder` to `app:3000/chat` use the same
   password, read from `config.toml` at startup.
@@ -369,6 +373,7 @@ is supported with a custom endpoint).
 | `"telegram"` | Telegram webhook |
 | `"whatsapp"` | WhatsApp (Baileys) |
 | `"email"` | Email webhook |
+| `"pebble-index"` | Pebble Index ring webhook |
 | `"cron"` | Scheduler |
 | `"coder"` | Coder agent callback |
 | `"plugin:<name>/<tool>"` | Async plugin tool callback |
@@ -377,7 +382,8 @@ is supported with a custom endpoint).
 
 Internal sources (`cli`, `cron`, `coder`, `plugin:*`, `upload`) always route to the
 main agent. External sources (`signal`, `telegram`, `whatsapp`, `email`) go through
-allowlist + interlocutor lookup to determine the target agent.
+allowlist + interlocutor lookup to determine the target agent. The Basic-authenticated
+`pebble-index` source routes directly to the main agent without those gates.
 
 ---
 
@@ -386,6 +392,7 @@ allowlist + interlocutor lookup to determine the target agent.
 | File | Role |
 |---|---|
 | `src/index.ts` | HTTP server, routing, auth middleware, all endpoint handlers |
+| `src/pebble-index.ts` | Pebble Index multipart ring webhook handler |
 | `src/agent/index.ts` | Agent setup, all built-in tool definitions, `handlePrompt`, compaction, truncation |
 | `src/queue.ts` | Single-threaded message queue, routing, steering logic, retry |
 | `src/database.ts` | All SQL queries, schema init, migrations |

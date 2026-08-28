@@ -45,6 +45,7 @@ import { serveSignalCaptchaPage, handleSignalCaptchaSubmit } from "./signal-capt
 import { initializeWhatsApp } from "./whatsapp.js";
 import { serveHomePage } from "./home.js";
 import { handleEmailWebhookRequest } from "./email.js";
+import { handlePebbleIndexWebhookRequest } from "./pebble-index.js";
 import { initializeEmailTransport } from "./email-api.js";
 import { log } from "./log.js";
 
@@ -524,6 +525,8 @@ async function main(): Promise<void> {
         response.writeHead(404, { "Content-Type": "application/json" });
         response.end(JSON.stringify({ error: "Not found" }));
       }
+    } else if (request.method === "POST" && pathname === "/pebble-index/webhook") {
+      handlePebbleIndexWebhookRequest(request, response);
     } else if (request.method === "GET" && pathname === "/login") {
       serveLoginPage(response, config);
     } else if (request.method === "GET" && pathname === "/login/events") {
