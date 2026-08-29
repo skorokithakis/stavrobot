@@ -741,6 +741,7 @@ const SETTINGS_HUB_HTML = `<!DOCTYPE html>
   <div class="section">
     <a href="/settings/allowlist">Manage allowlist</a>
     <a href="/settings/plugins">Manage plugins</a>
+    <a href="/settings/config">Config</a>
   </div>
 </body>
 </html>`;

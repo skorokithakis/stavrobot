@@ -19,8 +19,10 @@ arbitrary scripts in isolated Unix user accounts.
 | `pg-backup` | `pgvector/pgvector:pg17` | — | Hourly pg_dump to `./data/db-backups` |
 | `signal-bridge` | `./signal-bridge` | internal:8081 | Signal protocol bridge (optional profile) |
 
-All containers share `./data/main` (read-only) for `config.toml`. The `plugin-runner`
-and `coder` containers share `./data/plugins` and `./cache/plugins`.
+The app mounts `./data/main` read-write at `/app/config` so its configuration editor can
+update `config.toml`. `plugin-runner`, `coder`, `signal-bridge`, and `python-runner`
+mount it read-only and load it only when they start. The `plugin-runner` and `coder`
+containers share `./data/plugins` and `./cache/plugins`.
 
 ---
 
@@ -263,6 +265,21 @@ Migrations are additive `ALTER TABLE … ADD COLUMN IF NOT EXISTS` statements.
 - `plugin-runner` and `coder` also enforce Basic Auth on all endpoints.
 - Outbound callbacks from `plugin-runner` and `coder` to `app:3000/chat` use the same
   password, read from `config.toml` at startup.
+
+## Web UI
+
+- `GET /settings/config` serves the configuration editor. It loads the raw file through
+  `GET /api/settings/config`, which returns `{ content }` from `CONFIG_PATH`.
+- `PUT /api/settings/config` accepts `{ content: string }`, validates it with
+  `parseConfig`, copies the current file to `<CONFIG_PATH>.bak`, and writes the raw
+  submitted content. It responds before exiting after 500ms; Docker Compose restarts the
+  app through its `restart: unless-stopped` policy.
+- Saving interrupts any in-progress agent turn. `plugin-runner`, `coder`,
+  `signal-bridge`, and `python-runner` do not reload `config.toml`, so changes affecting
+  them require manually restarting those containers.
+
+The configuration editor endpoints use the default Basic Auth policy and are never
+public.
 
 ---
 

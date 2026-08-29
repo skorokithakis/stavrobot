@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import fs from "fs";
+import { getConfigPath, parseConfig } from "./config.js";
 
 vi.mock("fs");
 
@@ -11,6 +12,7 @@ provider = "anthropic"
 model = "claude-sonnet-4-20250514"
 apiKey = "test-key"
 publicHostname = "https://example.com"
+password = "test-password"
 
 [owner]
 name = "Stavros"
@@ -27,9 +29,43 @@ function setupMocks(toml: string): void {
   });
 }
 
-afterEach(() => {
+afterEach((): void => {
   vi.clearAllMocks();
   vi.resetModules();
+});
+
+describe("parseConfig", (): void => {
+  it("parses and validates TOML without loading prompt files", (): void => {
+    const config = parseConfig(BASE_TOML);
+
+    expect(config.owner.name).toBe("Stavros");
+    expect(mockReadFileSync).not.toHaveBeenCalled();
+  });
+
+  it("requires a non-empty password", (): void => {
+    expect(() => parseConfig(BASE_TOML.replace('password = "test-password"', 'password = ""'))).toThrow(
+      "Config must specify a password.",
+    );
+    expect(() => parseConfig(BASE_TOML.replace('password = "test-password"\n', ""))).toThrow(
+      "Config must specify a password.",
+    );
+  });
+});
+
+describe("getConfigPath", (): void => {
+  it("falls back to config.toml when CONFIG_PATH is empty", (): void => {
+    const previousConfigPath = process.env.CONFIG_PATH;
+    process.env.CONFIG_PATH = "";
+    try {
+      expect(getConfigPath()).toBe("config.toml");
+    } finally {
+      if (previousConfigPath === undefined) {
+        delete process.env.CONFIG_PATH;
+      } else {
+        process.env.CONFIG_PATH = previousConfigPath;
+      }
+    }
+  });
 });
 
 describe("loadConfig owner validation", () => {
@@ -88,6 +124,7 @@ provider = "anthropic"
 model = "claude-sonnet-4-20250514"
 apiKey = "test-key"
 publicHostname = "https://example.com"
+password = "test-password"
 
 [owner]
 name = "Stavros"
@@ -126,6 +163,7 @@ baseUrl = "http://localhost:11434/v1"
 contextWindow = 128000
 maxTokens = 8192
 publicHostname = "https://example.com"
+password = "test-password"
 
 [owner]
 name = "Stavros"
@@ -157,6 +195,7 @@ contextWindow = 200000
 maxTokens = 8192
 api = "anthropic-messages"
 publicHostname = "https://example.com"
+password = "test-password"
 
 [owner]
 name = "Stavros"
@@ -265,6 +304,7 @@ provider = "anthropic"
 model = "claude-sonnet-4-20250514"
 apiKey = "test-key"
 publicHostname = "https://example.com"
+password = "test-password"
 contextTokensK = 50
 
 [owner]

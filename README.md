@@ -44,6 +44,17 @@ That's it. Message your bot on Telegram and it will respond. See the detailed se
 3. At minimum, set `authFile` (or `apiKey`) and `publicHostname`. Everything else is optional.
 4. Copy `env.example` to `.env` and set your timezone (`TZ`). Postgres credentials and other environment settings can also be overridden there. **Always set `POSTGRES_PASSWORD` to something secure** — the default is a weak placeholder and should not be used in production.
 
+### Config editor
+
+After the app starts, open `/settings/config` to edit `config.toml` in the browser. The
+page is protected by HTTP Basic Auth and displays the raw configuration, including any
+secrets it contains. A valid save creates a single `<CONFIG_PATH>.bak` backup, saves the
+new content, and restarts the app; this interrupts any in-progress agent turn.
+
+`plugin-runner`, `coder`, `signal-bridge`, and `python-runner` read `config.toml` only
+when they start. Changes that affect them, such as the password, require manually
+restarting those containers.
+
 ### Custom and OpenAI-compatible endpoints
 
 Stavrobot can be pointed at any OpenAI-compatible endpoint (Ollama, LiteLLM, vLLM, etc.) or a custom Anthropic-compatible proxy by setting `baseUrl` in `config.toml`. See `config.example.toml` for the required fields and example configurations.

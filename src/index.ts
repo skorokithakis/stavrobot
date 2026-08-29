@@ -41,6 +41,11 @@ import {
   handleGetAllowlistRequest,
   handlePutAllowlistRequest,
 } from "./settings.js";
+import {
+  serveConfigSettingsPage,
+  handleGetConfigRequest,
+  handlePutConfigRequest,
+} from "./config-settings.js";
 import { serveSignalCaptchaPage, handleSignalCaptchaSubmit } from "./signal-captcha.js";
 import { initializeWhatsApp } from "./whatsapp.js";
 import { serveHomePage } from "./home.js";
@@ -569,6 +574,8 @@ async function main(): Promise<void> {
       void handlePluginRemoveRequest(request, response);
     } else if (request.method === "POST" && pathname === "/api/settings/plugins/configure") {
       void handlePluginConfigureRequest(request, response);
+    } else if (request.method === "GET" && pathname === "/settings/config") {
+      serveConfigSettingsPage(response);
     } else if (request.method === "GET" && pathname === "/settings/allowlist") {
       serveAllowlistPage(response);
     } else if (request.method === "GET" && pathname === "/settings") {
@@ -577,6 +584,10 @@ async function main(): Promise<void> {
       handleGetAllowlistRequest(response, config);
     } else if (request.method === "PUT" && pathname === "/api/settings/allowlist") {
       void handlePutAllowlistRequest(request, response, config);
+    } else if (request.method === "GET" && pathname === "/api/settings/config") {
+      handleGetConfigRequest(response);
+    } else if (request.method === "PUT" && pathname === "/api/settings/config") {
+      void handlePutConfigRequest(request, response);
     } else if (request.method === "GET" && pathname === "/signal/captcha") {
       serveSignalCaptchaPage(response);
     } else if (request.method === "POST" && pathname === "/signal/captcha") {

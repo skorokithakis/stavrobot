@@ -68,7 +68,8 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
   const navLinkHtml = `<a href="/explorer">Database explorer</a>
     <a href="/settings">Settings</a>
     <a href="/settings/allowlist" style="margin-left: 24px">Allowlist</a>
-    <a href="/settings/plugins" style="margin-left: 24px">Plugins</a>`;
+    <a href="/settings/plugins" style="margin-left: 24px">Plugins</a>
+    <a href="/settings/config" style="margin-left: 24px">Config</a>`;
 
   return `<!DOCTYPE html>
 <html lang="en">

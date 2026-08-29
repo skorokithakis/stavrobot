@@ -10,8 +10,7 @@ model = "claude-sonnet-4-20250514"
 # thinkingLevel = "low"
 
 # Password for HTTP Basic Auth. All endpoints except webhooks require this.
-# Change this to something secure. If removed or commented out, all endpoints
-# are open to the world.
+# Change this to something secure. Required: the app refuses to start without it.
 password = "change-me"
 
 # Authentication: use exactly one of apiKey or authFile.
