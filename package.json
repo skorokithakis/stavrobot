@@ -17,7 +17,7 @@
     "@earendil-works/pi-ai": "^0.80.6",
     "@toon-format/toon": "^2.1.0",
     "@types/qrcode-terminal": "^0.12.2",
-    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
     "busboy": "^1.6.0",
     "cron-parser": "^5.5.0",
     "mailparser": "^3.9.4",

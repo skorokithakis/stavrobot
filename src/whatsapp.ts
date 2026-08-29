@@ -91,15 +91,11 @@ export async function initializeWhatsApp(config: WhatsappConfig): Promise<void> 
 
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
-  // Workaround for Baileys 7.0.0-rc.9 hardcoding an outdated WA protocol version
-  // that WhatsApp rejects with a 405. Remove this once Baileys ships a fix
-  // (see https://github.com/WhiskeySockets/Baileys/issues/2376).
   const socket = makeWASocket({
     auth: state,
     logger: silentLogger,
     // Disable link previews to avoid the link-preview-js peer dependency.
     generateHighQualityLinkPreview: false,
-    version: [2, 3000, 1034074495],
   });
 
   setWhatsappSocket(socket);
