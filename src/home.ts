@@ -390,6 +390,11 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
       </div>
 
       <div class="section">
+        <h2>Navigation</h2>
+        ${navLinkHtml}
+      </div>
+
+      <div class="section">
         <h2>Message statistics</h2>
         <div class="stat-row">
           <span class="stat-label">Total inbound messages</span>
@@ -419,11 +424,6 @@ function buildHtml(config: Config, uptime: string, stats: MessageStats): string 
           <span class="stat-label">Agents</span>
           <span class="stat-value">${stats.agent}</span>
         </div>
-      </div>
-
-      <div class="section">
-        <h2>Navigation</h2>
-        ${navLinkHtml}
       </div>
     </div>
   </div>
