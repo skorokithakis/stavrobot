@@ -190,7 +190,9 @@ Each tool subdirectory contains its own `manifest.json`:
 - `description` (string, required): Shown when inspecting the plugin.
 - `entrypoint` (string, required): The filename of the executable script inside the tool directory.
 - `async` (boolean, optional, defaults to false): If true, the tool runs asynchronously and the result is delivered via callback instead of inline.
-- `parameters` (object, required): Parameter schema. Each key is a parameter name; each value has `type` (`string`, `integer`, `number`, `boolean`, or `file`) and `description`. Use an empty object `{}` if the tool takes no parameters. See "Receiving files" for how `file` parameters work.
+- `parameters` (object, required): Parameter definitions. Each key is a parameter name; each value requires string `type` and `description` fields. Any string is accepted for `type`, including `string`, `integer`, `number`, `boolean`, `file`, `array`, and `object`. Use an empty object `{}` if the tool takes no parameters. See "Receiving files" for how `file` parameters work.
+- Nested keys within a parameter definition, such as `items`, `properties`, and `required`, are preserved but not enforced. `manage_plugins` with `action: "show"` exposes definitions to the model as TOON text, not provider tool JSON Schema.
+- `run_plugin_tool` accepts arguments as a JSON-encoded `parameters` string.
 
 ### Async tools
 
@@ -369,12 +371,12 @@ Any executable works — use a shebang line. Node.js and Python are available in
 
 ## Parameter validation
 
-The plugin runner automatically validates parameters before the tool script runs:
+The plugin runner performs limited top-level validation before the tool script runs:
 
-- Unknown keys (not declared in the tool manifest's `parameters`) are rejected with HTTP 400. The error response includes the full parameter schema so the caller can self-correct.
-- Wrong types are rejected for `string`, `number`, `integer`, and `boolean` parameters. `file` parameters are exempt because they are already handled by the file materialization code.
+- Unknown top-level keys (not declared in the tool manifest's `parameters`) are rejected with HTTP 400. The error response includes the full parameter schema so the caller can self-correct.
+- Values declared as `string`, `number`, `integer`, or `boolean` are type-checked. `file` parameters use separate materialization and handling; other accepted type strings, including `array` and `object`, are not type-checked.
 
-Tools no longer need to implement unknown-parameter rejection or type validation themselves. Existing validation code in tools is harmless and can be left in place, but new tools do not need it.
+Tools must validate missing parameters and every constraint beyond these checks, including constraints expressed by nested keys.
 
 ## Example: a complete tool
 
