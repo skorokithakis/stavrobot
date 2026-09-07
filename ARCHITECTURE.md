@@ -304,48 +304,55 @@ The provider and model are set at the top level of `config.toml`:
 
 ```toml
 provider = "anthropic"          # any KnownProvider string from pi-ai
-model    = "claude-sonnet-4-20250514"
+model    = "claude-sonnet-4-5"
 ```
 
-`getModel(provider, model)` from `@earendil-works/pi-ai` looks up the model in a static
-registry (`models.generated.js`). The registry maps `(provider, modelId)` to a `Model`
-object that carries `api`, `baseUrl`, `contextWindow`, `maxTokens`, and optional `compat`
-overrides.
+`getBuiltinModel(provider, model)` from `@earendil-works/pi-ai/providers/all` looks up
+the model in a static registry (`models.generated.js`). The registry maps `(provider,
+modelId)` to a `Model` object that carries `api`, `baseUrl`, `contextWindow`,
+`maxTokens`, and optional `compat` overrides.
 
 ### Supported providers (from pi-ai `KnownProvider` type)
 
-`amazon-bedrock`, `anthropic`, `google`, `google-gemini-cli`, `google-antigravity`,
-`google-vertex`, `openai`, `azure-openai-responses`, `openai-codex`, `github-copilot`,
-`xai`, `groq`, `cerebras`, `openrouter`, `vercel-ai-gateway`, `zai`, `mistral`,
-`minimax`, `minimax-cn`, `huggingface`, `opencode`, `opencode-go`, `kimi-coding`.
+`amazon-bedrock`, `ant-ling`, `anthropic`, `google`, `google-vertex`, `openai`,
+`azure-openai-responses`, `openai-codex`, `radius`, `nvidia`, `deepseek`,
+`github-copilot`, `xai`, `groq`, `cerebras`, `openrouter`, `vercel-ai-gateway`,
+`zai`, `zai-coding-cn`, `mistral`, `minimax`, `minimax-cn`, `moonshotai`,
+`moonshotai-cn`, `huggingface`, `fireworks`, `together`, `baseten`, `opencode`,
+`opencode-go`, `kimi-coding`, `cloudflare-workers-ai`, `cloudflare-ai-gateway`,
+`qwen-token-plan`, `qwen-token-plan-cn`, `qwen-token-plan-individual`, `xiaomi`,
+`xiaomi-token-plan-cn`, `xiaomi-token-plan-ams`, `xiaomi-token-plan-sgp`.
 
 ### API backends (from pi-ai `KnownApi` type)
 
-| API string | Used by |
-|---|---|
-| `anthropic-messages` | `anthropic`, `amazon-bedrock` (Anthropic models) |
-| `openai-completions` | `openai`, `groq`, `cerebras`, `xai`, `openrouter`, `opencode`, `zai`, and any OpenAI-compatible endpoint |
-| `openai-responses` | `openai` (Responses API), `github-copilot` |
-| `openai-codex-responses` | `openai-codex` |
-| `azure-openai-responses` | `azure-openai-responses` |
-| `google-generative-ai` | `google`, `google-antigravity` |
-| `google-gemini-cli` | `google-gemini-cli` |
-| `google-vertex` | `google-vertex` |
-| `mistral-conversations` | `mistral` |
-| `bedrock-converse-stream` | `amazon-bedrock` |
+| API string |
+|---|
+| `openai-completions` |
+| `mistral-conversations` |
+| `openai-responses` |
+| `azure-openai-responses` |
+| `openai-codex-responses` |
+| `anthropic-messages` |
+| `bedrock-converse-stream` |
+| `google-generative-ai` |
+| `google-vertex` |
+| `pi-messages` |
 
 ### Authentication
 
 Exactly one of these must be set in `config.toml`:
 - `apiKey = "..."` — static API key, passed directly to the provider.
 - `authFile = "/path/to/auth.json"` — OAuth credentials file (for Claude Pro/Max
-  subscriptions). The file is read and refreshed by `src/auth.ts` using
-  `getOAuthProvider(config.provider)` from `@earendil-works/pi-ai/oauth`.
+  subscriptions). `src/auth.ts` locates the provider with `builtinProviders()` from
+  `@earendil-works/pi-ai/providers/all` and uses its `auth.oauth` implementation.
+  Existing untagged OAuth records are normalized in memory; an expired credential is
+  refreshed with `oauth.refresh(credential, AbortSignal.timeout(30_000))` and written
+  back with its `"oauth"` type tag. `oauth.toAuth(credential)` derives the API key.
 
 The `getApiKey(config)` function in `src/auth.ts` resolves whichever is configured and
-returns a plain string. This string is passed to the `Agent` constructor as
-`getApiKey: () => getApiKey(config)`. The Agent forwards it to the provider stream
-function as `options.apiKey`.
+returns a plain string. The `Agent` receives it through `getApiKey: () => getApiKey(config)`
+and explicitly uses `streamFn: streamSimple` from `@earendil-works/pi-ai/compat`, which
+forwards the key to the provider stream function as `options.apiKey`.
 
 ### OpenAI-compatible endpoints
 

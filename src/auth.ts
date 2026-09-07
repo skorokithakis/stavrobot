@@ -1,6 +1,6 @@
 import fs from "fs";
-import type { OAuthCredentials } from "@earendil-works/pi-ai/oauth";
-import { getOAuthProvider } from "@earendil-works/pi-ai/oauth";
+import type { OAuthAuth, OAuthCredential, OAuthCredentials } from "@earendil-works/pi-ai";
+import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { Config } from "./config.js";
 import { log } from "./log.js";
 
@@ -15,6 +15,20 @@ export class AuthError extends Error {
 
 type CredentialsMap = Record<string, OAuthCredentials>;
 
+export type OAuthAuthResolver = (providerId: string) => OAuthAuth | undefined;
+
+export function resolveOAuthAuth(providerId: string): OAuthAuth | undefined {
+  const provider = builtinProviders().find((candidate) => candidate.id === providerId);
+  return provider?.auth.oauth;
+}
+
+function normalizeOAuthCredential(credentials: OAuthCredentials): OAuthCredential {
+  if (credentials.type === "oauth") {
+    return credentials as OAuthCredential;
+  }
+  return { ...credentials, type: "oauth" };
+}
+
 const MAX_RETRIES = 3;
 const BASE_DELAY_MILLISECONDS = 1000;
 
@@ -27,7 +41,10 @@ async function sleep(milliseconds: number): Promise<void> {
 // persisted back to disk so subsequent calls reuse the updated token. Retries
 // with exponential backoff on transient failures to handle cases where the
 // Anthropic OAuth endpoint is temporarily unreachable.
-export async function getApiKey(config: Config): Promise<string> {
+export async function getApiKey(
+  config: Config,
+  resolveProvider: OAuthAuthResolver = resolveOAuthAuth,
+): Promise<string> {
   if (config.apiKey !== undefined) {
     return config.apiKey;
   }
@@ -47,20 +64,21 @@ export async function getApiKey(config: Config): Promise<string> {
         throw readError;
       }
 
-      const provider = getOAuthProvider(config.provider);
-      if (provider === undefined) {
+      const oauth = resolveProvider(config.provider);
+      if (oauth === undefined) {
         throw new AuthError(`Unknown OAuth provider "${config.provider}".`);
       }
 
-      let providerCredentials = credentials[config.provider];
-      if (providerCredentials === undefined) {
+      const storedCredentials = credentials[config.provider];
+      if (storedCredentials === undefined) {
         throw new AuthError(`No OAuth credentials found for provider "${config.provider}". Visit /login to authenticate.`);
       }
+      let providerCredentials = normalizeOAuthCredential(storedCredentials);
 
       log.debug(`[stavrobot] OAuth token state: refresh=...${providerCredentials.refresh.slice(-8)}, access=...${providerCredentials.access.slice(-8)}, expires=${providerCredentials.expires}`);
 
       if (Date.now() >= providerCredentials.expires) {
-        providerCredentials = await provider.refreshToken(providerCredentials);
+        providerCredentials = await oauth.refresh(providerCredentials, AbortSignal.timeout(30_000));
         credentials[config.provider] = providerCredentials;
         fs.writeFileSync(authFile, JSON.stringify(credentials, null, 2));
         log.debug(`[stavrobot] OAuth token refreshed: refresh=...${providerCredentials.refresh.slice(-8)}, access=...${providerCredentials.access.slice(-8)}, expires=${providerCredentials.expires}`);
@@ -70,7 +88,11 @@ export async function getApiKey(config: Config): Promise<string> {
         log.info(`[stavrobot] OAuth token resolved after ${attempt + 1} attempts.`);
       }
 
-      return provider.getApiKey(providerCredentials);
+      const apiKey = (await oauth.toAuth(providerCredentials)).apiKey;
+      if (apiKey === undefined) {
+        throw new AuthError(`OAuth provider "${config.provider}" did not return an API key.`);
+      }
+      return apiKey;
     } catch (error) {
       lastError = error;
       const errorMessage = error instanceof Error ? error.message : String(error);

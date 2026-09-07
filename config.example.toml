@@ -3,7 +3,7 @@
 # groq, huggingface, kimi-coding, minimax, minimax-cn, mistral, openai,
 # openai-codex, opencode, opencode-go, openrouter, vercel-ai-gateway, xai, zai.
 provider = "anthropic"
-model = "claude-sonnet-4-20250514"
+model = "claude-sonnet-4-5"
 
 # Thinking level for the main agent. Known values: "off", "low", "medium", "high", "xhigh".
 # Defaults to "low" when omitted.
@@ -38,7 +38,7 @@ authFile = "/app/data/auth.json"
 #
 # Example: Anthropic-compatible proxy
 # provider = "anthropic"
-# model = "claude-sonnet-4-20250514"
+# model = "claude-sonnet-4-5"
 # apiKey = "your-proxy-key"
 # baseUrl = "https://proxy.example.com"
 # contextWindow = 200000

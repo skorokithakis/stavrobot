@@ -106,6 +106,7 @@ vi.mock("@earendil-works/pi-ai", () => ({
 }));
 vi.mock("@earendil-works/pi-ai/compat", () => ({
   complete: vi.fn(),
+  streamSimple: vi.fn(),
 }));
 vi.mock("@earendil-works/pi-ai/providers/all", () => ({
   getBuiltinModel: vi.fn().mockReturnValue({ contextWindow: 200000 }),

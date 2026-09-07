@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import pg from "pg";
 import { Type, type Model, type Api, type TextContent, type ImageContent, type AssistantMessage, type ToolCall } from "@earendil-works/pi-ai";
 import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { Agent, type AgentTool, type AgentToolResult, type AgentMessage, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Config } from "../config.js";
 import type { FileAttachment } from "../uploads.js";
@@ -499,6 +500,7 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
       tools: tools.map(wrapToolWithLogging),
       messages: [],
     },
+    streamFn: streamSimple,
     getApiKey: () => getApiKey(config),
     transformContext: async (messages) => {
       const truncated = truncateContext(messages, tokenBudget);

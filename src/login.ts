@@ -1,8 +1,8 @@
 import http from "http";
 import fs from "fs";
 import path from "path";
-import { getOAuthProvider, getOAuthProviders } from "@earendil-works/pi-ai/oauth";
-import type { OAuthCredentials } from "@earendil-works/pi-ai/oauth";
+import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
+import type { AuthPrompt, OAuthAuth, OAuthCredentials } from "@earendil-works/pi-ai";
 import type { Config } from "./config.js";
 import { log } from "./log.js";
 import { getBaseStyles } from "./theme.js";
@@ -10,12 +10,13 @@ import { getBaseStyles } from "./theme.js";
 // Module-level state for the pending prompt resolver and rejecter. Safe because
 // this is a single-user bot — only one login flow runs at a time.
 let pendingPromptResolver: ((value: string) => void) | null = null;
-// Rejecting this causes the library's provider.login() to throw, which triggers
+// Rejecting this causes the library's oauth.login() to throw, which triggers
 // its internal cleanup (cancelWait, closing the callback server). Only used for
 // timeout cancellation — disconnects must not cancel the flow.
 let pendingPromptReject: ((error: Error) => void) | null = null;
-// Set to true when the timeout fires before the library has called onPrompt or
-// onManualCodeInput, so those callbacks can reject immediately when they do run.
+let pendingPromptAbortCleanup: (() => void) | null = null;
+// Set to true when the timeout fires before the library has called prompt(), so
+// that callback can reject immediately when it does run.
 let loginCancelled = false;
 
 // Module-level state for the active login flow.
@@ -23,12 +24,12 @@ let loginFlowActive = false;
 // Monotonically increasing counter so stale disconnect handlers from an old
 // flow cannot accidentally clear state that belongs to a newer flow.
 let loginFlowCounter = 0;
-// Per-flow AbortController so the library's provider.login() can be cancelled
+// Per-flow AbortController so the library's oauth.login() can be cancelled
 // on timeout, including for device-code flows that poll in the background.
 let activeFlowController: AbortController | null = null;
 
 // The current SSE response to write events to. Swapped on reconnection without
-// restarting the underlying provider.login() call.
+// restarting the underlying oauth.login() call.
 let activeResponse: http.ServerResponse | null = null;
 let activeIsConnected = false;
 
@@ -41,6 +42,13 @@ let lastPromptMessage: string | null = null;
 let flowTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
 const FLOW_TIMEOUT_MS = 5 * 60 * 1000;
+
+export type OAuthAuthResolver = (providerId: string) => OAuthAuth | undefined;
+
+export function resolveOAuthAuth(providerId: string): OAuthAuth | undefined {
+  const provider = builtinProviders().find((candidate) => candidate.id === providerId);
+  return provider?.auth.oauth;
+}
 
 function buildLoginPageHtml(providerName: string): string {
   return `<!DOCTYPE html>
@@ -218,6 +226,56 @@ function sendActiveSseEvent(eventName: string, data: unknown): void {
   }
 }
 
+function clearPendingPrompt(): void {
+  if (pendingPromptAbortCleanup !== null) {
+    pendingPromptAbortCleanup();
+    pendingPromptAbortCleanup = null;
+  }
+  pendingPromptResolver = null;
+  pendingPromptReject = null;
+}
+
+function getPromptCancellationError(prompt: AuthPrompt, flowSignal: AbortSignal): Error | undefined {
+  if (loginCancelled || flowSignal.aborted) {
+    return new Error("Login flow timed out");
+  }
+  if (prompt.signal?.aborted) {
+    return new Error("Login prompt cancelled");
+  }
+  return undefined;
+}
+
+function waitForPrompt(prompt: AuthPrompt, flowSignal: AbortSignal): Promise<string> {
+  const cancellationError = getPromptCancellationError(prompt, flowSignal);
+  if (cancellationError !== undefined) {
+    return Promise.reject(cancellationError);
+  }
+
+  return new Promise((resolve, reject) => {
+    const signal = prompt.signal;
+
+    const abortPendingPrompt = (): void => {
+      if (pendingPromptReject !== reject) {
+        return;
+      }
+      clearPendingPrompt();
+      reject(new Error("Login prompt cancelled"));
+    };
+
+    lastPromptMessage = prompt.message;
+    pendingPromptResolver = resolve;
+    pendingPromptReject = reject;
+    if (signal !== undefined) {
+      signal.addEventListener("abort", abortPendingPrompt, { once: true });
+      pendingPromptAbortCleanup = (): void => {
+        signal.removeEventListener("abort", abortPendingPrompt);
+      };
+    }
+    log.debug(`[stavrobot] handleLoginEvents: prompt called (${prompt.type}), sending prompt event`);
+    sendActiveSseEvent("prompt", { message: prompt.message });
+  });
+}
+
 function clearFlowState(flowId: number): void {
   if (flowId !== loginFlowCounter) {
     return;
@@ -225,6 +283,11 @@ function clearFlowState(flowId: number): void {
   if (flowTimeoutHandle !== null) {
     clearTimeout(flowTimeoutHandle);
     flowTimeoutHandle = null;
+  }
+  const pendingReject = pendingPromptReject;
+  clearPendingPrompt();
+  if (pendingReject !== null) {
+    pendingReject(new Error("Login flow finished"));
   }
   if (activeFlowController !== null) {
     activeFlowController.abort();
@@ -236,14 +299,12 @@ function clearFlowState(flowId: number): void {
   lastAuthEvent = null;
   lastDeviceCodeInfo = null;
   lastPromptMessage = null;
-  pendingPromptResolver = null;
-  pendingPromptReject = null;
   loginCancelled = false;
 }
 
 export function serveLoginPage(response: http.ServerResponse, config: Config): void {
-  const provider = getOAuthProvider(config.provider);
-  const providerName = provider !== undefined ? provider.name : config.provider;
+  const provider = builtinProviders().find((candidate) => candidate.id === config.provider && candidate.auth.oauth !== undefined);
+  const providerName = provider?.name ?? config.provider;
   response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
   response.end(buildLoginPageHtml(providerName));
 }
@@ -252,6 +313,7 @@ export async function handleLoginEvents(
   request: http.IncomingMessage,
   response: http.ServerResponse,
   config: Config,
+  resolveProvider: OAuthAuthResolver = resolveOAuthAuth,
 ): Promise<void> {
   if (config.authFile === undefined) {
     response.writeHead(200, {
@@ -264,14 +326,14 @@ export async function handleLoginEvents(
     return;
   }
 
-  const provider = getOAuthProvider(config.provider);
-  if (provider === undefined) {
+  const oauth = resolveProvider(config.provider);
+  if (oauth === undefined) {
     response.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       "Connection": "keep-alive",
     });
-    const validIds = getOAuthProviders().map((p) => p.id).join(", ");
+    const validIds = builtinProviders().filter((candidate) => candidate.auth.oauth !== undefined).map((candidate) => candidate.id).join(", ");
     sendSseEvent(response, "error_event", { message: `Unknown OAuth provider "${config.provider}". Valid OAuth providers: ${validIds}` });
     response.end();
     return;
@@ -337,7 +399,7 @@ export async function handleLoginEvents(
 
   log.debug(`[stavrobot] handleLoginEvents: starting login flow ${flowId} for provider "${config.provider}"`);
 
-  // Per-flow AbortController so we can cancel provider.login() on timeout.
+  // Per-flow AbortController so we can cancel oauth.login() on timeout.
   // This is captured in the timeout closure below; clearFlowState resets the
   // module-level reference and aborts any leftover controller.
   const flowController = new AbortController();
@@ -349,103 +411,82 @@ export async function handleLoginEvents(
   flowTimeoutHandle = setTimeout(() => {
     if (flowId === loginFlowCounter && loginFlowActive) {
       log.warn(`[stavrobot] handleLoginEvents: flow ${flowId} timed out after ${FLOW_TIMEOUT_MS / 1000}s`);
-      // Abort the library's provider.login() so it stops polling in the
-      // background (device-code) and closes the callback server. This works
-      // regardless of whether a prompt is pending.
+      loginCancelled = true;
+      const pendingReject = pendingPromptReject;
+      if (pendingReject !== null) {
+        clearPendingPrompt();
+      }
       flowController.abort();
-      if (pendingPromptReject !== null) {
+      if (pendingReject !== null) {
         // The library is currently blocked waiting for user input. Rejecting its
         // promise causes it to call cancelWait() and close the callback server.
         // The resulting throw propagates to the catch block, which sends an
         // error event, then runs clearFlowState via finally.
-        pendingPromptReject(new Error("Login flow timed out"));
+        pendingReject(new Error("Login flow timed out"));
       } else {
-        // The library hasn't called onPrompt/onManualCodeInput yet (or has
-        // already moved past it). Mark the flow cancelled so those callbacks
-        // reject immediately if they are called. flowController.abort() above
-        // has already cancelled provider.login(), which will throw and trigger
-        // cleanup via the catch/finally blocks.
+        // The library hasn't called prompt() yet (or has already moved past it).
+        // A later prompt rejects immediately because the flow is already marked
+        // cancelled.
         //
         // Known limitation: cancellation here relies on the provider honouring
         // the abort signal. The built-in device-code providers (GitHub Copilot,
         // OpenAI Codex) forward it, and prompt-based providers (Anthropic, the
-        // default) settle via pendingPromptReject above. A hypothetical provider
+        // default) settle via the rejected prompt above. A hypothetical provider
         // that polls in the background without a pending prompt AND ignores the
-        // signal would not settle provider.login() here, leaving the flow
-        // running until it completes. We do not race/detach provider.login()
-        // because that would leak its callback server — the abort signal is the
-        // library's public cancellation contract and we rely on it.
-        loginCancelled = true;
+        // signal would not settle oauth.login() here, leaving the flow running
+        // until it completes. We do not race/detach oauth.login() because that
+        // would leak its callback server — the abort signal is the library's
+        // public cancellation contract and we rely on it.
       }
     }
   }, FLOW_TIMEOUT_MS);
 
   try {
-    const credentials = await provider.login({
+    const credentials = await oauth.login({
       signal: flowController.signal,
-      onAuth: (info) => {
-        log.debug("[stavrobot] handleLoginEvents: onAuth called, sending auth event");
-        lastAuthEvent = { url: info.url, instructions: info.instructions };
-        sendActiveSseEvent("auth", { url: info.url, instructions: info.instructions });
-      },
-      onDeviceCode: (info) => {
-        log.debug("[stavrobot] handleLoginEvents: onDeviceCode called, sending device_code event");
-        lastDeviceCodeInfo = {
-          userCode: info.userCode,
-          verificationUri: info.verificationUri,
-          intervalSeconds: info.intervalSeconds,
-          expiresInSeconds: info.expiresInSeconds,
-        };
-        sendActiveSseEvent("device_code", lastDeviceCodeInfo);
-      },
-      onPrompt: (prompt) => {
-        log.debug("[stavrobot] handleLoginEvents: onPrompt called, sending prompt event");
-        return new Promise<string>((resolve, reject) => {
-          if (loginCancelled) {
-            reject(new Error("Login flow timed out"));
+      notify: (event): void => {
+        switch (event.type) {
+          case "auth_url":
+            log.debug("[stavrobot] handleLoginEvents: auth_url received, sending auth event");
+            lastAuthEvent = { url: event.url, instructions: event.instructions };
+            sendActiveSseEvent("auth", { url: event.url, instructions: event.instructions });
             return;
-          }
-          lastPromptMessage = prompt.message;
-          pendingPromptResolver = resolve;
-          pendingPromptReject = reject;
-          sendActiveSseEvent("prompt", { message: prompt.message });
-        });
-      },
-      onProgress: (message) => {
-        log.debug("[stavrobot] handleLoginEvents: onProgress:", message);
-        sendActiveSseEvent("progress", { message });
-      },
-      // Races against the provider's local callback server. In a remote deployment
-      // the browser redirect hits localhost on the container, not the user's machine,
-      // so the callback server never receives the code. Providing this callback lets
-      // the user paste the redirect URL or code manually, whichever arrives first wins.
-      onManualCodeInput: () => {
-        log.debug("[stavrobot] handleLoginEvents: onManualCodeInput called, sending prompt event");
-        return new Promise<string>((resolve, reject) => {
-          if (loginCancelled) {
-            reject(new Error("Login flow timed out"));
+          case "device_code":
+            log.debug("[stavrobot] handleLoginEvents: device_code received, sending device_code event");
+            lastDeviceCodeInfo = {
+              userCode: event.userCode,
+              verificationUri: event.verificationUri,
+              intervalSeconds: event.intervalSeconds,
+              expiresInSeconds: event.expiresInSeconds,
+            };
+            sendActiveSseEvent("device_code", lastDeviceCodeInfo);
             return;
-          }
-          const message = "Paste the authorization code or full redirect URL from your browser:";
-          lastPromptMessage = message;
-          pendingPromptResolver = resolve;
-          pendingPromptReject = reject;
-          sendActiveSseEvent("prompt", { message });
-        });
-      },
-      // This is a single-user bot in a remote browser (SSE) flow. For providers
-      // that offer a choice of login methods, deterministically pick the browser
-      // method, which maps to the onAuth/onPrompt/onManualCodeInput path above.
-      onSelect: async (prompt) => {
-        const options = prompt.options.map((o) => o.id).join(", ");
-        log.debug(`[stavrobot] handleLoginEvents: onSelect called, options: [${options}]`);
-        const browserOption = prompt.options.find((o) => o.id === "browser");
-        if (browserOption !== undefined) {
-          log.debug("[stavrobot] handleLoginEvents: onSelect picking 'browser'");
-          return "browser";
+          case "progress":
+          case "info":
+            log.debug(`[stavrobot] handleLoginEvents: ${event.type}:`, event.message);
+            sendActiveSseEvent("progress", { message: event.message });
+            return;
         }
-        log.debug(`[stavrobot] handleLoginEvents: onSelect no 'browser' option, picking first: ${prompt.options[0].id}`);
-        return prompt.options[0].id;
+      },
+      prompt: async (prompt): Promise<string> => {
+        const cancellationError = getPromptCancellationError(prompt, flowController.signal);
+        if (cancellationError !== undefined) {
+          throw cancellationError;
+        }
+
+        if (prompt.type === "select") {
+          const options = prompt.options.map((option) => option.id).join(", ");
+          log.debug(`[stavrobot] handleLoginEvents: select prompt received, options: [${options}]`);
+          const browserOption = prompt.options.find((option) => option.id === "browser");
+          if (browserOption !== undefined) {
+            log.debug("[stavrobot] handleLoginEvents: select prompt picking 'browser'");
+            return "browser";
+          }
+          log.debug(`[stavrobot] handleLoginEvents: select prompt has no 'browser' option, picking first: ${prompt.options[0].id}`);
+          return prompt.options[0].id;
+        }
+
+        return waitForPrompt(prompt, flowController.signal);
       },
     });
 
@@ -527,8 +568,7 @@ export async function handleLoginRespond(
 
   log.debug("[stavrobot] handleLoginRespond: resolving pending prompt");
   const resolver = pendingPromptResolver;
-  pendingPromptResolver = null;
-  pendingPromptReject = null;
+  clearPendingPrompt();
   resolver(value);
 
   response.writeHead(200, { "Content-Type": "application/json" });
