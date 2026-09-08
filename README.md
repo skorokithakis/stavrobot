@@ -146,7 +146,8 @@ attachments.
 docker compose up --build
 ```
 
-The API is available at `http://localhost:10567/chat`.
+The API is available at `http://localhost:10567/chat`. See [HTTP API](#http-api) for the
+full list of endpoints.
 
 **Note:** Docker Compose only exposes the app on `localhost:10567`. To make it accessible externally (required for Telegram/Signal webhooks and the `publicHostname` setting), set up a reverse proxy (e.g. Nginx, Caddy) pointing to `localhost:10567`. You can also expose the port directly, but this is not recommended as traffic will be unencrypted.
 
@@ -159,6 +160,159 @@ npm install && npm run build && npm start
 ```
 
 Note: Python execution and Signal integration only work inside the Docker containers.
+
+## HTTP API
+
+Every endpoint requires HTTP Basic authentication with the `password` from `config.toml`
+(the username is ignored), except the ones marked **public** below. Error responses are
+JSON objects of the form `{"error": "..."}`.
+
+### `POST /chat`
+
+Sends a message to the agent and returns its reply. This is the main entry point: the web
+UI, the Signal bridge, the plugin runner, the coder, and the cron scheduler all use it.
+
+Messages are processed one at a time through a single queue. The request blocks until
+the agent has finished its turn, which can take a while if the agent uses tools.
+
+Request body is a JSON object (maximum 25 MB) with these fields. At least one of
+`message`, `files`, or `attachments` is required.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `message` | string | The text to send to the agent. |
+| `source` | string | The channel the message came from. Controls routing (see below) and is shown to the agent alongside the message. Omit it for direct calls; the agent then sees `cli`. |
+| `sender` | string | Who sent the message within that channel: an E.164 phone number for `signal` and `whatsapp`, a chat ID for `telegram`, an email address for `email`. Shown to the agent. |
+| `files` | array | Files sent inline. Each entry is `{ "data": "<base64>", "filename": "...", "mimeType": "..." }`. Files larger than 10 MB after decoding are skipped with a warning in the logs. Use this from outside the app container. |
+| `attachments` | array | Files already present in the app container's temporary upload directory. Each entry is `{ "storedPath", "originalFilename", "mimeType", "size" }`. Paths outside the upload directory are rejected. This is for internal callers only; external callers should use `files`. |
+
+Routing by `source`:
+
+- Absent, or one of `cli`, `cron`, `coder`, `upload`, or `plugin:<name>`: goes to the
+  main agent as a message from you.
+- `signal`, `telegram`, `whatsapp`, `email`: `sender` is required. If it matches one of
+  your identities in `[owner]`, the message goes to the main agent. Otherwise the sender
+  must be in the allowlist and be assigned to an agent as an interlocutor; if not, the
+  message is dropped.
+- Anything else: goes to the main agent with the source name shown to the agent. No
+  allowlist check.
+
+Two special cases:
+
+- If the message is exactly `/stop`, the running agent turn is aborted and the response is
+  `Aborted.`. Nothing is queued.
+- If the agent is busy with one of your messages and another message from you arrives, the
+  new message is injected into the running turn instead of being queued. The response is
+  `Message received, steering the current request.`; the agent's reply to it becomes part
+  of the running turn, and is returned to whoever made the request that started that turn.
+
+Response: `200` with `{"response": "<agent reply>"}`. A dropped message (unknown sender on
+a gated channel) also returns `200`, with an empty `response` string.
+
+Errors: `400` for invalid JSON or a body with none of the required fields, `401` for a
+missing or wrong password, `413` if the body exceeds 25 MB, `500` for anything else.
+
+Examples:
+
+```bash
+curl -u :yourpassword -H 'Content-Type: application/json' \
+  -d '{"message": "What is on my calendar today?"}' \
+  http://localhost:10567/chat
+
+curl -u :yourpassword -H 'Content-Type: application/json' \
+  -d "{\"message\": \"Summarize this.\", \"files\": [{\"data\": \"$(base64 -w0 notes.txt)\", \"filename\": \"notes.txt\", \"mimeType\": \"text/plain\"}]}" \
+  http://localhost:10567/chat
+```
+
+### `POST /api/upload`
+
+Uploads a single file and hands it to the agent as a message with no text and
+`source: upload`. Returns immediately; the agent processes the file in the background.
+
+Body is `multipart/form-data` with a `file` part (maximum 10 MB) and an optional
+`filename` text field that overrides the original filename.
+
+Response: `200` with `{"message": "File uploaded successfully", "filename": "<stored name>"}`.
+Errors: `400` if the `file` part is missing, `413` if the file exceeds 10 MB.
+
+### Webhooks
+
+These accept inbound messages from external services. Each has its own authentication.
+
+- `POST /telegram/webhook` (**public**). Called by Telegram. Authenticated by the
+  `X-Telegram-Bot-Api-Secret-Token` header, which Stavrobot generates and registers with
+  Telegram at startup. Returns `403` on a bad secret, `404` if Telegram is not configured.
+  Responds `200 {"ok": true}` immediately and processes the update in the background.
+- `POST /email/webhook` (**public**). Called by the Cloudflare Email Worker. Authenticated
+  by `Authorization: Bearer <webhookSecret>` from the `[email]` config section. Body is
+  JSON `{ "from", "to", "raw" }` where `raw` is the full RFC 822 message. Responds
+  `200 {"ok": true}` immediately and processes the email in the background. Returns `404`
+  if email is not configured.
+- `POST /pebble-index/webhook`. Basic auth. Body is `multipart/form-data` with
+  `recordedAt` (epoch milliseconds), `client`, and at least one of a `transcription` text
+  field or an `audio` file part (`audio/mp4`, maximum 25 MB). Responds `200 {"ok": true}`
+  immediately and queues the recording for the agent in the background.
+
+### Pages
+
+Pages are files the agent publishes through its `manage_pages` tool. Each page is either
+public or private.
+
+- `GET /pages/<path>` (**public route, per-page auth**). Serves the latest version of the
+  page with its stored MIME type. Private pages require Basic auth. Deleted or unknown
+  pages return `404`.
+- `GET /api/pages/<path>/queries/<name>` (**public route, per-page auth**). Runs a named
+  read-only SQL query stored with the page and returns the rows as a JSON array. Query
+  placeholders of the form `$param:foo` are filled from the `?foo=` query string; a
+  missing parameter returns `400`. Auth follows the page's public flag.
+
+### Database explorer
+
+- `GET /api/explorer/tables`: JSON list of tables.
+- `GET /api/explorer/tables/<table>`: JSON schema of one table. `404` if it does not exist.
+- `GET /api/explorer/tables/<table>/rows`: JSON rows. Query parameters: `limit` (1 to
+  100, default 50), `offset` (default 0), `orderBy` (column name), `orderDirection`
+  (`asc` or `desc`, default `asc`).
+
+### Plugin management
+
+These proxy to the plugin runner. Bodies are JSON.
+
+- `GET /api/settings/plugins/list`: all installed plugins.
+- `GET /api/settings/plugins/<name>/detail`: one plugin's manifest.
+- `GET /api/settings/plugins/<name>/config`: the plugin's configuration, including
+  secret values. Never exposed to the agent.
+- `POST /api/settings/plugins/install`: body `{ "url": "<git url>" }`.
+- `POST /api/settings/plugins/update`: body `{ "name": "<plugin>" }`.
+- `POST /api/settings/plugins/remove`: body `{ "name": "<plugin>" }`.
+- `POST /api/settings/plugins/configure`: body `{ "name": "<plugin>", "config": { ... } }`.
+  Replaces the plugin's configuration.
+
+### Allowlist
+
+- `GET /api/settings/allowlist`: returns `{ "allowlist", "ownerIdentities" }`. The
+  allowlist has `signal`, `whatsapp`, `email` (arrays of strings), `telegram` (array of
+  integers), and `notes` (object mapping an entry to a free-text label).
+- `PUT /api/settings/allowlist`: body is the same `allowlist` shape. All four arrays are
+  required; `notes` is optional. Phone numbers must be E.164, Telegram entries must be
+  integers, and `"*"` in any list allows everyone on that channel. Your own identities from
+  `[owner]` are always added back if omitted. Returns the saved allowlist.
+
+### Login and Signal captcha
+
+- `GET /login/events`: server-sent events stream that drives the OAuth login flow started
+  from the `/login` page. Event types: `auth`, `device_code`, `prompt`, `progress`,
+  `success`, `error_event`.
+- `POST /login/respond`: body `{ "value": "<code>" }`, answers the pending `prompt` from
+  the login flow. `409` if no prompt is pending.
+- `POST /signal/captcha`: body `{ "captcha": "signalcaptcha://..." }`, forwarded to the
+  Signal bridge when Signal registration requires a captcha.
+
+### Web UI pages
+
+`GET /` (chat), `/login`, `/explorer`, `/settings`, `/settings/plugins`,
+`/settings/allowlist`, and `/signal/captcha` serve the HTML pages that use the endpoints
+above. `/plugins` redirects to `/settings/plugins`.
 
 ## Knowledge system
 
