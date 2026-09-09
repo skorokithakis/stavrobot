@@ -4,6 +4,9 @@ import { describe, it, expect, vi } from "vitest";
 import { handlePageQueryRequest, handleTelegramWebhookRequest, checkBasicAuth, readRequestBody, handleChatRequest } from "./index.js";
 import type { Pool, QueryResult } from "pg";
 import type { TelegramConfig } from "./config.js";
+import { log } from "./log.js";
+import { enqueueMessage } from "./queue.js";
+import { saveAttachment } from "./uploads.js";
 
 // Mock queue and uploads so handleChatRequest tests don't need real infrastructure.
 vi.mock("./queue.js", () => ({
@@ -301,6 +304,22 @@ function makeBodyRequest(body: Buffer, headers: Record<string, string> = {}): ht
   }) as unknown as http.IncomingMessage;
 }
 
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
+}
+
+function createDeferred<T>(): Deferred<T> {
+  let resolvePromise: (value: T) => void = () => {};
+  let rejectPromise: (reason?: unknown) => void = () => {};
+  const promise = new Promise<T>((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  return { promise, resolve: resolvePromise, reject: rejectPromise };
+}
+
 describe("readRequestBody size limit", () => {
   it("returns the body when it is within the limit", async () => {
     const body = Buffer.from(JSON.stringify({ message: "hello" }));
@@ -332,8 +351,7 @@ describe("handleChatRequest body size limit", () => {
 
 describe("handleChatRequest base64 file handling", () => {
   it("saves a small base64 file and returns 200", async () => {
-    const { saveAttachment: mockSaveAttachment } = await import("./uploads.js");
-    const saveMock = vi.mocked(mockSaveAttachment);
+    const saveMock = vi.mocked(saveAttachment);
     saveMock.mockClear();
 
     const smallBase64 = Buffer.from("hello world").toString("base64");
@@ -366,5 +384,129 @@ describe("handleChatRequest base64 file handling", () => {
     await handleChatRequest(request, response as unknown as http.ServerResponse);
 
     expect(response.statusCode).toBe(413);
+  });
+});
+
+describe("handleChatRequest async acknowledgement", () => {
+  it("acknowledges a request while its queue processing remains pending", async () => {
+    const mockEnqueue = vi.mocked(enqueueMessage);
+    mockEnqueue.mockClear();
+    const deferred = createDeferred<string>();
+    mockEnqueue.mockReturnValueOnce(deferred.promise);
+
+    const request = makeBodyRequest(Buffer.from(JSON.stringify({
+      message: "test",
+      source: "signal",
+      sender: "+1234567890",
+      async: true,
+    })));
+    const response = makeMockResponse();
+
+    await handleChatRequest(request, response as unknown as http.ServerResponse);
+
+    expect(response.statusCode).toBe(202);
+    expect(response.body).toBe(JSON.stringify({ accepted: true }));
+    expect(mockEnqueue).toHaveBeenCalledOnce();
+    expect(mockEnqueue).toHaveBeenCalledWith("test", "signal", "+1234567890", undefined);
+
+    deferred.resolve("complete");
+  });
+
+  for (const { label, payload } of [
+    { label: "omitted", payload: { message: "test" } },
+    { label: "false", payload: { message: "test", async: false } },
+  ]) {
+    it(`waits for queue processing when async is ${label}`, async () => {
+      const mockEnqueue = vi.mocked(enqueueMessage);
+      mockEnqueue.mockClear();
+      const deferred = createDeferred<string>();
+      mockEnqueue.mockReturnValueOnce(deferred.promise);
+
+      const request = makeBodyRequest(Buffer.from(JSON.stringify(payload)));
+      const response = makeMockResponse();
+      const requestPromise = handleChatRequest(request, response as unknown as http.ServerResponse);
+
+      await vi.waitFor(() => {
+        expect(mockEnqueue).toHaveBeenCalledOnce();
+      });
+      expect(response.statusCode).toBeUndefined();
+
+      deferred.resolve("complete");
+      await requestPromise;
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toBe(JSON.stringify({ response: "complete" }));
+    });
+  }
+
+  for (const { label, asyncValue } of [
+    { label: "string", asyncValue: "true" },
+    { label: "number", asyncValue: 1 },
+    { label: "null", asyncValue: null },
+    { label: "object", asyncValue: {} },
+    { label: "array", asyncValue: [] },
+  ]) {
+    it(`rejects a ${label} async value before file writes or enqueueing`, async () => {
+      const mockEnqueue = vi.mocked(enqueueMessage);
+      const mockSaveAttachment = vi.mocked(saveAttachment);
+      mockEnqueue.mockClear();
+      mockSaveAttachment.mockClear();
+
+      const request = makeBodyRequest(Buffer.from(JSON.stringify({
+        message: "test",
+        async: asyncValue,
+        files: [{ data: Buffer.from("file").toString("base64"), filename: "file.txt", mimeType: "text/plain" }],
+      })));
+      const response = makeMockResponse();
+
+      await handleChatRequest(request, response as unknown as http.ServerResponse);
+
+      expect(response.statusCode).toBe(400);
+      expect(JSON.parse(response.body ?? "{}").error).toMatch(/async.*boolean/i);
+      expect(mockSaveAttachment).not.toHaveBeenCalled();
+      expect(mockEnqueue).not.toHaveBeenCalled();
+    });
+  }
+
+  it("keeps required-content validation for async requests", async () => {
+    const mockEnqueue = vi.mocked(enqueueMessage);
+    mockEnqueue.mockClear();
+    const request = makeBodyRequest(Buffer.from(JSON.stringify({ async: true })));
+    const response = makeMockResponse();
+
+    await handleChatRequest(request, response as unknown as http.ServerResponse);
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toBe(JSON.stringify({ error: "At least one of 'message', 'attachments', or 'files' must be present" }));
+    expect(mockEnqueue).not.toHaveBeenCalled();
+  });
+
+  it("logs a detached enqueue rejection without sending another response", async () => {
+    const mockEnqueue = vi.mocked(enqueueMessage);
+    mockEnqueue.mockClear();
+    const deferred = createDeferred<string>();
+    mockEnqueue.mockReturnValueOnce(deferred.promise);
+    const error = new Error("queue failed");
+    const logErrorSpy = vi.spyOn(log, "error").mockImplementation(() => {});
+    const request = makeBodyRequest(Buffer.from(JSON.stringify({ message: "test", async: true })));
+    const response = makeMockResponse();
+    const writeHeadSpy = vi.spyOn(response, "writeHead");
+    const endSpy = vi.spyOn(response, "end");
+
+    try {
+      await handleChatRequest(request, response as unknown as http.ServerResponse);
+      deferred.reject(error);
+
+      await vi.waitFor(() => {
+        expect(logErrorSpy).toHaveBeenCalledWith("[stavrobot] Error processing asynchronous chat request:", error);
+      });
+
+      expect(response.statusCode).toBe(202);
+      expect(response.body).toBe(JSON.stringify({ accepted: true }));
+      expect(writeHeadSpy).toHaveBeenCalledOnce();
+      expect(endSpy).toHaveBeenCalledOnce();
+    } finally {
+      logErrorSpy.mockRestore();
+    }
   });
 });

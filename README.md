@@ -172,8 +172,10 @@ JSON objects of the form `{"error": "..."}`.
 Sends a message to the agent and returns its reply. This is the main entry point: the web
 UI, the Signal bridge, the plugin runner, the coder, and the cron scheduler all use it.
 
-Messages are processed one at a time through a single queue. The request blocks until
-the agent has finished its turn, which can take a while if the agent uses tools.
+Messages are processed one at a time through a single queue. By default, the request
+blocks until the agent has finished its turn, which can take a while if the agent uses
+tools. Set `"async": true` to acknowledge after the message is submitted through
+`enqueueMessage` without waiting for the turn to finish.
 
 Request body is a JSON object (maximum 25 MB) with these fields. At least one of
 `message`, `files`, or `attachments` is required.
@@ -181,6 +183,7 @@ Request body is a JSON object (maximum 25 MB) with these fields. At least one of
 | Field | Type | Description |
 | --- | --- | --- |
 | `message` | string | The text to send to the agent. |
+| `async` | boolean | Optional. Set to the literal `true` to receive `202` with `{"accepted":true}` after submission instead of waiting for the reply. Omit it or set it to `false` to wait normally. Other values are rejected. |
 | `source` | string | The channel the message came from. Controls routing (see below) and is shown to the agent alongside the message. Omit it for direct calls; the agent then sees `cli`. |
 | `sender` | string | Who sent the message within that channel: an E.164 phone number for `signal` and `whatsapp`, a chat ID for `telegram`, an email address for `email`. Shown to the agent. |
 | `files` | array | Files sent inline. Each entry is `{ "data": "<base64>", "filename": "...", "mimeType": "..." }`. Files larger than 10 MB after decoding are skipped with a warning in the logs. Use this from outside the app container. |
@@ -199,24 +202,38 @@ Routing by `source`:
 
 Two special cases:
 
-- If the message is exactly `/stop`, the running agent turn is aborted and the response is
-  `Aborted.`. Nothing is queued.
+- If the message is exactly `/stop`, the running agent turn is aborted. Nothing is queued.
+  A synchronous request receives `Aborted.`.
 - If the agent is busy with one of your messages and another message from you arrives, the
-  new message is injected into the running turn instead of being queued. The response is
-  `Message received, steering the current request.`; the agent's reply to it becomes part
-  of the running turn, and is returned to whoever made the request that started that turn.
+  new message is injected into the running turn instead of being queued. A synchronous
+  steering request receives `Message received, steering the current request.` The agent's
+  reply becomes part of the running turn and is returned only when the HTTP request that
+  started that turn is synchronous.
 
-Response: `200` with `{"response": "<agent reply>"}`. A dropped message (unknown sender on
-a gated channel) also returns `200`, with an empty `response` string.
+Response: with `async` omitted or set to `false`, `200` with
+`{"response": "<agent reply>"}`. With `async: true`, the response is `202` with
+`{"accepted":true}`; it follows the same enqueue path, preserving routing, `/stop`, and
+owner steering behavior, but no agent reply is returned to that request. For synchronous
+calls, a dropped message (unknown sender on a gated channel) also returns `200`, with an
+empty `response` string.
 
-Errors: `400` for invalid JSON or a body with none of the required fields, `401` for a
-missing or wrong password, `413` if the body exceeds 25 MB, `500` for anything else.
+The acknowledgement confirms submission to the in-memory queue, not eventual completion.
+Queued work is lost if the app restarts before processing it, and any later enqueue
+rejection is logged because the HTTP response has already been sent.
+
+Errors: `400` for invalid JSON, a body with none of the required fields, or a present
+non-boolean `async` field; `401` for a missing or wrong password, `413` if the body
+exceeds 25 MB, `500` for anything else.
 
 Examples:
 
 ```bash
 curl -u :yourpassword -H 'Content-Type: application/json' \
   -d '{"message": "What is on my calendar today?"}' \
+  http://localhost:10567/chat
+
+curl -u :yourpassword -H 'Content-Type: application/json' \
+  -d '{"message": "Process this in the background.", "async": true}' \
   http://localhost:10567/chat
 
 curl -u :yourpassword -H 'Content-Type: application/json' \

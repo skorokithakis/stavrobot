@@ -43,6 +43,14 @@ External caller (Telegram / Signal / WhatsApp / email / Pebble Index / CLI)
 
 Webhook handlers acknowledge the request before their queued message is processed.
 
+`POST /chat` also accepts an optional boolean `async` field. With `async: true`, the
+handler validates the request and submits it through `enqueueMessage` once, then returns
+`202 {"accepted":true}` without awaiting the turn. When the field is omitted or `false`,
+the caller waits for the normal response string. The async path does not bypass the
+queue, so its serialization, routing, `/stop`, and owner-steering behavior remain the
+same. A present non-boolean `async` value is rejected before raw file attachments are
+written.
+
 Owner messages arriving while a turn is in progress are **steered** into the running
 turn via `Agent.steer()` rather than queued. Non-owner messages are always queued.
 

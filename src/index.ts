@@ -136,6 +136,16 @@ export async function handleChatRequest(
       return;
     }
 
+    let asyncRequested = false;
+    if ("async" in parsedBody) {
+      if (typeof parsedBody.async !== "boolean") {
+        response.writeHead(400, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ error: "'async' must be a boolean" }));
+        return;
+      }
+      asyncRequested = parsedBody.async;
+    }
+
     const message = "message" in parsedBody && typeof parsedBody.message === "string" ? parsedBody.message : undefined;
 
     let attachments: FileAttachment[] | undefined;
@@ -214,7 +224,18 @@ export async function handleChatRequest(
       return;
     }
 
-    const assistantResponse = await enqueueMessage(message, source, sender, combinedAttachments);
+    const enqueuePromise = enqueueMessage(message, source, sender, combinedAttachments);
+    if (asyncRequested) {
+      // Keep async calls on the same queue so ordering and owner steering still apply.
+      void enqueuePromise.catch((error: unknown) => {
+        log.error("[stavrobot] Error processing asynchronous chat request:", error);
+      });
+      response.writeHead(202, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ accepted: true }));
+      return;
+    }
+
+    const assistantResponse = await enqueuePromise;
 
     response.writeHead(200, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ response: assistantResponse }));
