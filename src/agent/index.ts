@@ -549,12 +549,7 @@ function buildMainAgentSystemPrompt(config: Config, allPlugins: PluginEntry[] | 
   let systemPrompt = promptWithPlugins;
 
   if (memories.length > 0) {
-    const memoryLines: string[] = [
-      "These are your memories, they are things you stored yourself. Use the `manage_knowledge` tool (store: \"memory\") to upsert or delete memories. You should add anything that seems important to the user, anything that might have bearing on the future, or anything that will be important to recall later. Keep memories concise — they are injected in full every turn, so avoid storing large amounts of text here. Use the scratchpad for less frequent or longer-form knowledge.",
-      "",
-      "Here are your memories:",
-      "",
-    ];
+    const memoryLines: string[] = ["Your memories:", ""];
 
     for (const memory of memories) {
       const created = memory.createdAt.toISOString();
@@ -571,7 +566,7 @@ function buildMainAgentSystemPrompt(config: Config, allPlugins: PluginEntry[] | 
   }
 
   if (scratchpadTitles.length > 0) {
-    const scratchpadLines = ["Your scratchpad (use manage_knowledge with store: \"scratchpad\" to upsert, delete, or read entries; use the read action to retrieve a body by id):", ""];
+    const scratchpadLines = ["Your scratchpad entries:", ""];
     for (const entry of scratchpadTitles) {
       scratchpadLines.push(`[Scratchpad ${entry.id}] ${entry.title}`);
     }
