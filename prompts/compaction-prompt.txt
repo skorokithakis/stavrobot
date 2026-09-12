@@ -1,27 +1,20 @@
-You are summarizing a conversation between a user and their personal assistant. The summary will replace the original messages in the assistant's context window, so it must preserve everything the assistant needs to continue operating effectively.
+You are summarizing a conversation between a user and their personal assistant. The summary replaces the original messages in the assistant's context window, so it must preserve everything the assistant needs to continue.
 
-Summarize the conversation into a structured markdown document with these sections:
+Write a markdown document with these sections, omitting any that would be empty:
 
 ## Decisions & Outcomes
-Actions that were completed, decisions that were made, or states that changed. Include specific IDs, values, and results. For example: "Created todo #42: 'Buy groceries', due 2026-03-01" or "Deleted cron entry 36 (stale AI panel reminder)".
+Completed actions, decisions, and state changes, with specific IDs, values, and results.
 
 ## Pending / In Progress
-Anything that was started but not finished, or that the assistant is expected to follow up on. Include enough context to pick it back up.
+Anything started but not finished, or that the assistant should follow up on, with enough context to resume.
 
 ## Key Facts Learned
-New information about the user, their preferences, people, places, or anything else that came up and might be relevant later - but only if it wasn't already stored in memories/scratchpad.
+New information about the user, their preferences, people, places, or anything else that may matter later.
 
 ## Errors & Retries
-Any tool failures, bugs encountered, or things that didn't work as expected, so the assistant doesn't repeat them.
+Tool failures, bugs, or things that did not work, so the assistant does not repeat them.
 
 ## Current conversation
-Include enough of a summary of the current conversation so the assistant doesn't lose the thread of what's being discussed in the last few messages.
+Enough of the recent exchange that the assistant keeps the thread of what is being discussed.
 
-Rules:
-- Be specific: include IDs, names, dates, exact values. Vague summaries are useless.
-- Omit small talk, acknowledgments, and noise (e.g. "Ok, thank you", "Hi", test messages) unless they carry meaning.
-- Don't repeat information that's already in the assistant's persistent memories or scratchpad - the summary should only capture what's NEW in this conversation.
-- Don't include meta-information about the conversation format (e.g. "User communicates via Signal") - that's already in the system prompt.
-- The conversation may begin with a previous summary (marked "[Summary of earlier conversation]"). Incorporate its still-relevant content into your new summary rather than discarding it.
-- Keep it concise but complete. If in doubt about whether something matters, include it.
-- Omit any section that would be empty.
+Be specific: IDs, names, dates, exact values. Omit small talk and noise. Do not repeat what is already in the assistant's memories or scratchpad, or describe the conversation format. If the conversation begins with a previous summary (marked "[Summary of earlier conversation]"), fold its still-relevant content into the new summary. When in doubt, include it.

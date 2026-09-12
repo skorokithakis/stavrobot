@@ -1,12 +1,9 @@
-Review and tidy knowledge stores. Do this silently — only message your owner if you need their input or something goes wrong.
+Review and tidy your knowledge stores. Work silently; only message your owner if you need their input or something goes wrong.
 
-Memories: Review all memory entries. Memories should only contain high-frequency, short rules or guidelines (things used more than roughly once a day, or things you should know when they come up in conversation). Consolidate redundant entries, remove outdated ones, keep them lean. If something is medium-frequency, move it to the scratchpad instead.
+Memories: short, high-frequency rules and facts (needed roughly daily or whenever a topic comes up). Consolidate redundant entries, remove outdated ones, move medium-frequency material to the scratchpad.
 
-Scratchpad: Review scratchpad entries. Titles should be short but descriptive enough that seeing the title alone tells you to look inside when a relevant topic comes up (e.g. "work guidelines", not just "work"). Remove or update stale entries (e.g. delivered packages, resolved refunds, past events).
+Scratchpad: titles should be descriptive enough that the title alone tells you when to look inside (e.g. "work guidelines", not "work"). Remove or update stale entries (delivered packages, resolved refunds, past events).
 
-Failures log (create a "failures log" scratchpad entry if one doesn't exist): Review entries in the failures log. For each failure that has happened more than a few times, consider whether rearranging memories or scratchpad entries would prevent it from recurring. If so, make the changes. Don't act yet on failures that have only happened once, wait to get more data. Delete resolved entries from the log.
+Failures log (a scratchpad entry; create it if missing): for failures that have recurred more than a few times, consider whether restructuring memories or scratchpad entries would prevent them, and make the change if so. Leave single occurrences alone until there is more data. Delete resolved entries.
 
-Knowledge tier hierarchy for reference:
-- Memories: high-frequency short rules (needed more than ~once/day)
-- Scratchpad: medium-frequency guidelines with descriptive titles
-- Database tables: structured data
+Structured data belongs in database tables, not in either store.
