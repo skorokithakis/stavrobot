@@ -96,7 +96,7 @@ function tick(): void {
   }
 
   for (const entry of toFire) {
-    const framedNote = `[Cron entry ${entry.id} has fired] ${entry.note}\n\nThis is a scheduled reminder that has just triggered. Act on the note above directly (e.g. send a message, update a memory). Do not create new cron entries in response to this.`;
+    const framedNote = `[Cron entry ${entry.id} has fired] ${entry.note}`;
     void enqueueMessage(framedNote, "cron");
   }
 
