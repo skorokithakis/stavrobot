@@ -292,12 +292,12 @@ PY
 		readme=""
 		if [ -f "$clone_dir/README.md" ]; then
 			# Neutralise Zola shortcode delimiters so a third-party README cannot
-			# invoke an unknown shortcode and fail the whole build. Also escape the
-			# opening angle bracket of <script> tags as an HTML entity so a
-			# third-party README cannot inject a script that the CSP generator below
-			# would then hash and whitelist. A backslash escape is not enough: markdown
-			# passes it through verbatim inside a raw HTML block, leaving a real script
-			# element, whereas &lt; is rendered as text in inline and block contexts.
+			# invoke an unknown shortcode and fail the whole build. Escape the opening
+			# angle bracket of every raw HTML construct so tags, comments, doctypes
+			# and processing instructions become visible text. A backslash escape is
+			# not enough: markdown passes it through verbatim inside a raw HTML block,
+			# leaving a real element, whereas &lt; is rendered as text in inline and
+			# block contexts.
 			readme="$(python3 - "$clone_dir/README.md" <<'PY'
 import re
 import sys
@@ -306,11 +306,13 @@ with open(sys.argv[1], "r", encoding="utf-8", errors="replace") as handle:
     text = handle.read()
 
 # Bash command substitution strips NUL bytes after Python exits, so remove them
-# first to prevent NUL-injected shortcodes from becoming raw delimiters later.
+# first to prevent NUL-injected shortcodes or tags from being reassembled later.
 text = text.replace("\x00", "")
 
 text = re.sub(r"(\{)(?=[{%])", r"\1\\", text)
-text = re.sub(r"<(?=/?script)", "&lt;", text, flags=re.IGNORECASE)
+# Escape the opening angle bracket of any raw HTML: a tag with an optional
+# closing slash, a comment or doctype (<!), and a processing instruction (<?).
+text = re.sub(r"<(?=[!?]|/?[A-Za-z])", "&lt;", text)
 
 sys.stdout.write(text)
 PY
@@ -379,6 +381,71 @@ done
 if [ "$content_only" = false ]; then
 	zola build
 
+	# The markdown renderer copies link and image destinations straight into
+	# href/src with no scheme validation, and it decodes HTML entities in those
+	# destinations first. Check the schemes on the rendered attributes, where
+	# entity decoding is already done, and neutralise anything that is not a
+	# safe web scheme. This runs only on third-party pages.
+	for i in "${!plugin_sources[@]}"; do
+		[ "${plugin_sources[$i]}" = "third-party" ] || continue
+		python3 - "$REPO_ROOT/public/plugins/${plugin_slugs[$i]}/index.html" <<'PY'
+import html
+import re
+import sys
+from pathlib import Path
+
+ALLOWED_SCHEMES = {"http", "https", "mailto"}
+SCHEME_RE = re.compile(r"^([a-z][a-z0-9+.\-]*):", re.IGNORECASE)
+# Match href/src attributes as three separate forms so the whole destination is
+# always captured. A double-quoted value may contain anything up to the closing
+# double quote (including whitespace, single quotes and ">"), a single-quoted
+# value anything up to the closing single quote, and only an unquoted value
+# stops at whitespace or the end of the tag. The lookbehind keeps data-src and
+# xlink:href, which are not navigation targets, untouched.
+ATTRIBUTE_RE = re.compile(
+    r'(?P<prefix>(?<![\w:-])(?:href|src)\s*=\s*)'
+    r'(?:"(?P<double>[^"]*)"'
+    r"|'(?P<single>[^']*)'"
+    r"|(?P<unquoted>[^\s>]*))",
+    re.IGNORECASE,
+)
+
+
+def attribute_destination(match):
+    # Return the destination and the quote character that surrounded it, if any.
+    if match.group("double") is not None:
+        return match.group("double"), '"'
+    if match.group("single") is not None:
+        return match.group("single"), "'"
+    return match.group("unquoted"), ""
+
+
+def value_is_safe(value):
+    # The browser decodes entities before using the URL, so decode them here.
+    decoded = html.unescape(value)
+    # Browsers ignore ASCII control characters and spaces in a scheme.
+    decoded = re.sub(r"[\x00-\x20]", "", decoded)
+    match = SCHEME_RE.match(decoded)
+    if match is None:
+        return True
+    return match.group(1).lower() in ALLOWED_SCHEMES
+
+
+def neutralise(match):
+    value, quote = attribute_destination(match)
+    if value_is_safe(value):
+        return match.group(0)
+    # Drop the dangerous destination but keep the attribute so the element
+    # still renders.
+    return match.group("prefix") + quote + "#" + quote
+
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+path.write_text(ATTRIBUTE_RE.sub(neutralise, text), encoding="utf-8")
+PY
+	done
+
 	# Copy raw skill .md files into the Zola output so they're served as-is at
 	# their original URLs (the bot fetches these as raw markdown).
 	mkdir -p "$REPO_ROOT/public/skills"
@@ -405,70 +472,4 @@ if [ "$content_only" = false ]; then
 			echo "| $filename | $title | $description | $version |" >>"$REPO_ROOT/public/skills/index.md"
 		done
 	fi
-
-	# Write the Cloudflare Pages _headers file. The script-src hashes are derived
-	# from the built HTML because minify_html rewrites the inline script bodies,
-	# so hashing the templates would produce hashes the browser never sees.
-	python3 - "$REPO_ROOT/public" <<'PY'
-import base64
-import hashlib
-import pathlib
-import sys
-from html.parser import HTMLParser
-
-
-# Collect inline script bodies, ignoring scripts with a real src attribute.
-# HTMLParser handles a quoted ">" inside an attribute and whitespace in the
-# closing tag, both of which defeat a regex-based extraction.
-class ScriptBodyExtractor(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.in_script = False
-        self.has_src = False
-        self.body_parts = []
-        self.bodies = []
-
-    def handle_starttag(self, tag, attrs):
-        if tag == "script":
-            self.in_script = True
-            self.has_src = any(name == "src" for name, _ in attrs)
-            self.body_parts = []
-
-    def handle_data(self, data):
-        if self.in_script:
-            self.body_parts.append(data)
-
-    def handle_endtag(self, tag):
-        if tag == "script" and self.in_script:
-            if not self.has_src:
-                self.bodies.append("".join(self.body_parts))
-            self.in_script = False
-
-
-public = pathlib.Path(sys.argv[1])
-hashes = set()
-for path in public.rglob("*.html"):
-    extractor = ScriptBodyExtractor()
-    extractor.feed(path.read_text(encoding="utf-8"))
-    extractor.close()
-    for body in extractor.bodies:
-        digest = hashlib.sha256(body.encode("utf-8")).digest()
-        hashes.add("'sha256-" + base64.b64encode(digest).decode("ascii") + "'")
-
-policy = (
-    "default-src 'none'; "
-    "script-src " + " ".join(sorted(hashes)) + "; "
-    "style-src 'self'; "
-    "img-src 'self' https: data:; "
-    "connect-src https://api.github.com; "
-    "base-uri 'none'; "
-    "form-action 'none'; "
-    "frame-ancestors 'none'"
-)
-
-(public / "_headers").write_text(
-    f"/*\n  Content-Security-Policy: {policy}\n",
-    encoding="utf-8",
-)
-PY
 fi
