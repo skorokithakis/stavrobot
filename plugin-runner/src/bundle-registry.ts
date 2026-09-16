@@ -9,6 +9,8 @@ export const PLUGINS_DIR = "/plugins";
 export interface BundleManifest {
   name: string;
   description: string;
+  // Consumed by the website build for the public plugin listing; not used by the runner.
+  summary?: string;
   config?: Record<string, { description: string; required: boolean; default?: unknown }>;
   instructions?: string;
   init?: { entrypoint: string; async?: boolean };

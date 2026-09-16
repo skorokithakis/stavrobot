@@ -55,6 +55,7 @@ The `manifest.json` at the root of the plugin directory describes the plugin:
 {
   "name": "my-plugin",
   "description": "A short description of what this plugin provides, in the imperative mood (e.g. 'Manage your Google Maps places').",
+  "summary": "Manage your Google Maps places.",
   "instructions": "Optional setup notes or usage guidance for the user.",
   "init": {
     "entrypoint": "init.py",
@@ -65,6 +66,7 @@ The `manifest.json` at the root of the plugin directory describes the plugin:
 
 - `name` (string, required): The plugin's unique identifier. Used to namespace tools. Must contain only lowercase letters, digits, and hyphens (`[a-z0-9-]`).
 - `description` (string, required): A short description shown when listing plugins.
+- `summary` (string, optional): A short one-line description (roughly under 80 characters) shown in the public plugin listing on stavrobot.stavros.io. Falls back to `description` when absent.
 - `instructions` (string, optional): Setup notes or usage guidance for the user. See "Plugin instructions" below.
 - `init` (object, optional): Declares an init script.
   - `entrypoint` (string, required): The filename of the executable script at the plugin root.
