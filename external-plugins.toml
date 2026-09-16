@@ -6,3 +6,6 @@
 #
 # [[plugin]]
 # url = "https://github.com/exampleuser/plugin-example"
+
+[[plugin]]
+url = "https://github.com/diegopetrucci/stavrobot-imcp-plugin"
