@@ -40,12 +40,22 @@ If creating a new plugin:
 
 ## README
 
-Every plugin must include a `README.md` at the repository root. The README should contain:
+Every plugin must include a `README.md` at the repository root. It is published as the plugin's public page on `https://stavrobot.stavros.io/plugins/`, so write it for a person deciding whether to install the plugin.
 
-- A summary of what the plugin does and why a user would want to install it.
-- Installation instructions (e.g., "Tell Stavrobot to install <git URL>", or any required configuration values and how to obtain them).
+Cover these, in this order:
 
-This is the first thing a potential user sees when browsing the repository, so it should be concise and practical.
+- What the plugin does, in one or two sentences.
+- What the user needs before installing: an account, an API key, a service running on their network.
+- How to install it: "Tell Stavrobot to install `<git URL>`".
+- Each configuration key, what it is for, and where to get the value.
+- The tools the plugin provides, and what each one does.
+
+Keep it short. The reader is deciding whether they want the plugin, not learning to operate it. Anything that only a maintainer needs, such as repository layout or publishing steps, belongs in a separate file.
+
+Two constraints apply once the README is published:
+
+- Use markdown only. Raw HTML is escaped when the page is built and renders as visible text, so a `<div>` or an `<img>` tag will appear literally.
+- Links must use `http`, `https` or `mailto`. Any other scheme is replaced with `#`.
 
 ## Plugin manifest
 
@@ -71,6 +81,25 @@ The `manifest.json` at the root of the plugin directory describes the plugin:
 - `init` (object, optional): Declares an init script.
   - `entrypoint` (string, required): The filename of the executable script at the plugin root.
   - `async` (boolean, optional, defaults to false): If true, the init script runs in the background and does not block install/update.
+
+### Writing the description and the summary
+
+These two fields look similar but have different readers.
+
+`description` is read by the assistant when it decides whether a plugin can do what the user asked. Be specific about capability. Name the service, and say what the plugin can do with it. Length is not a problem here.
+
+`summary` is read by a person scanning a table of every available plugin. One line, under 80 characters, no line breaks. The usual shape is a verb, an object, and the service:
+
+```
+Check weather forecasts via OpenMeteo
+Track packages via 17track
+Manage Google Calendar events
+Text-to-speech using ElevenLabs voices
+```
+
+Do not repeat the plugin's name in the summary, because it is already shown next to it. Do not end it with a full stop. Do not write "A plugin that..." or "This plugin lets you...", because every row in the table is a plugin.
+
+If `summary` is absent, the listing falls back to `description`. That works, but a description written to brief the assistant is usually too long for a table, so set `summary` if the plugin is published.
 
 ## Plugin configuration
 
