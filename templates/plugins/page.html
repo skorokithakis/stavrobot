@@ -6,7 +6,7 @@
 <div class="skill-detail">
   <div class="skill-detail-header">
     <a href="/plugins/" class="skill-back mono">← Plugins</a>
-    <h1 class="skill-detail-title">{{ page.title }}</h1>
+    <h1 class="skill-detail-title">{{ page.title }}{% if page.extra.source == "third-party" %}<span class="plugin-source-badge">Third party</span>{% endif %}</h1>
     <p class="skill-detail-description">{{ page.description }}</p>
     <div class="skill-detail-actions">
       <button class="cta-button skill-install-btn" id="install-btn">Install plugin</button>

@@ -90,9 +90,9 @@
   <div class="quickstart-panel active" data-panel="manual">
     <div class="terminal">
       <div class="terminal-header">
-        <div class="terminal-dot" style="background: #ff5f57;"></div>
-        <div class="terminal-dot" style="background: #febc2e;"></div>
-        <div class="terminal-dot" style="background: #28c840;"></div>
+        <div class="terminal-dot terminal-dot-red"></div>
+        <div class="terminal-dot terminal-dot-yellow"></div>
+        <div class="terminal-dot terminal-dot-green"></div>
         <span class="terminal-title mono">Terminal</span>
       </div>
       <div class="terminal-body mono">
@@ -115,7 +115,7 @@
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
             <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
           </svg>
-          <svg class="ai-check-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+          <svg class="ai-check-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="20 6 9 17 4 12"></polyline>
           </svg>
         </button>
@@ -138,13 +138,9 @@
     var text = document.querySelector('.ai-install-url').textContent;
     var btn = document.querySelector('.ai-copy-btn');
     navigator.clipboard.writeText(text).then(function() {
-      var copyIcon = document.querySelector('.ai-copy-icon');
-      var checkIcon = document.querySelector('.ai-check-icon');
-      copyIcon.style.display = 'none';
-      checkIcon.style.display = '';
+      btn.classList.add('copied');
       setTimeout(function() {
-        copyIcon.style.display = '';
-        checkIcon.style.display = 'none';
+        btn.classList.remove('copied');
       }, 1500);
     }).catch(function() {
       var originalColor = btn.style.backgroundColor;

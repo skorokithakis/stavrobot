@@ -1,0 +1,8 @@
+# Third-party plugins to list alongside the official ones.
+#
+# Each entry is a plain git HTTPS URL. The build shallow-clones the repository and
+# reads manifest.json and README.md from its default branch. Entries whose clone
+# fails or whose manifest.json is missing or unparseable are skipped.
+#
+# [[plugin]]
+# url = "https://github.com/exampleuser/plugin-example"

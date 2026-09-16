@@ -239,6 +239,9 @@ body {
   padding: 32px;
   text-align: center;
 }
+.ai-install-box-spaced {
+  margin-bottom: 32px;
+}
 .ai-install-box p {
   font-size: 15px;
   color: rgba(255,255,255,0.5);
@@ -279,6 +282,15 @@ body {
   background: rgba(255,255,255,0.1);
   color: rgba(255,255,255,0.85);
 }
+.ai-check-icon {
+  display: none;
+}
+.ai-copy-btn.copied .ai-copy-icon {
+  display: none;
+}
+.ai-copy-btn.copied .ai-check-icon {
+  display: inline;
+}
 .ai-install-sub {
   font-size: 13px !important;
   color: rgba(255,255,255,0.25) !important;
@@ -307,6 +319,9 @@ body {
   height: 12px;
   border-radius: 50%;
 }
+.terminal-dot-red { background: #ff5f57; }
+.terminal-dot-yellow { background: #febc2e; }
+.terminal-dot-green { background: #28c840; }
 .terminal-title {
   margin-left: 8px;
   font-size: 12px;
@@ -614,6 +629,23 @@ body {
   margin-bottom: 40px;
 }
 
+/* Third-party plugin badge */
+.plugin-source-badge {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  color: rgba(255,255,255,0.45);
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 4px;
+  padding: 2px 7px;
+  margin-left: 8px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
 /* Modal */
 .modal-overlay {
   display: none;
@@ -702,6 +734,36 @@ body {
   background: rgba(79,195,247,0.15);
   border-color: rgba(79,195,247,0.3);
   color: #4fc3f7;
+}
+
+/* 404 page */
+.not-found {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 4rem 1rem;
+  gap: 1.5rem;
+}
+
+.not-found pre {
+  line-height: 1.1;
+  color: #4fc3f7;
+  margin: 0;
+}
+
+.not-found .error-code {
+  font-size: 1rem;
+  color: #ce93d8;
+  letter-spacing: 0.2em;
+}
+
+.not-found .message {
+  font-size: 1.1rem;
+  color: rgba(255, 255, 255, 0.7);
+  max-width: 36rem;
+  line-height: 1.6;
 }
 
 /* Footer */
