@@ -496,7 +496,7 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
     initialState: {
       systemPrompt: effectiveBasePrompt,
       model,
-      thinkingLevel: (config.thinkingLevel ?? "low") as ThinkingLevel,
+      thinkingLevel: (config.thinkingLevel ?? "high") as ThinkingLevel,
       tools: tools.map(wrapToolWithLogging),
       messages: [],
     },
@@ -779,9 +779,6 @@ async function runHandlePrompt(
     log.debug(`[stavrobot] [debug] Reloaded ${conversationMessages.length} messages`);
   }
 
-  agent.state.messages = conversationMessages;
-  log.debug(`[stavrobot] Loaded ${conversationMessages.length} messages for agent ${agentId}.`);
-
   const allPlugins = await fetchPluginList();
 
   // Load the subagent's DB row once here so it can be used for both system
@@ -798,7 +795,14 @@ async function runHandlePrompt(
     systemPrompt = await buildSubagentSystemPrompt(config, subagentRow, allPlugins);
   }
 
-  agent.state.systemPrompt = systemPrompt;
+  // Pi's transcript owns the system prompt now, and state.systemPrompt is
+  // read-only: the leading system message is the prompt. Rebuild that message
+  // along with the conversation history loaded from the database.
+  agent.state.messages = [
+    { role: "system", content: systemPrompt, timestamp: Date.now() },
+    ...conversationMessages,
+  ];
+  log.debug(`[stavrobot] Loaded ${conversationMessages.length} messages for agent ${agentId}.`);
 
   let saveChain: Promise<unknown> = Promise.resolve();
 

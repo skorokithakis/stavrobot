@@ -1567,6 +1567,43 @@ describe("handlePrompt — user message persistence", () => {
   });
 });
 
+describe("handlePrompt — system prompt placement", () => {
+  function setupCommonMocks(): void {
+    vi.clearAllMocks();
+    vi.mocked(loadMessages).mockResolvedValue([]);
+    vi.mocked(loadAllMemories).mockResolvedValue([]);
+    vi.mocked(loadAllScratchpadTitles).mockResolvedValue([]);
+    vi.mocked(getMainAgentId).mockReturnValue(1);
+    vi.mocked(internalFetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ plugins: [] }),
+    } as unknown as Response);
+    vi.mocked(getApiKey).mockResolvedValue("test-key");
+    vi.mocked(runSearch).mockResolvedValue({ tableResults: [], messages: [] });
+    vi.mocked(saveMessage).mockResolvedValue(42);
+  }
+
+  it("carries the rebuilt system prompt as the leading system message of the transcript", async () => {
+    setupCommonMocks();
+
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+
+    await handlePrompt(agent, makePool(), "hello", minimalConfig, mainAgentRouting);
+
+    // Pi's transcript owns the system prompt now, so it must reach the model as
+    // a system message rather than through the read-only state field.
+    const messages = fakeAgent.state.messages as Array<{ role: string; content: unknown }>;
+    const leadingMessage = messages[0];
+    expect(leadingMessage?.role).toBe("system");
+    const promptText = typeof leadingMessage?.content === "string"
+      ? leadingMessage.content
+      : JSON.stringify(leadingMessage?.content);
+    expect(promptText).toContain(minimalConfig.baseSystemPrompt);
+    expect(promptText).toContain(minimalConfig.publicHostname);
+  });
+});
+
 describe("handlePrompt — TurnProgressPersistedError wrapping", () => {
   const mockSaveMessage = vi.mocked(saveMessage);
 
@@ -1740,6 +1777,15 @@ describe("isTurnBoundary", () => {
       assistantMsg(10),
     ];
     expect(isTurnBoundary(messages, 0)).toBe(true);
+  });
+
+  it("returns true for a user message after a system message", () => {
+    const messages: AgentMessage[] = [
+      { role: "system", content: "prompt", timestamp: 0 },
+      userMsg(10),
+      assistantMsg(10),
+    ];
+    expect(isTurnBoundary(messages, 1)).toBe(true);
   });
 
   it("returns false for a non-user message", () => {

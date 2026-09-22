@@ -124,11 +124,13 @@ export function estimateTokens(messages: AgentMessage[]): number {
 // boundary when:
 //   - It is the first message (index 0), OR
 //   - The previous message is also a user message (consecutive user messages), OR
+//   - The previous message is a system message (the prompt or a tool
+//     declaration), OR
 //   - The previous message is an assistant message with no toolCall blocks.
 //
 // Steering injects user messages mid-turn (between an assistant toolCall and its
-// toolResult). Cutting there would orphan the toolResult and cause a 400 from the
-// Anthropic API. Those injected messages are NOT turn boundaries.
+// toolResult). Cutting there would orphan the toolResult and cause a 400 from
+// the Anthropic API. Those injected messages are NOT turn boundaries.
 export function isTurnBoundary(messages: AgentMessage[], index: number): boolean {
   if (messages[index].role !== "user") {
     return false;
@@ -138,6 +140,9 @@ export function isTurnBoundary(messages: AgentMessage[], index: number): boolean
   }
   const previous = messages[index - 1];
   if (previous.role === "user") {
+    return true;
+  }
+  if (previous.role === "system") {
     return true;
   }
   if (previous.role === "assistant") {

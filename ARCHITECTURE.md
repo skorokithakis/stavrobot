@@ -112,7 +112,10 @@ as an error and discarded.
 
 The single `Agent` instance is created in `createAgent()` and shared across all
 conversations. Per-turn, `handlePrompt()` swaps the conversation history and system
-prompt by assigning `agent.state.messages` and `agent.state.systemPrompt` directly.
+prompt by assigning `agent.state.messages` directly, with the rebuilt system prompt as
+the leading `system` message. Since Pi 0.86 the transcript owns the prompt and
+`agent.state.systemPrompt` is read-only. System messages are never persisted to the
+`messages` table; only user, assistant, and toolResult rows are saved.
 
 ### Main agent identity
 
@@ -312,7 +315,7 @@ The provider and model are set at the top level of `config.toml`:
 
 ```toml
 provider = "anthropic"          # any KnownProvider string from pi-ai
-model    = "claude-sonnet-4-5"
+model    = "claude-opus-5-5"
 ```
 
 `getBuiltinModel(provider, model)` from `@earendil-works/pi-ai/providers/all` looks up

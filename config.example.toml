@@ -3,11 +3,11 @@
 # groq, huggingface, kimi-coding, minimax, minimax-cn, mistral, openai,
 # openai-codex, opencode, opencode-go, openrouter, vercel-ai-gateway, xai, zai.
 provider = "anthropic"
-model = "claude-sonnet-4-5"
+model = "claude-opus-5-5"
 
-# Thinking level for the main agent. Known values: "off", "low", "medium", "high", "xhigh".
-# Defaults to "low" when omitted.
-# thinkingLevel = "low"
+# Thinking level for the main agent. Known values: "low", "medium", "high", "xhigh".
+# Defaults to "high" when omitted.
+# thinkingLevel = "high"
 
 # Password for HTTP Basic Auth. All endpoints except webhooks require this.
 # Change this to something secure. Required: the app refuses to start without it.
@@ -38,7 +38,7 @@ authFile = "/app/data/auth.json"
 #
 # Example: Anthropic-compatible proxy
 # provider = "anthropic"
-# model = "claude-sonnet-4-5"
+# model = "claude-opus-5-5"
 # apiKey = "your-proxy-key"
 # baseUrl = "https://proxy.example.com"
 # contextWindow = 200000
@@ -156,7 +156,7 @@ botToken = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 # alias: "sonnet", "opus", or "haiku". This section also requires enabling the
 # "coder" Docker Compose profile (see README for details).
 [coder]
-model = "sonnet"
+model = "opus"
 
 # Optional OpenAI embeddings support. When present, the bot generates vector
 # embeddings for semantic search. This improves recall (finding relevant
