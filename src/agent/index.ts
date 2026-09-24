@@ -352,6 +352,9 @@ export function createManageCronTool(pool: pg.Pool): AgentTool {
         if (raw.schedule !== undefined && raw.fire_at !== undefined) {
           return toolError("Error: schedule and fire_at are mutually exclusive.");
         }
+        if (raw.schedule === undefined && raw.fire_at === undefined && raw.note === undefined) {
+          return toolError("Error: provide at least one of note, schedule, or fire_at for update.");
+        }
         const fields: { cronExpression?: string | null; fireAt?: Date | null; note?: string } = {};
         if (raw.schedule !== undefined) {
           fields.cronExpression = raw.schedule;

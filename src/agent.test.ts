@@ -2,7 +2,7 @@ import { describe, it, expect, vi, type MockedFunction, beforeEach } from "vites
 import type { Agent, AgentMessage, AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { complete } from "@earendil-works/pi-ai/compat";
 import type { Pool } from "pg";
-import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool, injectAutoSearchBlock, pendingAutoSearchBlocks, handlePrompt, createAgent, escalatingSummarize, selectCompactionCutIndex, isTurnBoundary } from "./agent/index.js";
+import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool, createManageCronTool, injectAutoSearchBlock, pendingAutoSearchBlocks, handlePrompt, createAgent, escalatingSummarize, selectCompactionCutIndex, isTurnBoundary } from "./agent/index.js";
 import { getApiKey } from "./auth.js";
 import { loadMessages, loadAllMemories, loadAllScratchpadTitles, getMainAgentId, saveMessage, loadAgent } from "./database.js";
 import { runSearch } from "./search.js";
@@ -915,6 +915,20 @@ describe("createManageKnowledgeTool — read action", () => {
     const result = await tool.execute("tc1", { action: "read", store: "scratchpad" });
 
     expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("id is required") });
+  });
+});
+
+describe("createManageCronTool — update action", () => {
+  it("rejects an update with no fields to change", async () => {
+    const db = await import("./database.js");
+    const updateCronEntry = db.updateCronEntry as unknown as MockedFunction<() => Promise<void>>;
+    updateCronEntry.mockClear();
+
+    const tool = createManageCronTool({} as Pool);
+    const result = await tool.execute("tc1", { action: "update", id: 3 });
+
+    expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("at least one of note, schedule, or fire_at") });
+    expect(updateCronEntry).not.toHaveBeenCalled();
   });
 });
 
