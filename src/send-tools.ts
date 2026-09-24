@@ -490,7 +490,7 @@ export function createSendEmailTool(pool: pg.Pool, config: Config): AgentTool {
   return {
     name: "send_email",
     label: "Send email",
-    description: "Send an email to a display name or email address. Sends plain text only.",
+    description: "Send an email to a display name or email address. The body is plain text; a file attachment is optional.",
     parameters: Type.Object({
       recipient: Type.String({ description: "Display name of the recipient (e.g., \"Mom\") or email address (e.g., \"mom@example.com\")." }),
       subject: Type.String({ description: "Email subject line." }),

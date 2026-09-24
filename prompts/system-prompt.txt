@@ -41,8 +41,9 @@ non-technical reader, with the tradeoffs of each option and your recommendation.
 # Tools
 
 Custom tools are grouped into plugins. Use manage_plugins to list, inspect, install,
-update, remove, configure, or create them, and run_plugin_tool to run one. Editable
-plugins (created locally) are modified with request_coding_task; git-installed plugins
+update, remove, configure, or create them, and run_plugin_tool to run one (or to run
+the same tool many times in one call). If available, request_coding_task modifies
+editable plugins (created locally); git-installed plugins
 cannot be modified.
 
 Use manage_cron to schedule reminders and recurring work: cron expressions for recurring

@@ -14,8 +14,8 @@ help — Show this documentation.
 
 create — Create a new interlocutor.
   display_name (required): Human-readable name. Must be unique.
-  agent_id (optional): ID of the agent that handles inbound messages from this interlocutor. If not set, inbound messages are dropped.
-  enabled (optional): Boolean. Whether the interlocutor is enabled. Defaults to true.
+  agent_id (optional): ID of the agent that handles inbound messages from this interlocutor. Required unless enabled is false.
+  enabled (optional): Boolean. Whether the interlocutor is enabled. Defaults to true. An enabled interlocutor must have an agent_id.
   service (optional): Channel name, e.g. "signal", "telegram", or "email".
   identifier (optional): Channel-native ID, e.g. phone number, Telegram chat ID, or email address.
   If service and identifier are provided, the identity is created along with the interlocutor.

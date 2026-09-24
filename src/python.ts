@@ -29,7 +29,8 @@ export function createRunPythonTool(): AgentTool {
       "specifying dependencies. Returns stdout and stderr from the script. " +
       "Input files can be passed via the `files` parameter as absolute paths under " +
       `/tmp/stavrobot-temp/. They will be available to the script at /tmp/input/<filename>. ` +
-      "Output files should be written by the script to /tmp/output/. They will be returned and saved locally.",
+      "Output files should be written by the script to /tmp/output/. They will be returned and saved locally (25 MB total limit). " +
+      "Scripts are killed after 30 seconds.",
     parameters: Type.Object({
       code: Type.String({ description: "The Python code to execute." }),
       dependencies: Type.Optional(

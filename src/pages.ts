@@ -11,7 +11,7 @@ Versioning: every upsert creates a new version row. Delete inserts a tombstone (
 Actions:
 - upsert: create or update a page. Parameters: path (required), mimetype (required for new pages), content (required for new pages), is_public (optional), queries (optional).
 - delete: delete a page by path (inserts a tombstone). Parameters: path (required).
-- read: read a page. Parameters: path (required), version (optional integer — omit for latest). Returns the full row including version, mimetype, content, is_public, queries, and created_at. Tombstone versions are returned as-is (empty content).
+- read: read a page. Parameters: path (required), version (optional integer — omit for latest). Returns the full row including path, version, mimetype, data, is_public, queries, and created_at. Tombstone versions are returned as-is (empty data).
 - list_versions: list all versions of a page. Parameters: path (required). Returns version number, created_at, and whether the version is a tombstone (empty content).
 - restore_version: restore an old version by copying it as a new version. Parameters: path (required), version (required integer). Works for un-deleting too — restore a pre-tombstone version.
 - help: show this help text.

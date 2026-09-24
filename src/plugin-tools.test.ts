@@ -384,6 +384,145 @@ describe("createRunPluginToolTool", () => {
     await tool.execute("call-file-6", { plugin: "myplugin", tool: "mytool", parameters: JSON.stringify({ audio: "/some/path" }) });
     expect(vi.mocked(fs.readFile)).not.toHaveBeenCalled();
   });
+
+  it("runs a batch sequentially and numbers each result", async () => {
+    mockFetchSequence(
+      { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
+      { status: 200, body: JSON.stringify({ success: true, output: "first" }) },
+      { status: 200, body: JSON.stringify({ success: true, output: "second" }) },
+    );
+    const result = await tool.execute("call-batch-1", {
+      plugin: "myplugin",
+      tool: "mytool",
+      parameters: JSON.stringify([{ value: 1 }, { value: 2 }]),
+    });
+    const text = (result.content[0] as { type: string; text: string }).text;
+    expect(text).toBe(
+      'Batch run of tool "mytool" (plugin "myplugin"): 2 calls.\n\n' +
+      'Call 1:\nThe run of tool "mytool" (plugin "myplugin") returned:\n```\nfirst\n```\n\n' +
+      'Call 2:\nThe run of tool "mytool" (plugin "myplugin") returned:\n```\nsecond\n```',
+    );
+    const fetchMock = vi.mocked(globalThis.fetch);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as { body: string }).body)).toEqual({ value: 1 });
+    expect(JSON.parse((fetchMock.mock.calls[2][1] as { body: string }).body)).toEqual({ value: 2 });
+    expect(vi.mocked(fs.rm)).toHaveBeenCalledTimes(1);
+  });
+
+  it("continues the batch when one call fails and still numbers every result", async () => {
+    mockFetchSequence(
+      { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
+      { status: 200, body: JSON.stringify({ success: false, error: "boom" }) },
+      { status: 200, body: JSON.stringify({ success: true, output: "recovered" }) },
+    );
+    const result = await tool.execute("call-batch-2", {
+      plugin: "myplugin",
+      tool: "mytool",
+      parameters: JSON.stringify([{}, {}]),
+    });
+    const text = (result.content[0] as { type: string; text: string }).text;
+    expect(text).toContain('Call 1:\nThe run of tool "mytool" (plugin "myplugin") failed:\n```\nboom\n```');
+    expect(text).toContain('Call 2:\nThe run of tool "mytool" (plugin "myplugin") returned:\n```\nrecovered\n```');
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(3);
+  });
+
+  it("turns a per-call error into a failed call and keeps going", async () => {
+    const manifest = {
+      name: "myplugin",
+      permissions: ["*"],
+      tools: [{ name: "mytool", parameters: { audio: { type: "file" } } }],
+    };
+    mockFetchSequence(
+      { status: 200, body: JSON.stringify(manifest) },
+      { status: 200, body: JSON.stringify({ success: true, output: "second ok" }) },
+    );
+    const result = await tool.execute("call-batch-3", {
+      plugin: "myplugin",
+      tool: "mytool",
+      parameters: JSON.stringify([{ audio: "/etc/passwd" }, {}]),
+    });
+    const text = (result.content[0] as { type: string; text: string }).text;
+    expect(text).toContain('Call 1:\nThe run of tool "mytool" (plugin "myplugin") failed:\n```\nFile parameter \'audio\' path is not under the allowed directory: /etc/passwd\n```');
+    expect(text).toContain('Call 2:\nThe run of tool "mytool" (plugin "myplugin") returned:\n```\nsecond ok\n```');
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not send non-object batch items and reports them as failed calls", async () => {
+    mockFetchSequence(
+      { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
+      { status: 200, body: JSON.stringify({ success: true, output: "ok" }) },
+    );
+    const result = await tool.execute("call-batch-invalid", {
+      plugin: "myplugin",
+      tool: "mytool",
+      parameters: JSON.stringify([null, 42, "hello", [1, 2], { value: "ok" }]),
+    });
+    const text = (result.content[0] as { type: string; text: string }).text;
+    expect(text).toContain('Call 1:\nThe run of tool "mytool" (plugin "myplugin") failed:\n```\nBatch item 1 is not a JSON object.\n```');
+    expect(text).toContain("Call 2:\nThe run of tool");
+    expect(text).toContain("Call 3:\nThe run of tool");
+    expect(text).toContain("Call 4:\nThe run of tool");
+    expect(text).toContain('Call 5:\nThe run of tool "mytool" (plugin "myplugin") returned:\n```\nok\n```');
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(2);
+  });
+
+  it("resolves file parameters per batch item", async () => {
+    const fileContent = Buffer.from("audio data");
+    vi.mocked(fs.readFile).mockResolvedValue(fileContent as unknown as string);
+    const manifest = {
+      name: "myplugin",
+      permissions: ["*"],
+      tools: [{ name: "mytool", parameters: { audio: { type: "file" } } }],
+    };
+    mockFetchSequence(
+      { status: 200, body: JSON.stringify(manifest) },
+      { status: 200, body: JSON.stringify({ success: true, output: "one" }) },
+      { status: 200, body: JSON.stringify({ success: true, output: "two" }) },
+    );
+    const firstPath = path.join(TEMP_ATTACHMENTS_DIR, "one.ogg");
+    const secondPath = path.join(TEMP_ATTACHMENTS_DIR, "two.ogg");
+    await tool.execute("call-batch-files", {
+      plugin: "myplugin",
+      tool: "mytool",
+      parameters: JSON.stringify([{ audio: firstPath }, { audio: secondPath }]),
+    });
+    const fetchMock = vi.mocked(globalThis.fetch);
+    const firstBody = JSON.parse((fetchMock.mock.calls[1][1] as { body: string }).body) as { audio: { filename: string } };
+    const secondBody = JSON.parse((fetchMock.mock.calls[2][1] as { body: string }).body) as { audio: { filename: string } };
+    expect(firstBody.audio.filename).toBe("one.ogg");
+    expect(secondBody.audio.filename).toBe("two.ogg");
+  });
+
+  it("rejects a batch for an async tool before running anything", async () => {
+    const manifest = {
+      name: "myplugin",
+      permissions: ["*"],
+      tools: [{ name: "mytool", async: true, parameters: {} }],
+    };
+    mockFetchSequence({ status: 200, body: JSON.stringify(manifest) });
+    const result = await tool.execute("call-batch-async", {
+      plugin: "myplugin",
+      tool: "mytool",
+      parameters: JSON.stringify([{}]),
+    });
+    const text = (result.content[0] as { type: string; text: string }).text;
+    expect(text).toBe('Error: tool "mytool" (plugin "myplugin") is asynchronous and cannot be run in a batch. Run it once per call with a single parameters object.');
+    expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(fs.rm)).not.toHaveBeenCalled();
+  });
+
+  it("returns an error for an empty parameters array", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await tool.execute("call-batch-empty", {
+      plugin: "myplugin",
+      tool: "mytool",
+      parameters: "[]",
+    });
+    const text = (result.content[0] as { type: string; text: string }).text;
+    expect(text).toBe("Error: the parameters array is empty; provide at least one set of parameters.");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("createManagePluginsTool", () => {

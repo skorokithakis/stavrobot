@@ -273,7 +273,7 @@ export function createSearchTool(pool: pg.Pool, embeddingsConfig?: EmbeddingsCon
       query: Type.String({ description: "The text to search for" }),
       limit: Type.Optional(
         Type.Integer({
-          description: `Maximum number of rows to return per table. Default: ${LIMIT_DEFAULT}, max: ${LIMIT_MAX}.`,
+          description: `Maximum number of conversation messages to return. Default: ${LIMIT_DEFAULT}, max: ${LIMIT_MAX}. Table results are capped at ${TABLE_RESULT_ROW_LIMIT} rows in total regardless.`,
           default: LIMIT_DEFAULT,
         }),
       ),

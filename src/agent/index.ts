@@ -146,7 +146,7 @@ export function createManageKnowledgeTool(pool: pg.Pool): AgentTool {
   return {
     name: "manage_knowledge",
     label: "Manage knowledge",
-    description: "Upsert or delete entries in the two-tier knowledge store (memory and scratchpad). Use the 'help' action for details.",
+    description: "Upsert, delete, or read entries in the two-tier knowledge store (memory and scratchpad). Use the 'help' action for details.",
     parameters: Type.Object({
       action: Type.Union([
         Type.Literal("upsert"),
@@ -158,7 +158,7 @@ export function createManageKnowledgeTool(pool: pg.Pool): AgentTool {
         Type.Literal("memory"),
         Type.Literal("scratchpad"),
       ], { description: "Which store to operate on: memory or scratchpad." })),
-      id: Type.Optional(Type.Number({ description: "Entry id. Omit to create a new entry (upsert); required for delete." })),
+      id: Type.Optional(Type.Number({ description: "Entry id. Omit to create a new entry (upsert); required for delete and read." })),
       content: Type.Optional(Type.String({ description: "Memory content. Required when upserting a memory entry." })),
       title: Type.Optional(Type.String({ description: "Scratchpad title. Required when upserting a scratchpad entry." })),
       body: Type.Optional(Type.String({ description: "Scratchpad body. Required when upserting a scratchpad entry." })),
@@ -280,9 +280,9 @@ const MANAGE_CRON_HELP_TEXT = `manage_cron: create, update, delete, or list sche
 
 Actions:
 - create: create a new cron entry. Parameters: note (required), schedule or fire_at (exactly one required).
-- update: update an existing entry. Parameters: id (required), note (optional), schedule or fire_at (optional, mutually exclusive).
+- update: update an existing entry. Parameters: id (required), plus at least one of note, schedule, or fire_at (schedule and fire_at are mutually exclusive).
 - delete: remove an entry. Parameters: id (required).
-- list: list all cron entries. Returns a JSON array of entries.
+- list: list all cron entries.
 - help: show this help text.
 
 Constraints:

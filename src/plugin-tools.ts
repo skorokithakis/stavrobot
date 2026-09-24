@@ -128,8 +128,8 @@ Actions:
 - update: update an installed plugin to the latest version from its git repository. Parameters: name (required).
 - remove: remove an installed plugin. Parameters: name (required).
 - configure: set configuration values for a plugin. The config keys must match what the plugin's manifest declares. Parameters: name (required), config (required, JSON string). When a plugin requires sensitive values (API keys, tokens, passwords), tell the user they can either configure them through the settings page at /settings/plugins or paste the values in the chat. Any secrets the user provides must be treated as secrets: only pass them to this configure action, and never store, refer to, or repeat them in any other context (emails, messages, summaries, etc.).
-- list: list all installed plugins. No additional parameters.
-- show: show all tools in a plugin, including their names, descriptions, and parameter schemas. Parameters: name (required).
+- list: list all enabled plugins. No additional parameters.
+- show: show the permitted tools in a plugin, including their names, descriptions, and parameter schemas. Parameters: name (required).
 - create: create a new empty editable plugin. Parameters: name (required), plugin_description (required). Only available when the coder is configured.
 - help: show this help text.`;
 
@@ -399,15 +399,92 @@ async function resolveFileParameters(
   return resolved;
 }
 
+function findToolManifest(manifest: unknown, tool: string): ToolManifest | undefined {
+  if (!isBundleManifest(manifest) || !Array.isArray(manifest.tools)) {
+    return undefined;
+  }
+  return manifest.tools.find((t) => t.name === tool);
+}
+
+interface PluginToolRun {
+  result: string;
+  filesWritten: string[];
+}
+
+// Runs the tool once: resolves file parameters, sends the request to
+// plugin-runner, and saves any returned files into pluginFilesDir. Throws only
+// on file-parameter resolution errors; parse failures of the run response are
+// already handled by formatRunPluginToolResult.
+async function runPluginToolOnce(
+  plugin: string,
+  tool: string,
+  manifest: unknown,
+  parameters: unknown,
+  pluginFilesDir: string,
+): Promise<PluginToolRun> {
+  const resolvedParameters = await resolveFileParameters(plugin, tool, manifest, parameters);
+
+  const response = await internalFetch(`${PLUGIN_RUNNER_BASE_URL}/bundles/${plugin}/tools/${tool}/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(resolvedParameters),
+  });
+  const responseText = await response.text();
+  const result = formatRunPluginToolResult(plugin, tool, responseText, response.status);
+
+  const filesWritten: string[] = [];
+  try {
+    const parsed = JSON.parse(responseText) as unknown;
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "files" in parsed &&
+      Array.isArray((parsed as Record<string, unknown>).files)
+    ) {
+      const files = (parsed as Record<string, unknown>).files as unknown[];
+      const validFiles = files.filter(
+        (f): f is { filename: string; data: string } =>
+          typeof f === "object" &&
+          f !== null &&
+          typeof (f as Record<string, unknown>).filename === "string" &&
+          typeof (f as Record<string, unknown>).data === "string"
+      );
+      if (validFiles.length > 0) {
+        await fs.mkdir(pluginFilesDir, { recursive: true });
+        for (const file of validFiles) {
+          const filePath = path.join(pluginFilesDir, file.filename);
+          await fs.writeFile(filePath, Buffer.from(file.data, "base64"));
+          filesWritten.push(filePath);
+        }
+        log.debug(`[stavrobot] run_plugin_tool: saved ${validFiles.length} file(s) to ${pluginFilesDir}`);
+      }
+    }
+  } catch {
+    // If JSON parsing fails here, formatRunPluginToolResult already handled it.
+  }
+
+  return { result, filesWritten };
+}
+
+async function formatOutputFiles(filesWritten: string[]): Promise<string> {
+  const lines = await Promise.all(
+    filesWritten.map(async (filePath) => {
+      const stat = await fs.stat(filePath);
+      return `- ${filePath} (${formatFileSize(stat.size)})`;
+    }),
+  );
+  return `\n\nOutput files:\n${lines.join("\n")}`;
+}
+
 export function createRunPluginToolTool(): AgentTool {
   return {
     name: "run_plugin_tool",
     label: "Run plugin tool",
-    description: "Run a tool from an installed plugin with the given parameters. The parameters must match the tool's schema as shown by manage_plugins (action: show). For parameters with type \"file\", pass the absolute path to the file (e.g. a path returned by manage_files or received as an incoming attachment).",
+    description: "Run a tool from an installed plugin with the given parameters. The parameters must match the tool's schema as shown by manage_plugins (action: show). To run the tool many times in one call, pass a JSON array of parameter objects; calls run in order, failures do not stop the batch, and results are numbered. Not supported for async tools. For parameters with type \"file\", pass the absolute path to the file (e.g. a path returned by manage_files or received as an incoming attachment).",
     parameters: Type.Object({
       plugin: Type.String({ description: "The plugin name." }),
       tool: Type.String({ description: "The tool name." }),
-      parameters: Type.String({ description: "JSON string of the parameters to pass to the tool." }),
+      parameters: Type.String({ description: "JSON string of the parameters object, or of an array of parameter objects to run the tool once per item." }),
     }),
     execute: async (
       toolCallId: string,
@@ -415,6 +492,11 @@ export function createRunPluginToolTool(): AgentTool {
     ): Promise<AgentToolResult<{ message: string }>> => {
       const { plugin, tool, parameters } = params as { plugin: string; tool: string; parameters: string };
       const parsedParameters = JSON.parse(parameters) as unknown;
+
+      const isBatch = Array.isArray(parsedParameters);
+      if (isBatch && parsedParameters.length === 0) {
+        return toolError("Error: the parameters array is empty; provide at least one set of parameters.");
+      }
 
       const bundleResponse = await internalFetch(`${PLUGIN_RUNNER_BASE_URL}/bundles/${plugin}`);
       if (bundleResponse.status === 404) {
@@ -449,64 +531,50 @@ export function createRunPluginToolTool(): AgentTool {
         }
       }
 
+      const toolManifest = findToolManifest(manifest, tool);
+      if (isBatch && toolManifest?.async === true) {
+        return toolError(`Error: tool "${tool}" (plugin "${plugin}") is asynchronous and cannot be run in a batch. Run it once per call with a single parameters object.`);
+      }
+
       const pluginFilesDir = path.join(TEMP_ATTACHMENTS_DIR, plugin);
-      // Clear stale files from previous runs.
+      // Clear stale files from previous runs once per batch, not per call.
       await fs.rm(pluginFilesDir, { recursive: true, force: true });
 
-      const resolvedParameters = await resolveFileParameters(plugin, tool, manifest, parsedParameters);
+      if (!isBatch) {
+        const { result, filesWritten } = await runPluginToolOnce(plugin, tool, manifest, parsedParameters, pluginFilesDir);
+        let output = result;
+        if (filesWritten.length > 0) {
+          output += await formatOutputFiles(filesWritten);
+        }
+        return toolSuccess(output);
+      }
 
-      const response = await internalFetch(`${PLUGIN_RUNNER_BASE_URL}/bundles/${plugin}/tools/${tool}/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(resolvedParameters),
-      });
-      const responseText = await response.text();
-      let result = formatRunPluginToolResult(plugin, tool, responseText, response.status);
-
-      let filesDir: string | undefined;
-      try {
-        const parsed = JSON.parse(responseText) as unknown;
-        if (
-          typeof parsed === "object" &&
-          parsed !== null &&
-          "files" in parsed &&
-          Array.isArray((parsed as Record<string, unknown>).files)
-        ) {
-          const files = (parsed as Record<string, unknown>).files as unknown[];
-          const validFiles = files.filter(
-            (f): f is { filename: string; data: string } =>
-              typeof f === "object" &&
-              f !== null &&
-              typeof (f as Record<string, unknown>).filename === "string" &&
-              typeof (f as Record<string, unknown>).data === "string"
-          );
-          if (validFiles.length > 0) {
-            await fs.mkdir(pluginFilesDir, { recursive: true });
-            for (const file of validFiles) {
-              const filePath = path.join(pluginFilesDir, file.filename);
-              await fs.writeFile(filePath, Buffer.from(file.data, "base64"));
+      log.debug(`[stavrobot] run_plugin_tool: running batch of ${parsedParameters.length} call(s) for '${plugin}/${tool}'`);
+      const sections: string[] = [];
+      for (let index = 0; index < parsedParameters.length; index++) {
+        const itemParameters = parsedParameters[index];
+        let callResult: string;
+        // The plugin-runner skips parameter validation for primitive request bodies, so
+        // reject anything that is not a plain object here instead of forwarding it.
+        if (typeof itemParameters !== "object" || itemParameters === null || Array.isArray(itemParameters)) {
+          callResult = `The run of tool "${tool}" (plugin "${plugin}") failed:\n\`\`\`\nBatch item ${index + 1} is not a JSON object.\n\`\`\``;
+        } else {
+          try {
+            const { result, filesWritten } = await runPluginToolOnce(plugin, tool, manifest, itemParameters, pluginFilesDir);
+            callResult = result;
+            if (filesWritten.length > 0) {
+              callResult += await formatOutputFiles(filesWritten);
             }
-            filesDir = pluginFilesDir;
-            log.debug(`[stavrobot] run_plugin_tool: saved ${validFiles.length} file(s) to ${pluginFilesDir}`);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            callResult = `The run of tool "${tool}" (plugin "${plugin}") failed:\n\`\`\`\n${message}\n\`\`\``;
           }
         }
-      } catch {
-        // If JSON parsing fails here, formatRunPluginToolResult already handled it.
+        sections.push(`Call ${index + 1}:\n${callResult}`);
       }
 
-      if (filesDir !== undefined) {
-        const entries = await fs.readdir(filesDir);
-        const lines = await Promise.all(
-          entries.map(async (entry) => {
-            const filePath = path.join(filesDir, entry);
-            const stat = await fs.stat(filePath);
-            return `- ${filePath} (${formatFileSize(stat.size)})`;
-          }),
-        );
-        result += `\n\nOutput files:\n${lines.join("\n")}`;
-      }
-
-      return toolSuccess(result);
+      const header = `Batch run of tool "${tool}" (plugin "${plugin}"): ${parsedParameters.length} calls.`;
+      return toolSuccess(`${header}\n\n${sections.join("\n\n")}`);
     },
   };
 }

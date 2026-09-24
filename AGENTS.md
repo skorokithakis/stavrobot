@@ -173,8 +173,6 @@ both linting and formatting with good TypeScript ESM support).
 - Do not mention AI in commit messages. Write them as if the human wrote the code.
 - DO NOT REVERT ANY CHANGES. If you notice unrelated changes in the repo, pause and ask
   the user, as they might be changes the user has made.
-- After completing any task that modifies files, ALWAYS run `jj describe -m "..."` with
-  an appropriate message describing the whole change. DO NOT SKIP THIS.
 - When a change fixes a GitHub issue, include `Fixes #<number>` in the commit message
   so the issue is closed automatically when pushed.
 

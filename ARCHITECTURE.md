@@ -219,6 +219,11 @@ Plugins live in `/plugins/<name>/` (shared volume between `plugin-runner` and `c
 
 ### Tool execution (sync)
 - `plugin-runner` receives `POST /bundles/<plugin>/tools/<tool>/run` with JSON body.
+- `run_plugin_tool` accepts either a single parameter object or a JSON array of them.
+  An array runs the tool once per item, sequentially, and returns one result with each
+  call numbered (1-based). A failed call does not stop the rest of the batch. The
+  plugin's temp directory is cleared once at batch start, and file-type parameters are
+  resolved per item. Arrays are rejected for async tools; empty arrays return an error.
 - Parameters of type `"file"` are base64-decoded from the request and materialised into
   `/tmp/<plugin>/` before the script runs.
 - The script receives all parameters as JSON on stdin.
