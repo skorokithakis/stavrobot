@@ -257,7 +257,7 @@ Plugins live in `/plugins/<name>/` (shared volume between `plugin-runner` and `c
 | `compactions` | Summarised history snapshots (up_to_message_id boundary) |
 | `scratchpad` | On-demand knowledge (title injected, body fetched on read via manage_knowledge) |
 | `cron_entries` | Scheduled entries (cron expression or one-shot fire_at) |
-| `pages` | LLM-authored pages (path, mimetype, data BYTEA, is_public, queries JSONB, version INTEGER); append-only versioning — each update inserts a new row; empty `data` is a tombstone |
+| `pages` | LLM-authored pages (path, mimetype, data BYTEA, is_public, queries JSONB, mutations JSONB, version INTEGER); append-only versioning — each update inserts a new row; empty `data` is a tombstone |
 | `agents` | Subagent definitions (name, system_prompt, allowed_tools TEXT[], allowed_plugins TEXT[]) |
 | `interlocutors` | Contact records (display_name, owner bool, enabled bool, agent_id FK) |
 | `interlocutor_identities` | Per-channel identifiers (service, identifier; nullable for soft-delete) |
@@ -276,6 +276,9 @@ Migrations are additive `ALTER TABLE … ADD COLUMN IF NOT EXISTS` statements.
   - `POST /email/webhook`
   - `GET /pages/*` (per-row `is_public` check inside the handler)
   - `GET /api/pages/*/queries/*` (per-page `is_public` check inside the handler)
+- `POST /api/pages/*/mutations/*` is deliberately not public. It always requires Basic
+  Auth, regardless of the page's `is_public` flag, and also requires a JSON content type
+  as CSRF protection.
 - `POST /pebble-index/webhook` requires Basic Auth. It accepts a multipart Pebble Index
   ring recording and queues it directly for the main agent.
 - `plugin-runner` and `coder` also enforce Basic Auth on all endpoints.

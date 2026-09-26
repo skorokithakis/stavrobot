@@ -282,6 +282,12 @@ public or private.
   read-only SQL query stored with the page and returns the rows as a JSON array. Query
   placeholders of the form `$param:foo` are filled from the `?foo=` query string; a
   missing parameter returns `400`. Auth follows the page's public flag.
+- `POST /api/pages/<path>/mutations/<name>` (**always requires auth**). Runs a named SQL
+  mutation stored with the page, with any verb and a single statement per name, and
+  returns `{ "rowCount", "rows" }`. The body must be a JSON object whose top-level keys
+  supply the `$param:foo` placeholders; a missing key returns `400`, and a non-JSON
+  content type returns `415` (CSRF protection). Unlike queries, mutations are not
+  public even when the page is, and are not run in a read-only transaction.
 
 ### Database explorer
 

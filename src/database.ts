@@ -630,11 +630,12 @@ export interface Page {
   data: Buffer;
   isPublic: boolean;
   queries: Record<string, string> | null;
+  mutations: Record<string, string> | null;
 }
 
 export async function getPageByPath(pool: pg.Pool, path: string): Promise<Page | null> {
   const result = await pool.query(
-    "SELECT mimetype, data, is_public, queries FROM pages WHERE path = $1 ORDER BY version DESC LIMIT 1",
+    "SELECT mimetype, data, is_public, queries, mutations FROM pages WHERE path = $1 ORDER BY version DESC LIMIT 1",
     [path],
   );
   if (result.rows.length === 0) {
@@ -651,6 +652,7 @@ export async function getPageByPath(pool: pg.Pool, path: string): Promise<Page |
     data,
     isPublic: row.is_public as boolean,
     queries: row.queries as Record<string, string> | null,
+    mutations: row.mutations as Record<string, string> | null,
   };
 }
 
@@ -682,6 +684,31 @@ export async function getPageQueryByPath(
   };
 }
 
+export async function getPageMutationByPath(
+  pool: pg.Pool,
+  pagePath: string,
+  mutationName: string,
+): Promise<{ mutation: string } | null> {
+  const result = await pool.query(
+    "SELECT mutations->>$2 AS mutation, data FROM pages WHERE path = $1 ORDER BY version DESC LIMIT 1",
+    [pagePath, mutationName],
+  );
+  if (result.rows.length === 0) {
+    return null;
+  }
+  const row = result.rows[0];
+  const data = row.data as Buffer;
+  // An empty data buffer is a tombstone left by deletePage(); treat it as not found.
+  if (data.length === 0) {
+    return null;
+  }
+  const mutation = row.mutation as string | null;
+  if (mutation === null) {
+    return null;
+  }
+  return { mutation };
+}
+
 export async function upsertPage(
   pool: pg.Pool,
   path: string,
@@ -689,6 +716,7 @@ export async function upsertPage(
   content?: string,
   isPublic?: boolean,
   queries?: Record<string, string>,
+  mutations?: Record<string, string>,
 ): Promise<string> {
   // Fetch the latest existing version (if any) to carry forward unchanged fields
   // and to compute the next version number.
@@ -698,8 +726,9 @@ export async function upsertPage(
     data: Buffer;
     is_public: boolean;
     queries: Record<string, string> | null;
+    mutations: Record<string, string> | null;
   }>(
-    "SELECT version, mimetype, data, is_public, queries FROM pages WHERE path = $1 ORDER BY version DESC LIMIT 1",
+    "SELECT version, mimetype, data, is_public, queries, mutations FROM pages WHERE path = $1 ORDER BY version DESC LIMIT 1",
     [path],
   );
 
@@ -709,9 +738,9 @@ export async function upsertPage(
       return "Error: content and mimetype are required when creating a new page.";
     }
     await pool.query(
-      `INSERT INTO pages (path, mimetype, data, is_public, queries, version)
-       VALUES ($1, $2, convert_to($3, 'UTF8'), $4, $5, 1)`,
-      [path, mimetype, content, isPublic ?? false, queries !== undefined ? JSON.stringify(queries) : null],
+      `INSERT INTO pages (path, mimetype, data, is_public, queries, mutations, version)
+       VALUES ($1, $2, convert_to($3, 'UTF8'), $4, $5, $6, 1)`,
+      [path, mimetype, content, isPublic ?? false, queries !== undefined ? JSON.stringify(queries) : null, mutations !== undefined ? JSON.stringify(mutations) : null],
     );
     return `Page created at /pages/${path}`;
   }
@@ -719,27 +748,28 @@ export async function upsertPage(
   const latest = existing.rows[0];
 
   // For updates, at least one field must be provided.
-  if (mimetype === undefined && content === undefined && isPublic === undefined && queries === undefined) {
-    return "Error: no fields to update. Provide at least one of mimetype, content, is_public, or queries.";
+  if (mimetype === undefined && content === undefined && isPublic === undefined && queries === undefined && mutations === undefined) {
+    return "Error: no fields to update. Provide at least one of mimetype, content, is_public, queries, or mutations.";
   }
 
   const nextVersion = latest.version + 1;
   const newMimetype = mimetype ?? latest.mimetype;
   const newIsPublic = isPublic ?? latest.is_public;
   const newQueries = queries !== undefined ? JSON.stringify(queries) : (latest.queries !== null ? JSON.stringify(latest.queries) : null);
+  const newMutations = mutations !== undefined ? JSON.stringify(mutations) : (latest.mutations !== null ? JSON.stringify(latest.mutations) : null);
 
   if (content !== undefined) {
     await pool.query(
-      `INSERT INTO pages (path, mimetype, data, is_public, queries, version)
-       VALUES ($1, $2, convert_to($3, 'UTF8'), $4, $5, $6)`,
-      [path, newMimetype, content, newIsPublic, newQueries, nextVersion],
+      `INSERT INTO pages (path, mimetype, data, is_public, queries, mutations, version)
+       VALUES ($1, $2, convert_to($3, 'UTF8'), $4, $5, $6, $7)`,
+      [path, newMimetype, content, newIsPublic, newQueries, newMutations, nextVersion],
     );
   } else {
     // Carry forward the existing data unchanged.
     await pool.query(
-      `INSERT INTO pages (path, mimetype, data, is_public, queries, version)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [path, newMimetype, latest.data, newIsPublic, newQueries, nextVersion],
+      `INSERT INTO pages (path, mimetype, data, is_public, queries, mutations, version)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [path, newMimetype, latest.data, newIsPublic, newQueries, newMutations, nextVersion],
     );
   }
 
@@ -754,8 +784,9 @@ export async function deletePage(pool: pg.Pool, path: string): Promise<boolean> 
     data: Buffer;
     is_public: boolean;
     queries: Record<string, string> | null;
+    mutations: Record<string, string> | null;
   }>(
-    "SELECT version, mimetype, data, is_public, queries FROM pages WHERE path = $1 ORDER BY version DESC LIMIT 1",
+    "SELECT version, mimetype, data, is_public, queries, mutations FROM pages WHERE path = $1 ORDER BY version DESC LIMIT 1",
     [path],
   );
 
@@ -772,9 +803,9 @@ export async function deletePage(pool: pg.Pool, path: string): Promise<boolean> 
 
   const nextVersion = latest.version + 1;
   await pool.query(
-    `INSERT INTO pages (path, mimetype, data, is_public, queries, version)
-     VALUES ($1, $2, convert_to('', 'UTF8'), $3, $4, $5)`,
-    [path, latest.mimetype, latest.is_public, latest.queries !== null ? JSON.stringify(latest.queries) : null, nextVersion],
+    `INSERT INTO pages (path, mimetype, data, is_public, queries, mutations, version)
+     VALUES ($1, $2, convert_to('', 'UTF8'), $3, $4, $5, $6)`,
+    [path, latest.mimetype, latest.is_public, latest.queries !== null ? JSON.stringify(latest.queries) : null, latest.mutations !== null ? JSON.stringify(latest.mutations) : null, nextVersion],
   );
   return true;
 }
@@ -786,6 +817,7 @@ export interface PageVersion {
   data: string;
   isPublic: boolean;
   queries: Record<string, string> | null;
+  mutations: Record<string, string> | null;
   createdAt: Date;
 }
 
@@ -799,9 +831,10 @@ export async function readPage(pool: pg.Pool, path: string, version?: number): P
       data: string;
       is_public: boolean;
       queries: Record<string, string> | null;
+      mutations: Record<string, string> | null;
       created_at: Date;
     }>(
-      "SELECT path, version, mimetype, convert_from(data, 'UTF8') AS data, is_public, queries, created_at FROM pages WHERE path = $1 AND version = $2",
+      "SELECT path, version, mimetype, convert_from(data, 'UTF8') AS data, is_public, queries, mutations, created_at FROM pages WHERE path = $1 AND version = $2",
       [path, version],
     );
   } else {
@@ -812,9 +845,10 @@ export async function readPage(pool: pg.Pool, path: string, version?: number): P
       data: string;
       is_public: boolean;
       queries: Record<string, string> | null;
+      mutations: Record<string, string> | null;
       created_at: Date;
     }>(
-      "SELECT path, version, mimetype, convert_from(data, 'UTF8') AS data, is_public, queries, created_at FROM pages WHERE path = $1 ORDER BY version DESC LIMIT 1",
+      "SELECT path, version, mimetype, convert_from(data, 'UTF8') AS data, is_public, queries, mutations, created_at FROM pages WHERE path = $1 ORDER BY version DESC LIMIT 1",
       [path],
     );
   }
@@ -829,6 +863,7 @@ export async function readPage(pool: pg.Pool, path: string, version?: number): P
     data: row.data,
     isPublic: row.is_public,
     queries: row.queries,
+    mutations: row.mutations,
     createdAt: row.created_at,
   };
 }
@@ -861,8 +896,9 @@ export async function restorePageVersion(pool: pg.Pool, path: string, version: n
     data: Buffer;
     is_public: boolean;
     queries: Record<string, string> | null;
+    mutations: Record<string, string> | null;
   }>(
-    "SELECT mimetype, data, is_public, queries FROM pages WHERE path = $1 AND version = $2",
+    "SELECT mimetype, data, is_public, queries, mutations FROM pages WHERE path = $1 AND version = $2",
     [path, version],
   );
   if (sourceResult.rows.length === 0) {
@@ -877,9 +913,9 @@ export async function restorePageVersion(pool: pg.Pool, path: string, version: n
   const nextVersion = (maxResult.rows[0].max_version ?? 0) + 1;
 
   await pool.query(
-    `INSERT INTO pages (path, mimetype, data, is_public, queries, version)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [path, source.mimetype, source.data, source.is_public, source.queries !== null ? JSON.stringify(source.queries) : null, nextVersion],
+    `INSERT INTO pages (path, mimetype, data, is_public, queries, mutations, version)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [path, source.mimetype, source.data, source.is_public, source.queries !== null ? JSON.stringify(source.queries) : null, source.mutations !== null ? JSON.stringify(source.mutations) : null, nextVersion],
   );
 
   return `Page '${path}' restored from version ${version} as version ${nextVersion}.`;

@@ -7,7 +7,7 @@ import { loadConfig } from "./config.js";
 import { loadAllowlist } from "./allowlist.js";
 import { initInternalFetch } from "./internal-fetch.js";
 import { startBackgroundTokenRefresh } from "./auth.js";
-import { connectDatabase, seedCronEntries, seedOwner, getPageByPath, getPageQueryByPath } from "./database.js";
+import { connectDatabase, seedCronEntries, seedOwner, getPageByPath, getPageQueryByPath, getPageMutationByPath } from "./database.js";
 import { runMigrations } from "./migrations.js";
 import { createAgent } from "./agent/index.js";
 import { initializeQueue, enqueueMessage } from "./queue.js";
@@ -61,7 +61,7 @@ const CSP_HEADER_VALUE =
   "img-src 'self' data:; " +
   "connect-src 'self'";
 
-function isPublicRoute(method: string, pathname: string): boolean {
+export function isPublicRoute(method: string, pathname: string): boolean {
   if (method === "POST" && pathname === "/telegram/webhook") {
     return true;
   }
@@ -76,6 +76,8 @@ function isPublicRoute(method: string, pathname: string): boolean {
   if (method === "GET" && pathname.startsWith("/api/pages/") && pathname.includes("/queries/")) {
     return true;
   }
+  // Page mutations are deliberately not public: they always require Basic Auth,
+  // regardless of the page's is_public flag. The global auth check in main() covers them.
   return false;
 }
 
@@ -321,17 +323,47 @@ export async function handleTelegramWebhookRequest(
   }
 }
 
-// Returns an error message string if the SQL is not a valid read-only query, or null if it is valid.
-function validateReadOnlySql(sql: string): string | null {
-  if (!sql.match(/^(SELECT|WITH)\b/i)) {
-    return "Only SELECT queries are allowed";
-  }
+// Returns an error message string if the SQL contains more than one statement, or null if it is valid.
+function validateSingleStatement(sql: string): string | null {
   // Strip one optional trailing semicolon, then reject if any remain — this
   // blocks multi-statement injection like "SELECT 1; DELETE FROM users".
   if (sql.replace(/;$/, "").includes(";")) {
     return "Multiple SQL statements are not allowed";
   }
   return null;
+}
+
+// Returns an error message string if the SQL is not a valid read-only query, or null if it is valid.
+function validateReadOnlySql(sql: string): string | null {
+  if (!sql.match(/^(SELECT|WITH)\b/i)) {
+    return "Only SELECT queries are allowed";
+  }
+  return validateSingleStatement(sql);
+}
+
+// Rewrites $param:name placeholders to positional $1, $2, ... placeholders and
+// returns the names in first-seen order. Shared by page queries and page mutations.
+function parseParamPlaceholders(sql: string): { parameterizedSql: string; paramNames: string[] } {
+  const paramRegex = /\$param:(\w+)/g;
+  const paramNames: string[] = [];
+  const seenParams = new Set<string>();
+  let match: RegExpExecArray | null;
+  while ((match = paramRegex.exec(sql)) !== null) {
+    const name = match[1];
+    if (!seenParams.has(name)) {
+      seenParams.add(name);
+      paramNames.push(name);
+    }
+  }
+
+  // Replace each unique $param:name with its positional placeholder $1, $2, etc.
+  let paramIndex = 0;
+  const paramMap = new Map<string, string>();
+  for (const name of paramNames) {
+    paramMap.set(name, `$${++paramIndex}`);
+  }
+  const parameterizedSql = sql.replace(/\$param:(\w+)/g, (_full, name: string) => paramMap.get(name) ?? "");
+  return { parameterizedSql, paramNames };
 }
 
 export async function handlePageQueryRequest(
@@ -385,17 +417,7 @@ export async function handlePageQueryRequest(
 
     // Parse $param:name placeholders and replace them with positional $1, $2, etc.
     // Parameters are read from query string values.
-    const paramRegex = /\$param:(\w+)/g;
-    const paramNames: string[] = [];
-    const seenParams = new Set<string>();
-    let match: RegExpExecArray | null;
-    while ((match = paramRegex.exec(sql)) !== null) {
-      const name = match[1];
-      if (!seenParams.has(name)) {
-        seenParams.add(name);
-        paramNames.push(name);
-      }
-    }
+    const { parameterizedSql, paramNames } = parseParamPlaceholders(sql);
 
     const paramValues: string[] = [];
     for (const name of paramNames) {
@@ -407,14 +429,6 @@ export async function handlePageQueryRequest(
       }
       paramValues.push(value);
     }
-
-    // Replace each unique $param:name with its positional placeholder $1, $2, etc.
-    let paramIndex = 0;
-    const paramMap = new Map<string, string>();
-    for (const name of paramNames) {
-      paramMap.set(name, `$${++paramIndex}`);
-    }
-    const parameterizedSql = sql.replace(/\$param:(\w+)/g, (_full, name: string) => paramMap.get(name) ?? "");
 
     log.info(`[stavrobot] Page query: ${pagePath}/${queryName}`, parameterizedSql);
     const client = await pool.connect();
@@ -434,6 +448,98 @@ export async function handlePageQueryRequest(
     response.end(JSON.stringify(result.rows));
   } catch (error) {
     log.error("[stavrobot] Error handling page query request:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    response.writeHead(500, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: errorMessage }));
+  }
+}
+
+export async function handlePageMutationRequest(
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+  pathname: string,
+  pool: Pool,
+): Promise<void> {
+  try {
+    // The path format is /api/pages/<pagePath>/mutations/<mutationName>.
+    // The mutation name is always the last segment after the last "/mutations/".
+    // Everything between "/api/pages/" and the last "/mutations/" is the page path.
+    const mutationsMarker = "/mutations/";
+    const lastMutationsIndex = pathname.lastIndexOf(mutationsMarker);
+    const pagePath = pathname.slice("/api/pages/".length, lastMutationsIndex);
+    const mutationName = pathname.slice(lastMutationsIndex + mutationsMarker.length);
+
+    if (pagePath === "" || mutationName === "") {
+      response.writeHead(404, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: "Not found" }));
+      return;
+    }
+
+    const pageMutation = await getPageMutationByPath(pool, pagePath, mutationName);
+    if (pageMutation === null) {
+      response.writeHead(404, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: "Not found" }));
+      return;
+    }
+
+    // Require a JSON content type. This is CSRF protection: cross-site HTML forms
+    // cannot send this content type without triggering a CORS preflight, which we
+    // never answer. Parameters such as "; charset=utf-8" are allowed.
+    const contentType = request.headers["content-type"];
+    const mediaType = typeof contentType === "string" ? contentType.split(";")[0].trim().toLowerCase() : "";
+    if (mediaType !== "application/json") {
+      response.writeHead(415, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: "Content-Type must be application/json" }));
+      return;
+    }
+
+    const body = await readRequestBody(request);
+    let parsedBody: unknown;
+    try {
+      parsedBody = JSON.parse(body);
+    } catch {
+      response.writeHead(400, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: "Invalid JSON" }));
+      return;
+    }
+
+    if (typeof parsedBody !== "object" || parsedBody === null || Array.isArray(parsedBody)) {
+      response.writeHead(400, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: "Request body must be a JSON object" }));
+      return;
+    }
+    const bodyObject = parsedBody as Record<string, unknown>;
+
+    const sql = pageMutation.mutation.trim();
+    const validationError = validateSingleStatement(sql);
+    if (validationError !== null) {
+      response.writeHead(400, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: validationError }));
+      return;
+    }
+
+    // Parse $param:name placeholders and replace them with positional $1, $2, etc.
+    // Parameters are read from the top-level keys of the JSON body. Values are
+    // passed to pg unchanged as bound parameters.
+    const { parameterizedSql, paramNames } = parseParamPlaceholders(sql);
+    const paramValues: unknown[] = [];
+    for (const name of paramNames) {
+      if (!Object.prototype.hasOwnProperty.call(bodyObject, name)) {
+        response.writeHead(400, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ error: `Missing mutation parameter: ${name}` }));
+        return;
+      }
+      paramValues.push(bodyObject[name]);
+    }
+
+    // Mutations are not run in a READ ONLY transaction — they are allowed to write.
+    log.info(`[stavrobot] Page mutation: ${pagePath}/${mutationName}`, parameterizedSql);
+    const result = await pool.query(parameterizedSql, paramValues);
+
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ rowCount: result.rowCount, rows: result.rows }));
+  } catch (error) {
+    log.error("[stavrobot] Error handling page mutation request:", error);
     const errorMessage = error instanceof Error ? error.message : String(error);
     response.writeHead(500, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ error: errorMessage }));
@@ -615,6 +721,8 @@ async function main(): Promise<void> {
       void handleSignalCaptchaSubmit(request, response);
     } else if (request.method === "GET" && pathname.startsWith("/api/pages/") && pathname.includes("/queries/")) {
       void handlePageQueryRequest(request, response, pathname, config.password, pool, url);
+    } else if (request.method === "POST" && pathname.startsWith("/api/pages/") && pathname.includes("/mutations/")) {
+      void handlePageMutationRequest(request, response, pathname, pool);
     } else if (request.method === "GET" && pathname.startsWith("/pages/")) {
       void handlePageRequest(request, response, pathname, config.password, pool);
     } else {

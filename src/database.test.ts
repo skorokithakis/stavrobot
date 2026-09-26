@@ -15,7 +15,7 @@ vi.mock("./toon.js", () => ({
 vi.mock("fs");
 
 import fs from "fs";
-import { resolveInterlocutor, seedOwner, seedCronEntries, upsertPage, deletePage, getPageByPath, getPageQueryByPath, readPage, listPageVersions, restorePageVersion, readScratchpad, saveMessage } from "./database.js";
+import { resolveInterlocutor, seedOwner, seedCronEntries, upsertPage, deletePage, getPageByPath, getPageQueryByPath, getPageMutationByPath, readPage, listPageVersions, restorePageVersion, readScratchpad, saveMessage } from "./database.js";
 import type { OwnerConfig } from "./config.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
@@ -456,6 +456,44 @@ describe("upsertPage — versioned inserts", () => {
     expect(insertQuery?.values[3]).toBe(true);
   });
 
+  it("stores mutations on page creation", async () => {
+    const queries: Array<{ text: string; values: unknown[] }> = [];
+    const pool = makeMockPool((text, values) => {
+      queries.push({ text, values: values ?? [] });
+      if (text.includes("SELECT")) {
+        return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
+      }
+      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
+    });
+
+    await upsertPage(pool, "about", "text/html", "<h1>About</h1>", false, { q: "SELECT 1" }, { m: "UPDATE t SET x = 1" });
+
+    const insertQuery = queries.find((q) => q.text.includes("INSERT INTO pages"));
+    expect(insertQuery).toBeDefined();
+    // On creation version is hardcoded to 1 in the SQL, so mutations is the last parameter.
+    expect(insertQuery?.values[insertQuery.values.length - 1]).toBe(JSON.stringify({ m: "UPDATE t SET x = 1" }));
+  });
+
+  it("carries forward mutations when not provided on update", async () => {
+    const queries: Array<{ text: string; values: unknown[] }> = [];
+    const pool = makeMockPool((text, values) => {
+      queries.push({ text, values: values ?? [] });
+      if (text.includes("SELECT")) {
+        return Promise.resolve({
+          rows: [{ version: 1, mimetype: "text/html", data: Buffer.from("x"), is_public: false, queries: null, mutations: { m: "UPDATE t SET x = 1" } }],
+          rowCount: 1,
+        } as unknown as QueryResult);
+      }
+      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
+    });
+
+    await upsertPage(pool, "about", undefined, "<h1>New</h1>");
+
+    const insertQuery = queries.find((q) => q.text.includes("INSERT INTO pages"));
+    expect(insertQuery).toBeDefined();
+    expect(insertQuery?.values[insertQuery.values.length - 2]).toBe(JSON.stringify({ m: "UPDATE t SET x = 1" }));
+  });
+
   it("returns an error when updating with no fields provided", async () => {
     const pool = makeMockPool(() =>
       Promise.resolve({
@@ -601,6 +639,58 @@ describe("getPageQueryByPath — versioned reads", () => {
     expect(result).not.toBeNull();
     expect(result?.query).toBe("SELECT 1");
     expect(result?.isPublic).toBe(true);
+  });
+});
+
+describe("getPageMutationByPath — versioned reads", () => {
+  it("returns null when no rows exist", async () => {
+    const pool = makeMockPool(() =>
+      Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult),
+    );
+
+    const result = await getPageMutationByPath(pool, "about", "mymutation");
+
+    expect(result).toBeNull();
+  });
+
+  it("returns null when the latest version is a tombstone (empty data)", async () => {
+    const pool = makeMockPool(() =>
+      Promise.resolve({
+        rows: [{ mutation: "UPDATE t SET x = 1", is_public: false, data: Buffer.alloc(0) }],
+        rowCount: 1,
+      } as unknown as QueryResult),
+    );
+
+    const result = await getPageMutationByPath(pool, "about", "mymutation");
+
+    expect(result).toBeNull();
+  });
+
+  it("returns null when the named mutation is not defined", async () => {
+    const pool = makeMockPool(() =>
+      Promise.resolve({
+        rows: [{ mutation: null, is_public: false, data: Buffer.from("content") }],
+        rowCount: 1,
+      } as unknown as QueryResult),
+    );
+
+    const result = await getPageMutationByPath(pool, "about", "mymutation");
+
+    expect(result).toBeNull();
+  });
+
+  it("returns the mutation when the latest version has non-empty data", async () => {
+    const pool = makeMockPool(() =>
+      Promise.resolve({
+        rows: [{ mutation: "UPDATE t SET x = 1", data: Buffer.from("content") }],
+        rowCount: 1,
+      } as unknown as QueryResult),
+    );
+
+    const result = await getPageMutationByPath(pool, "about", "mymutation");
+
+    expect(result).not.toBeNull();
+    expect(result?.mutation).toBe("UPDATE t SET x = 1");
   });
 });
 

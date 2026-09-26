@@ -1,7 +1,7 @@
 import http from "http";
 import { Readable } from "stream";
 import { describe, it, expect, vi } from "vitest";
-import { handlePageQueryRequest, handleTelegramWebhookRequest, checkBasicAuth, readRequestBody, handleChatRequest } from "./index.js";
+import { handlePageQueryRequest, handlePageMutationRequest, handleTelegramWebhookRequest, checkBasicAuth, readRequestBody, handleChatRequest, isPublicRoute } from "./index.js";
 import type { Pool, QueryResult } from "pg";
 import type { TelegramConfig } from "./config.js";
 import { log } from "./log.js";
@@ -205,6 +205,157 @@ describe("handlePageQueryRequest transaction enforcement", () => {
     expect(queryCalls).toContain(writableCte);
     expect(queryCalls).toContain("ROLLBACK");
     expect(mockClient.release).toHaveBeenCalledOnce();
+  });
+});
+
+// Builds a readable IncomingMessage carrying a JSON body for the mutation endpoint.
+function makeMutationRequest(
+  body: string,
+  headers: Record<string, string> = {},
+  pathname: string = "/api/pages/mypage/mutations/mymutation",
+): http.IncomingMessage {
+  const readable = Readable.from([Buffer.from(body)]);
+  return Object.assign(readable, {
+    headers: { "content-type": "application/json", ...headers },
+    method: "POST",
+    url: pathname,
+  }) as unknown as http.IncomingMessage;
+}
+
+interface MutationPoolOptions {
+  pageRows?: unknown[];
+  execResult?: QueryResult;
+}
+
+// Mock Pool for the mutation handler: the first query() call is the
+// getPageMutationByPath lookup (identified by "mutations->>"), the second is the
+// mutation execution.
+function makeMutationPool(options: MutationPoolOptions = {}): { pool: Pool; queryMock: ReturnType<typeof vi.fn> } {
+  const pageRows = options.pageRows ?? [{ mutation: "UPDATE widgets SET name = 'x'", data: Buffer.from("content") }];
+  const execResult = options.execResult ?? ({ rows: [{ id: 1 }], command: "UPDATE", rowCount: 1 } as unknown as QueryResult);
+  const queryMock = vi.fn().mockImplementation((sql: string) => {
+    if (typeof sql === "string" && sql.includes("mutations->>")) {
+      return Promise.resolve({ rows: pageRows, rowCount: pageRows.length } as unknown as QueryResult);
+    }
+    return Promise.resolve(execResult);
+  });
+  return { pool: { query: queryMock } as unknown as Pool, queryMock };
+}
+
+async function invokeMutation(
+  pool: Pool,
+  body: string = "{}",
+  headers: Record<string, string> = {},
+  pathname: string = "/api/pages/mypage/mutations/mymutation",
+): Promise<MockResponse> {
+  const request = makeMutationRequest(body, headers, pathname);
+  const response = makeMockResponse();
+  await handlePageMutationRequest(request, response as unknown as http.ServerResponse, pathname, pool);
+  return response;
+}
+
+describe("handlePageMutationRequest", () => {
+  it("runs the mutation and returns rowCount and rows", async () => {
+    const { pool, queryMock } = makeMutationPool({
+      execResult: { rows: [{ id: 7 }], command: "UPDATE", rowCount: 1 } as unknown as QueryResult,
+    });
+    const response = await invokeMutation(pool);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe(JSON.stringify({ rowCount: 1, rows: [{ id: 7 }] }));
+    // The execution query is the second pool.query() call (the first is the lookup).
+    expect(queryMock.mock.calls[1][0]).toContain("UPDATE widgets");
+    expect(queryMock.mock.calls[1][1]).toEqual([]);
+  });
+
+  it("binds $param:name values from the JSON body", async () => {
+    const { pool, queryMock } = makeMutationPool({
+      pageRows: [{ mutation: "INSERT INTO widgets (a, b) VALUES ($param:first, $param:second)", data: Buffer.from("content") }],
+    });
+    const response = await invokeMutation(pool, JSON.stringify({ first: "hello", second: 42 }));
+
+    expect(response.statusCode).toBe(200);
+    expect(queryMock.mock.calls[1][0]).toBe("INSERT INTO widgets (a, b) VALUES ($1, $2)");
+    expect(queryMock.mock.calls[1][1]).toEqual(["hello", 42]);
+  });
+
+  it("returns 400 when a $param:name key is missing from the body", async () => {
+    const { pool, queryMock } = makeMutationPool({
+      pageRows: [{ mutation: "UPDATE widgets SET name = $param:name", data: Buffer.from("content") }],
+    });
+    const response = await invokeMutation(pool, "{}");
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body ?? "{}").error).toContain("name");
+    // The execution query must not run.
+    expect(queryMock).toHaveBeenCalledOnce();
+  });
+
+  it("returns 400 for invalid JSON", async () => {
+    const { pool } = makeMutationPool();
+    const response = await invokeMutation(pool, "not json");
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("returns 400 for a non-object JSON body", async () => {
+    const { pool } = makeMutationPool();
+    const response = await invokeMutation(pool, JSON.stringify([1, 2, 3]));
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body ?? "{}").error).toMatch(/object/i);
+  });
+
+  it("returns 415 when the content type is not JSON", async () => {
+    const { pool, queryMock } = makeMutationPool();
+    const response = await invokeMutation(pool, "{}", { "content-type": "application/x-www-form-urlencoded" });
+
+    expect(response.statusCode).toBe(415);
+    // Only the lookup ran; the mutation execution did not.
+    expect(queryMock).toHaveBeenCalledOnce();
+  });
+
+  it("returns 415 when the content type is empty", async () => {
+    const { pool } = makeMutationPool();
+    const response = await invokeMutation(pool, "{}", { "content-type": "" });
+
+    expect(response.statusCode).toBe(415);
+  });
+
+  it("allows a JSON content type with parameters such as charset", async () => {
+    const { pool } = makeMutationPool();
+    const response = await invokeMutation(pool, "{}", { "content-type": "application/json; charset=utf-8" });
+
+    expect(response.statusCode).toBe(200);
+  });
+
+  it("returns 404 when the page or mutation is unknown", async () => {
+    const { pool } = makeMutationPool({ pageRows: [] });
+    const response = await invokeMutation(pool, "{}");
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("rejects multi-statement SQL", async () => {
+    const { pool, queryMock } = makeMutationPool({
+      pageRows: [{ mutation: "UPDATE widgets SET name = 'x'; DELETE FROM widgets", data: Buffer.from("content") }],
+    });
+    const response = await invokeMutation(pool, "{}");
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body ?? "{}").error).toMatch(/Multiple SQL statements/);
+    // Only the lookup query ran.
+    expect(queryMock).toHaveBeenCalledOnce();
+  });
+});
+
+describe("isPublicRoute — page mutations", () => {
+  it("treats POST mutations as non-public even for public pages", () => {
+    expect(isPublicRoute("POST", "/api/pages/public-page/mutations/do_thing")).toBe(false);
+  });
+
+  it("still treats GET page queries as public with per-page auth", () => {
+    expect(isPublicRoute("GET", "/api/pages/public-page/queries/do_thing")).toBe(true);
   });
 });
 

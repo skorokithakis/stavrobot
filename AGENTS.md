@@ -264,13 +264,14 @@ changes.  This file is the plugin authoring guide used by the coder agent.
 
 ## Pages
 
-- The `pages` table schema: `id` (serial PK), `path` (text), `version` (integer), `mimetype` (text), `data` (BYTEA), `is_public` (boolean, default false), `queries` (JSONB, nullable), `created_at` (timestamptz). Unique constraint on `(path, version)`.
+- The `pages` table schema: `id` (serial PK), `path` (text), `version` (integer), `mimetype` (text), `data` (BYTEA), `is_public` (boolean, default false), `queries` (JSONB, nullable), `mutations` (JSONB, nullable), `created_at` (timestamptz). Unique constraint on `(path, version)`.
 - Versioning model: every edit inserts a new version row; a delete inserts a tombstone (empty data). Old versions are never removed.
 - Pages are served at `GET /pages/<path>` — the latest version is returned. If the latest version is a tombstone (empty data), the page is treated as deleted (404).
 - `is_public` controls auth: false requires authentication, true is publicly accessible.
 - The LLM agent manages pages via the `manage_pages` tool (not `execute_sql`).
 - The `/pages/` prefix is whitelisted in `isPublicRoute` so the route is reachable without a session cookie, but the route handler enforces auth for non-public pages.
 - Named queries: pages can define SQL queries in the `queries` JSONB column, fetchable via `GET /api/pages/<path>/queries/<name>`.
+- Named mutations: pages can define SQL mutations in the `mutations` JSONB column, run via `POST /api/pages/<path>/mutations/<name>`. Mutation endpoints always require auth even for public pages, require a JSON content type (CSRF protection), allow any SQL verb but only a single statement, and are not run in a read-only transaction.
 
 ## General rules
 

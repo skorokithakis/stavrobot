@@ -167,11 +167,13 @@ const migrations: Migration[] = [
         data BYTEA NOT NULL,
         is_public BOOLEAN NOT NULL DEFAULT FALSE,
         queries JSONB,
+        mutations JSONB,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
     // Existing databases may be missing these columns or have the old schema.
     await client.query(`ALTER TABLE pages ADD COLUMN IF NOT EXISTS queries JSONB`);
+    await client.query(`ALTER TABLE pages ADD COLUMN IF NOT EXISTS mutations JSONB`);
     await client.query(`ALTER TABLE pages ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1`);
     await client.query(`ALTER TABLE pages DROP COLUMN IF EXISTS updated_at`);
     // Drop the old unique constraint on path alone and replace it with a composite
