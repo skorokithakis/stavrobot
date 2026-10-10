@@ -1,5 +1,23 @@
-import { describe, it, expect } from "vitest";
-import { applyTelegramEntitiesToMarkdown } from "./telegram.js";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { applyTelegramEntitiesToMarkdown, startTelegramPolling, runTelegramPollingLoop } from "./telegram.js";
+import { enqueueMessage } from "./queue.js";
+import { log } from "./log.js";
+import type { TelegramConfig } from "./config.js";
+
+// Mock the queue and allowlist so polling tests can assert that updates reach the
+// handler without touching real infrastructure.
+vi.mock("./queue.js", () => ({
+  enqueueMessage: vi.fn().mockResolvedValue("ok"),
+  initializeQueue: vi.fn(),
+}));
+
+vi.mock("./allowlist.js", () => ({
+  isInAllowlist: vi.fn().mockReturnValue(true),
+}));
+
+function jsonResponse(payload: unknown): Response {
+  return { json: async () => payload } as unknown as Response;
+}
 
 describe("applyTelegramEntitiesToMarkdown", () => {
   it("returns text unchanged when entities is undefined", () => {
@@ -151,5 +169,164 @@ describe("applyTelegramEntitiesToMarkdown", () => {
       { type: "bot_command", offset: 11, length: 4 },
     ]);
     expect(result).toBe("@user #tag /cmd");
+  });
+});
+
+describe("Telegram long polling", () => {
+  const config: TelegramConfig = { botToken: "test-token" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("hands updates to the handler and advances the offset to last update_id + 1", async () => {
+    interface RecordedCall {
+      url: string;
+      body: Record<string, unknown>;
+    }
+    const calls: RecordedCall[] = [];
+    const fetchFunction = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+      calls.push({ url, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+      if (calls.length === 1) {
+        return jsonResponse({
+          ok: true,
+          result: [
+            { update_id: 100, message: { chat: { id: 1 }, text: "first" } },
+            { update_id: 101, message: { chat: { id: 1 }, text: "second" } },
+          ],
+        });
+      }
+      return jsonResponse({ ok: false, error_code: 500, description: "boom" });
+    });
+    const sleepFunction = vi.fn(async (): Promise<void> => {
+      throw new Error("stop");
+    });
+
+    await expect(runTelegramPollingLoop(config, fetchFunction, sleepFunction)).rejects.toThrow("stop");
+
+    expect(enqueueMessage).toHaveBeenCalledTimes(2);
+    expect(enqueueMessage).toHaveBeenNthCalledWith(1, "first", "telegram", "1");
+    expect(enqueueMessage).toHaveBeenNthCalledWith(2, "second", "telegram", "1");
+    expect(calls).toHaveLength(2);
+    expect(calls[1].body.offset).toBe(102);
+    expect(calls[1].body.timeout).toBe(30);
+    expect(calls[1].body.allowed_updates).toEqual(["message"]);
+    expect(sleepFunction).toHaveBeenCalledWith(5000);
+  });
+
+  it("retries after a thrown error without losing the offset", async () => {
+    const offsets: unknown[] = [];
+    let callCount = 0;
+    const fetchFunction = vi.fn(async (_url: string, init?: RequestInit): Promise<Response> => {
+      callCount += 1;
+      offsets.push(JSON.parse(String(init?.body)).offset);
+      if (callCount === 1) {
+        throw new Error("network down");
+      }
+      if (callCount === 2) {
+        return jsonResponse({ ok: true, result: [{ update_id: 7, message: { chat: { id: 1 }, text: "hi" } }] });
+      }
+      return jsonResponse({ ok: false, error_code: 500, description: "boom" });
+    });
+    // The first sleep lets the loop retry; the second stops it.
+    let sleepCount = 0;
+    const sleepFunction = vi.fn(async (): Promise<void> => {
+      sleepCount += 1;
+      if (sleepCount >= 2) {
+        throw new Error("stop");
+      }
+    });
+
+    await expect(runTelegramPollingLoop(config, fetchFunction, sleepFunction)).rejects.toThrow("stop");
+
+    expect(fetchFunction).toHaveBeenCalledTimes(3);
+    expect(offsets).toEqual([undefined, undefined, 8]);
+    expect(sleepFunction).toHaveBeenCalledWith(5000);
+  });
+
+  it("advances the offset per update when a later handler in the batch throws", async () => {
+    const enqueueMock = vi.mocked(enqueueMessage);
+    enqueueMock.mockImplementationOnce(async () => "ok");
+    // A synchronous throw becomes a rejection of handleTelegramUpdate's promise.
+    enqueueMock.mockImplementationOnce((): never => {
+      throw new Error("handler boom");
+    });
+
+    const offsets: unknown[] = [];
+    let callCount = 0;
+    const fetchFunction = vi.fn(async (_url: string, init?: RequestInit): Promise<Response> => {
+      callCount += 1;
+      offsets.push(JSON.parse(String(init?.body)).offset);
+      if (callCount === 1) {
+        return jsonResponse({
+          ok: true,
+          result: [
+            { update_id: 10, message: { chat: { id: 1 }, text: "first" } },
+            { update_id: 11, message: { chat: { id: 1 }, text: "second" } },
+          ],
+        });
+      }
+      // Reached only if the loop kept going after the second handler threw.
+      throw new Error("stop");
+    });
+    // The first sleep lets the loop retry after the handler throws; the second stops it.
+    let sleepCount = 0;
+    const sleepFunction = vi.fn(async (): Promise<void> => {
+      sleepCount += 1;
+      if (sleepCount >= 2) {
+        throw new Error("stop-loop");
+      }
+    });
+
+    await expect(runTelegramPollingLoop(config, fetchFunction, sleepFunction)).rejects.toThrow("stop-loop");
+
+    expect(enqueueMock).toHaveBeenCalledTimes(2);
+    expect(fetchFunction).toHaveBeenCalledTimes(2);
+    expect(offsets).toEqual([undefined, 11]);
+  });
+
+  it("logs a clear conflict message when error_code is 409", async () => {
+    const errorSpy = vi.spyOn(log, "error").mockImplementation((): void => {});
+    const fetchFunction = vi.fn(async (): Promise<Response> =>
+      jsonResponse({ ok: false, error_code: 409, description: "Conflict: terminated by other getUpdates request" })
+    );
+    const sleepFunction = vi.fn(async (): Promise<void> => {
+      throw new Error("stop");
+    });
+
+    await expect(runTelegramPollingLoop(config, fetchFunction, sleepFunction)).rejects.toThrow("stop");
+
+    const loggedMessage = String(errorSpy.mock.calls[0][0]);
+    expect(loggedMessage).toMatch(/409/);
+    expect(loggedMessage).toMatch(/another instance/i);
+    errorSpy.mockRestore();
+  });
+
+  it("throws when deleteWebhook fails", async () => {
+    const fetchFunction = vi.fn(async (): Promise<Response> =>
+      jsonResponse({ ok: false, description: "nope" })
+    );
+
+    await expect(startTelegramPolling(config, fetchFunction)).rejects.toThrow(/delete Telegram webhook/);
+  });
+
+  it("awaits deleteWebhook before the first getUpdates", async () => {
+    const order: string[] = [];
+    const fetchFunction = vi.fn(async (url: string): Promise<Response> => {
+      if (url.endsWith("/deleteWebhook")) {
+        order.push("deleteWebhook");
+        return jsonResponse({ ok: true, result: true });
+      }
+      order.push("getUpdates");
+      // Never resolve so the background loop parks without timers.
+      return new Promise<Response>(() => {});
+    });
+
+    await startTelegramPolling(config, fetchFunction);
+
+    await vi.waitFor(() => {
+      expect(order).toContain("getUpdates");
+    });
+    expect(order[0]).toBe("deleteWebhook");
   });
 });

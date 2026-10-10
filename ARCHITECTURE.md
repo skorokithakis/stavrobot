@@ -303,7 +303,6 @@ Migrations are additive `ALTER TABLE … ADD COLUMN IF NOT EXISTS` statements.
 
 - All endpoints require HTTP Basic Auth (password from `config.toml`).
 - Public exceptions whitelisted in `isPublicRoute()` (`src/index.ts`):
-  - `POST /telegram/webhook`
   - `POST /email/webhook`
   - `GET /pages/*` (per-row `is_public` check inside the handler)
   - `GET /api/pages/*/queries/*` (per-page `is_public` check inside the handler)
@@ -433,7 +432,7 @@ to the endpoint (as `reasoning_effort` for `openai-completions`). It is ignored 
 - Log level: `STAVROBOT_LOG_LEVEL` env var (`error`/`warn`/`info`/`debug`; default `info`).
 - Feature gates in `config.toml` (presence of section enables the feature):
   - `[coder]` — enables `request_coding_task` tool and `manage_plugins create` action (also requires the `coder` Docker Compose profile).
-  - `[telegram]` — enables Telegram webhook + `send_telegram_message` tool.
+  - `[telegram]` — enables Telegram long polling + `send_telegram_message` tool.
   - `[whatsapp]` — enables WhatsApp (Baileys) + `send_whatsapp_message` tool.
   - `[email]` with `smtpHost` — enables `send_email` tool and SMTP transport.
   - `[embeddings]` — enables OpenAI vector embeddings worker and semantic search in `db_search`.
@@ -447,7 +446,7 @@ to the endpoint (as `reasoning_effort` for `openai-completions`). It is ignored 
 |---|---|
 | `undefined` | Direct HTTP call (no source header) |
 | `"signal"` | Signal bridge webhook |
-| `"telegram"` | Telegram webhook |
+| `"telegram"` | Telegram long polling |
 | `"whatsapp"` | WhatsApp (Baileys) |
 | `"email"` | Email webhook |
 | `"pebble-index"` | Pebble Index ring webhook |

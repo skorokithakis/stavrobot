@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { Marked, type RendererObject, type Tokens } from "marked";
 import type { TelegramConfig } from "./config.js";
 import { isInAllowlist } from "./allowlist.js";
@@ -32,7 +31,15 @@ interface TelegramMessage {
 }
 
 interface TelegramUpdate {
+  update_id?: number;
   message?: TelegramMessage;
+}
+
+interface GetUpdatesResponse {
+  ok: boolean;
+  error_code?: number;
+  description?: string;
+  result?: TelegramUpdate[];
 }
 
 interface GetFileResponse {
@@ -260,55 +267,102 @@ function isTelegramMessage(value: unknown): value is TelegramMessage {
   );
 }
 
-export async function registerTelegramWebhook(config: TelegramConfig, publicHostname: string): Promise<string> {
-  const webhookUrl = `${publicHostname}/telegram/webhook`;
-  const secret = randomUUID();
-  const secretFingerprint = secret.slice(0, 8);
-  log.info("[stavrobot] Registering Telegram webhook:", webhookUrl);
+const TELEGRAM_POLL_TIMEOUT_SECONDS = 30;
+// Abort slightly above the long-poll timeout so a half-open connection cannot hang the loop forever.
+const TELEGRAM_POLL_ABORT_MILLISECONDS = 40000;
+const TELEGRAM_POLL_ERROR_RETRY_MILLISECONDS = 5000;
 
-  const response = await fetch(
-    `https://api.telegram.org/bot${config.botToken}/setWebhook`,
+type FetchFunction = (url: string, init?: RequestInit) => Promise<Response>;
+type SleepFunction = (milliseconds: number) => Promise<void>;
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
+async function deleteTelegramWebhook(config: TelegramConfig, fetchFunction: FetchFunction): Promise<void> {
+  log.info("[stavrobot] Deleting Telegram webhook to enable long polling.");
+
+  const response = await fetchFunction(
+    `https://api.telegram.org/bot${config.botToken}/deleteWebhook`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: webhookUrl, secret_token: secret }),
+      body: JSON.stringify({ drop_pending_updates: false }),
     }
   );
 
   const result = await response.json() as { ok: boolean; description?: string };
 
   if (!result.ok) {
-    throw new Error(`Failed to register Telegram webhook: ${result.description ?? "unknown error"}`);
+    throw new Error(`Failed to delete Telegram webhook: ${result.description ?? "unknown error"}`);
   }
 
-  log.info("[stavrobot] Telegram webhook registered successfully.");
+  log.info("[stavrobot] Telegram webhook deleted; starting long polling.");
+}
 
-  log.debug(`[stavrobot] [debug] setWebhook: url=${webhookUrl}, secret=${secretFingerprint}..., status=${response.status}`);
+// Deletes any webhook, then runs the getUpdates loop in the background forever.
+export async function startTelegramPolling(
+  config: TelegramConfig,
+  fetchFunction: FetchFunction = fetch,
+  sleepFunction: SleepFunction = sleep
+): Promise<void> {
+  await deleteTelegramWebhook(config, fetchFunction);
+  void runTelegramPollingLoop(config, fetchFunction, sleepFunction);
+}
 
-  // Verify the webhook state Telegram actually stored.
-  if (log.isDebugEnabled()) {
-    const infoResponse = await fetch(
-      `https://api.telegram.org/bot${config.botToken}/getWebhookInfo`
-    );
-    const info = await infoResponse.json() as {
-      ok: boolean;
-      result?: {
-        url?: string;
-        has_custom_certificate?: boolean;
-        pending_update_count?: number;
-        last_error_date?: number;
-        last_error_message?: string;
-      };
-    };
-    if (info.ok && info.result !== undefined) {
-      const r = info.result;
-      log.debug(`[stavrobot] [debug] getWebhookInfo: url=${r.url}, pending=${r.pending_update_count}, lastError=${r.last_error_message ?? "none"}, customCert=${r.has_custom_certificate}`);
-    } else {
-      log.debug("[stavrobot] [debug] getWebhookInfo: failed or empty result");
+// Long-polls getUpdates and hands each update to the handler, advancing the offset past
+// the last update seen. Errors are logged and retried forever; the loop never exits.
+export async function runTelegramPollingLoop(
+  config: TelegramConfig,
+  fetchFunction: FetchFunction = fetch,
+  sleepFunction: SleepFunction = sleep
+): Promise<void> {
+  let offset: number | undefined;
+
+  for (;;) {
+    try {
+      const response = await fetchFunction(
+        `https://api.telegram.org/bot${config.botToken}/getUpdates`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            timeout: TELEGRAM_POLL_TIMEOUT_SECONDS,
+            allowed_updates: ["message"],
+            ...(offset !== undefined ? { offset } : {}),
+          }),
+          signal: AbortSignal.timeout(TELEGRAM_POLL_ABORT_MILLISECONDS),
+        }
+      );
+
+      const result = await response.json() as GetUpdatesResponse;
+
+      if (!result.ok) {
+        if (result.error_code === 409) {
+          log.error("[stavrobot] Telegram polling conflict (409): another instance is polling getUpdates, or a webhook is still set. Stop the other instance or delete the webhook.");
+        } else {
+          log.error(`[stavrobot] Telegram getUpdates failed${result.error_code !== undefined ? ` (${result.error_code})` : ""}: ${result.description ?? "unknown error"}`);
+        }
+        await sleepFunction(TELEGRAM_POLL_ERROR_RETRY_MILLISECONDS);
+        continue;
+      }
+
+      const updates = result.result ?? [];
+      for (const update of updates) {
+        await handleTelegramUpdate(update, config);
+        // Advance per update so that, if a later handler in the batch throws, the
+        // already-enqueued earlier updates are not fetched and replayed again.
+        if (typeof update.update_id === "number") {
+          offset = update.update_id + 1;
+        }
+      }
+    } catch (error) {
+      log.error("[stavrobot] Telegram polling error:", error);
+      await sleepFunction(TELEGRAM_POLL_ERROR_RETRY_MILLISECONDS);
     }
   }
-
-  return secret;
 }
 
 async function downloadTelegramFile(config: TelegramConfig, fileId: string): Promise<Buffer> {
@@ -337,12 +391,12 @@ async function downloadTelegramFile(config: TelegramConfig, fileId: string): Pro
 }
 
 
-export async function handleTelegramWebhook(
+export async function handleTelegramUpdate(
   body: unknown,
   config: TelegramConfig
 ): Promise<void> {
   if (!isTelegramUpdate(body)) {
-    log.debug("[stavrobot] Telegram webhook received non-object body, ignoring.");
+    log.debug("[stavrobot] Telegram update is not an object, ignoring.");
     return;
   }
 
@@ -363,7 +417,7 @@ export async function handleTelegramWebhook(
   const chatId = message.chat.id;
 
   const updateType = message.voice || message.audio ? "voice" : message.photo ? "photo" : message.document ? "document" : message.text ? "text" : "unknown";
-  log.debug(`[stavrobot] [debug] Webhook accepted: chatId=${chatId}, type=${updateType}`);
+  log.debug(`[stavrobot] [debug] Update accepted: chatId=${chatId}, type=${updateType}`);
 
   if (!isInAllowlist("telegram", String(chatId))) {
     log.info("[stavrobot] Telegram message from disallowed chat ID:", chatId);

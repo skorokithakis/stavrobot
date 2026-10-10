@@ -104,8 +104,9 @@ account = "+1234567890"
 
 # Telegram integration. Create a bot via @BotFather on Telegram to get a token.
 # To find your chat ID, message @userinfobot on Telegram.
-# The webhook is registered at <publicHostname>/telegram/webhook on startup.
-# publicHostname (top-level) must be set when using Telegram.
+# Stavrobot long-polls Telegram for updates on startup, so Telegram needs no
+# publicly reachable endpoint or webhook. The top-level publicHostname setting is
+# still required for links the bot sends (login, pages).
 # The allowlist of chat IDs permitted to message the agent is managed via the
 # /settings web UI and stored in allowlist.json (not in this file).
 [telegram]

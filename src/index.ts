@@ -13,8 +13,7 @@ import { createAgent } from "./agent/index.js";
 import { initializeQueue, enqueueMessage } from "./queue.js";
 import { initializeScheduler } from "./scheduler.js";
 import { initializeEmbeddingsWorker } from "./embeddings.js";
-import type { TelegramConfig } from "./config.js";
-import { registerTelegramWebhook, handleTelegramWebhook } from "./telegram.js";
+import { startTelegramPolling } from "./telegram.js";
 import { serveLoginPage, handleLoginEvents, handleLoginRespond } from "./login.js";
 import {
   serveExplorerPage,
@@ -62,9 +61,6 @@ const CSP_HEADER_VALUE =
   "connect-src 'self'";
 
 export function isPublicRoute(method: string, pathname: string): boolean {
-  if (method === "POST" && pathname === "/telegram/webhook") {
-    return true;
-  }
   if (method === "POST" && pathname === "/email/webhook") {
     return true;
   }
@@ -251,75 +247,6 @@ export async function handleChatRequest(
     const errorMessage = error instanceof Error ? error.message : String(error);
     response.writeHead(500, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ error: errorMessage }));
-  }
-}
-
-export async function handleTelegramWebhookRequest(
-  request: http.IncomingMessage,
-  response: http.ServerResponse,
-  telegramConfig: TelegramConfig | undefined,
-  webhookSecret: string | undefined
-): Promise<void> {
-  if (telegramConfig === undefined) {
-    response.writeHead(404, { "Content-Type": "application/json" });
-    response.end(JSON.stringify({ error: "Not found" }));
-    return;
-  }
-
-  if (webhookSecret !== undefined) {
-    const providedSecret = request.headers["x-telegram-bot-api-secret-token"];
-    if (providedSecret !== webhookSecret) {
-      let reason = "unknown";
-      if (providedSecret === undefined) {
-        reason = "missing_header";
-      } else if (Array.isArray(providedSecret)) {
-        reason = "multiple_header_values";
-      } else if (typeof providedSecret !== "string") {
-        reason = "non_string_header";
-      } else {
-        reason = "wrong_secret";
-      }
-      log.info(`[stavrobot] Telegram webhook rejected: ${reason}`);
-      const providedFingerprint = typeof providedSecret === "string" ? providedSecret.slice(0, 8) : String(providedSecret);
-      log.debug(`[stavrobot] [debug] Secret mismatch: reason=${reason}, provided=${providedFingerprint}...`);
-      log.debug(`[stavrobot] [debug] Request metadata: remoteAddress=${request.socket?.remoteAddress}, x-forwarded-for=${request.headers["x-forwarded-for"]}, user-agent=${request.headers["user-agent"]}, content-length=${request.headers["content-length"]}`);
-      response.writeHead(403, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({ error: "Forbidden" }));
-      return;
-    }
-  }
-
-  try {
-    const body = await readRequestBody(request);
-    let parsedBody: unknown;
-
-    try {
-      parsedBody = JSON.parse(body);
-    } catch {
-      response.writeHead(400, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({ error: "Invalid JSON" }));
-      return;
-    }
-
-    // Respond 200 immediately before processing — Telegram requires a fast response.
-    response.writeHead(200, { "Content-Type": "application/json" });
-    response.end(JSON.stringify({ ok: true }));
-
-    void handleTelegramWebhook(parsedBody, telegramConfig);
-  } catch (error) {
-    if (error instanceof Error && error.message === "Request body too large") {
-      if (!response.headersSent) {
-        response.writeHead(413, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({ error: "Request body too large" }));
-      }
-      return;
-    }
-    log.error("[stavrobot] Error handling Telegram webhook request:", error);
-    if (!response.headersSent) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      response.writeHead(500, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({ error: errorMessage }));
-    }
   }
 }
 
@@ -607,13 +534,8 @@ async function main(): Promise<void> {
   await initializeScheduler(pool);
   initializeEmbeddingsWorker(pool, config);
 
-  let telegramWebhookSecret: string | undefined;
   if (config.telegram !== undefined) {
-    if (config.publicHostname === undefined) {
-      throw new Error("Config must specify publicHostname when telegram is configured.");
-    }
-    telegramWebhookSecret = await registerTelegramWebhook(config.telegram, config.publicHostname);
-    log.debug(`[stavrobot] [debug] Telegram webhook secret loaded: fingerprint=${telegramWebhookSecret.slice(0, 8)}..., bootTime=${new Date().toISOString()}`);
+    await startTelegramPolling(config.telegram);
   }
 
   if (config.whatsapp !== undefined) {
@@ -648,8 +570,6 @@ async function main(): Promise<void> {
       void handleUploadRequest(request, response);
     } else if (request.method === "POST" && pathname === "/chat") {
       handleChatRequest(request, response);
-    } else if (request.method === "POST" && pathname === "/telegram/webhook") {
-      handleTelegramWebhookRequest(request, response, config.telegram, telegramWebhookSecret);
     } else if (request.method === "POST" && pathname === "/email/webhook") {
       if (config.email !== undefined) {
         handleEmailWebhookRequest(request, response, config.email);

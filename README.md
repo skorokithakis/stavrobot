@@ -105,7 +105,7 @@ Signal requires a **separate phone number** — not your personal one. A prepaid
 3. Set `[telegram].botToken` in your config.
 3. Set the chat ID (*not your mobile phone number*) in `[owner].telegram` in your config.
 4. After first startup, add allowed chat IDs via the `/settings` web UI.
-5. The webhook is registered automatically when the app starts.
+5. Stavrobot long-polls Telegram for updates automatically when the app starts.
 
 ### WhatsApp setup
 
@@ -149,7 +149,7 @@ docker compose up --build
 The API is available at `http://localhost:10567/chat`. See [HTTP API](#http-api) for the
 full list of endpoints.
 
-**Note:** Docker Compose only exposes the app on `localhost:10567`. To make it accessible externally (required for Telegram/Signal webhooks and the `publicHostname` setting), set up a reverse proxy (e.g. Nginx, Caddy) pointing to `localhost:10567`. You can also expose the port directly, but this is not recommended as traffic will be unencrypted.
+**Note:** Docker Compose only exposes the app on `localhost:10567`. To make it accessible externally, set up a reverse proxy (e.g. Nginx, Caddy) pointing to `localhost:10567`. This is required for Signal webhooks and for the `publicHostname` setting, which is used for links the bot sends (login, pages). Telegram needs no publicly reachable endpoint or webhook because the app long-polls it. You can also expose the port directly, but this is not recommended as traffic will be unencrypted.
 
 ### Without Docker
 
@@ -256,10 +256,6 @@ Errors: `400` if the `file` part is missing, `413` if the file exceeds 10 MB.
 
 These accept inbound messages from external services. Each has its own authentication.
 
-- `POST /telegram/webhook` (**public**). Called by Telegram. Authenticated by the
-  `X-Telegram-Bot-Api-Secret-Token` header, which Stavrobot generates and registers with
-  Telegram at startup. Returns `403` on a bad secret, `404` if Telegram is not configured.
-  Responds `200 {"ok": true}` immediately and processes the update in the background.
 - `POST /email/webhook` (**public**). Called by the Cloudflare Email Worker. Authenticated
   by `Authorization: Bearer <webhookSecret>` from the `[email]` config section. Body is
   JSON `{ "from", "to", "raw" }` where `raw` is the full RFC 822 message. Responds
@@ -441,7 +437,7 @@ https://github.com/orgs/stavrobot/repositories
 
 ## Architecture
 
-Three core Docker containers: `app` (TypeScript server, exposes `POST /chat`, handles Telegram webhooks at `POST /telegram/webhook`, handles inbound email webhooks at `POST /email/webhook`, and runs WhatsApp in-process via Baileys), `postgres` (PostgreSQL 17 for persistent state), and `plugin-runner` (Node.js server — lists, inspects, and executes plugins, both locally created and git-installed). An optional `coder` container (Claude Code headless agent for creating and modifying editable plugins) is enabled via the `coder` Docker Compose profile. The main agent can create subagents, each with their own conversation history, system prompt, and tool whitelist. Interlocutors are contact records assigned to agents for inbound message routing.
+Three core Docker containers: `app` (TypeScript server, exposes `POST /chat`, polls Telegram for inbound messages via long polling, handles inbound email webhooks at `POST /email/webhook`, and runs WhatsApp in-process via Baileys), `postgres` (PostgreSQL 17 for persistent state), and `plugin-runner` (Node.js server — lists, inspects, and executes plugins, both locally created and git-installed). An optional `coder` container (Claude Code headless agent for creating and modifying editable plugins) is enabled via the `coder` Docker Compose profile. The main agent can create subagents, each with their own conversation history, system prompt, and tool whitelist. Interlocutors are contact records assigned to agents for inbound message routing.
 
 ## License
 
