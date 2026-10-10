@@ -1,7 +1,12 @@
-# Valid providers: amazon-bedrock, anthropic, azure-openai-responses, cerebras,
-# github-copilot, google, google-antigravity, google-gemini-cli, google-vertex,
-# groq, huggingface, kimi-coding, minimax, minimax-cn, mistral, openai,
-# openai-codex, opencode, opencode-go, openrouter, vercel-ai-gateway, xai, zai.
+# Valid providers: amazon-bedrock, ant-ling, anthropic,
+# azure-openai-responses, baseten, cerebras, cloudflare-ai-gateway,
+# cloudflare-workers-ai, deepseek, fireworks, github-copilot, google,
+# google-vertex, groq, huggingface, kimi-coding, meta, minimax, minimax-cn,
+# mistral, moonshotai, moonshotai-cn, nvidia, openai, openai-codex, opencode,
+# opencode-go, openrouter, qwen-token-plan, qwen-token-plan-cn,
+# qwen-token-plan-individual, radius, together, vercel-ai-gateway, xai, xiaomi,
+# xiaomi-token-plan-ams, xiaomi-token-plan-cn, xiaomi-token-plan-sgp, zai,
+# zai-coding-cn.
 provider = "anthropic"
 model = "claude-opus-5-5"
 
@@ -27,6 +32,10 @@ authFile = "/app/data/auth.json"
 # contextWindow and maxTokens are also required. api defaults to
 # "openai-completions" if omitted.
 #
+# reasoning is opt-in and defaults to false. Set it to true only for models that
+# support thinking, which is what makes thinkingLevel apply on a custom endpoint.
+# Leave it off for non-thinking models, since some servers reject reasoning_effort.
+#
 # Example: Ollama running locally
 # provider = "openai"
 # model = "llama3.2"
@@ -35,6 +44,17 @@ authFile = "/app/data/auth.json"
 # contextWindow = 128000
 # maxTokens = 8192
 # api = "openai-completions"
+#
+# Example: Ollama Cloud. Available model names are listed at
+# https://ollama.com/api/tags.
+# provider = "openai"
+# model = "gpt-oss:120b"
+# apiKey = "your-ollama-api-key"
+# baseUrl = "https://ollama.com/v1"
+# contextWindow = 128000
+# maxTokens = 8192
+# api = "openai-completions"
+# reasoning = true
 #
 # Example: Anthropic-compatible proxy
 # provider = "anthropic"

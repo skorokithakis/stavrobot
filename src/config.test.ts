@@ -290,6 +290,62 @@ name = "Stavros"
   });
 });
 
+describe("loadConfig reasoning", () => {
+  const BASE_TOML_PREFIX = `
+provider = "openai"
+model = "gpt-oss:120b"
+apiKey = "ollama"
+baseUrl = "https://ollama.com/v1"
+contextWindow = 128000
+maxTokens = 8192
+`;
+  const OWNER_TOML_SUFFIX = `
+publicHostname = "https://example.com"
+password = "test-password"
+
+[owner]
+name = "Stavros"
+`;
+
+  it("defaults to false when baseUrl is set and reasoning is omitted", async () => {
+    setupMocks(`${BASE_TOML_PREFIX}${OWNER_TOML_SUFFIX}`);
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.reasoning).toBe(false);
+  });
+
+  it("uses the value from TOML when reasoning is true", async () => {
+    setupMocks(`${BASE_TOML_PREFIX}reasoning = true\n${OWNER_TOML_SUFFIX}`);
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.reasoning).toBe(true);
+  });
+
+  it("throws when reasoning is not a boolean and baseUrl is set", async () => {
+    setupMocks(`${BASE_TOML_PREFIX}reasoning = "yes"\n${OWNER_TOML_SUFFIX}`);
+    const { loadConfig } = await import("./config.js");
+    expect(() => loadConfig()).toThrow("Config reasoning must be a boolean when baseUrl is set.");
+  });
+
+  it("ignores reasoning when baseUrl is absent", async () => {
+    const toml = `
+provider = "anthropic"
+model = "claude-sonnet-4-20250514"
+apiKey = "test-key"
+reasoning = "yes"
+publicHostname = "https://example.com"
+password = "test-password"
+
+[owner]
+name = "Stavros"
+`;
+    setupMocks(toml);
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.reasoning).toBe("yes");
+  });
+});
+
 describe("loadConfig contextTokensK", () => {
   it("is undefined when the key is omitted from the TOML", async () => {
     setupMocks(BASE_TOML);

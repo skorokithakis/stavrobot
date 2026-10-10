@@ -429,7 +429,7 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
         api: config.api as Api,
         provider: config.provider,
         baseUrl: config.baseUrl,
-        reasoning: false,
+        reasoning: config.reasoning ?? false,
         input: ["text", "image"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         contextWindow: config.contextWindow!,

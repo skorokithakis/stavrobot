@@ -57,7 +57,7 @@ restarting those containers.
 
 ### Custom and OpenAI-compatible endpoints
 
-Stavrobot can be pointed at any OpenAI-compatible endpoint (Ollama, LiteLLM, vLLM, etc.) or a custom Anthropic-compatible proxy by setting `baseUrl` in `config.toml`. See `config.example.toml` for the required fields and example configurations.
+Stavrobot can be pointed at any OpenAI-compatible endpoint (Ollama, LiteLLM, vLLM, etc.) or a custom Anthropic-compatible proxy by setting `baseUrl` in `config.toml`. See `config.example.toml` for the required fields and example configurations. Set `reasoning = true` only for models that support thinking, since it is what makes `thinkingLevel` apply on a custom endpoint.
 
 ### Authentication
 

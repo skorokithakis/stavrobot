@@ -417,7 +417,10 @@ When `baseUrl` is set in `config.toml`, `src/agent/index.ts` constructs a `Model
 manually instead of calling `getModel()`. `contextWindow` and `maxTokens` are required.
 `api` defaults to `"openai-completions"` if omitted; the only accepted values are
 `"openai-completions"` and `"anthropic-messages"`. `authFile` is forbidden (only `apiKey`
-is supported with a custom endpoint).
+is supported with a custom endpoint). `reasoning` is opt-in and defaults to false; when set
+to true it sets `reasoning: true` on the constructed `Model`, so Pi sends `thinkingLevel`
+to the endpoint (as `reasoning_effort` for `openai-completions`). It is ignored when
+`baseUrl` is not set.
 
 ---
 

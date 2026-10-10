@@ -67,6 +67,7 @@ export interface Config {
   contextWindow?: number;
   maxTokens?: number;
   api?: string;
+  reasoning?: boolean;
   publicHostname: string;
   password?: string;
   baseSystemPrompt: string;
@@ -114,6 +115,10 @@ export function parseConfig(content: string): Config {
         `Config api must be one of: ${supportedApis.join(", ")}. Got: "${config.api}".`,
       );
     }
+    if (config.reasoning !== undefined && typeof config.reasoning !== "boolean") {
+      throw new Error("Config reasoning must be a boolean when baseUrl is set.");
+    }
+    config.reasoning = config.reasoning ?? false;
   }
 
   if (config.publicHostname === undefined) {
