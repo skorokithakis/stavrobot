@@ -10,7 +10,7 @@ import { startBackgroundTokenRefresh } from "./auth.js";
 import { connectDatabase, seedCronEntries, seedOwner, getPageByPath, getPageQueryByPath, getPageMutationByPath } from "./database.js";
 import { runMigrations } from "./migrations.js";
 import { createAgent } from "./agent/index.js";
-import { initializeQueue, enqueueMessage } from "./queue.js";
+import { initializeQueue, enqueueMessage, type Participant } from "./queue.js";
 import { initializeScheduler } from "./scheduler.js";
 import { initializeEmbeddingsWorker } from "./embeddings.js";
 import { startTelegramPolling } from "./telegram.js";
@@ -176,6 +176,15 @@ export async function handleChatRequest(
     const source = "source" in parsedBody && typeof parsedBody.source === "string" ? parsedBody.source : undefined;
     const sender = "sender" in parsedBody && typeof parsedBody.sender === "string" ? parsedBody.sender : undefined;
 
+    let participant: Participant | undefined;
+    if ("participant" in parsedBody && typeof parsedBody.participant === "object" && parsedBody.participant !== null) {
+      const candidate = parsedBody.participant as Record<string, unknown>;
+      if (typeof candidate.id === "string" && typeof candidate.name === "string") {
+        participant = { id: candidate.id, name: candidate.name };
+      }
+    }
+    const senderLabel = "senderLabel" in parsedBody && typeof parsedBody.senderLabel === "string" ? parsedBody.senderLabel : undefined;
+
     // Parse raw file data sent by external callers (e.g. the Signal bridge) that
     // cannot write to the app container's filesystem directly.
     interface RawFileEntry {
@@ -222,7 +231,7 @@ export async function handleChatRequest(
       return;
     }
 
-    const enqueuePromise = enqueueMessage(message, source, sender, combinedAttachments);
+    const enqueuePromise = enqueueMessage(message, source, sender, combinedAttachments, undefined, participant, senderLabel);
     if (asyncRequested) {
       // Keep async calls on the same queue so ordering and owner steering still apply.
       void enqueuePromise.catch((error: unknown) => {

@@ -11,6 +11,7 @@ import http.client
 import http.server
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -116,14 +117,25 @@ def start_signal_cli(account: str) -> subprocess.Popen:
     return process
 
 
-def send_agent_request(message_text: str | None, source_number: str, files: list[dict] | None = None) -> str:
+def send_agent_request(
+    message_text: str | None,
+    sender: str,
+    files: list[dict] | None = None,
+    participant: dict | None = None,
+    sender_label: str | None = None,
+) -> str:
     """Send a message to the agent API and return the response.
 
-    At least one of message_text or files must be provided.
+    At least one of message_text or files must be provided. For group messages
+    sender is the group ID and participant carries the individual sender.
     """
-    log(f"send_agent_request: sending to agent API (message length={len(message_text) if message_text else 0}, files={len(files) if files else 0}, sender={source_number})")
+    log(f"send_agent_request: sending to agent API (message length={len(message_text) if message_text else 0}, files={len(files) if files else 0}, sender={sender}, participant={participant}, senderLabel={sender_label})")
     connection = http.client.HTTPConnection("app", 3000, timeout=60)
-    payload: dict = {"source": "signal", "sender": source_number}
+    payload: dict = {"source": "signal", "sender": sender}
+    if participant is not None:
+        payload["participant"] = participant
+    if sender_label is not None:
+        payload["senderLabel"] = sender_label
     if message_text is not None:
         payload["message"] = message_text
     if files is not None:
@@ -170,6 +182,23 @@ def _extract_rate_limit_info(error: dict) -> tuple[str, int] | None:
     return None
 
 
+# Signal phone numbers arrive in E.164 format (e.g. "+33123456789"). Anything
+# that is neither a phone number nor a UUID is treated as a base64 group ID.
+_PHONE_NUMBER_PATTERN = re.compile(r"^\+\d+$")
+_UUID_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def recipient_params(recipient: str) -> dict:
+    """Return the JSON-RPC params that address the given recipient.
+
+    Phone numbers and UUIDs go in the 'recipient' list; anything else (i.e. a
+    base64 group ID) goes in the 'groupId' string parameter.
+    """
+    if _PHONE_NUMBER_PATTERN.match(recipient) or _UUID_PATTERN.match(recipient):
+        return {"recipient": [recipient]}
+    return {"groupId": recipient}
+
+
 def send_signal_message(
     recipient: str,
     message_text: str,
@@ -182,8 +211,8 @@ def send_signal_message(
     """
     global _rate_limit_token, _rate_limit_retry_after_seconds
     params: dict = {
-        "recipient": [recipient],
         "message": message_text,
+        **recipient_params(recipient),
     }
     if text_styles:
         params["textStyle"] = text_styles
@@ -229,9 +258,9 @@ def send_signal_message_with_attachment(
     """
     global _rate_limit_token, _rate_limit_retry_after_seconds
     params: dict = {
-        "recipient": [recipient],
         "message": message_text,
         "attachment": attachment_paths,
+        **recipient_params(recipient),
     }
     connection = http.client.HTTPConnection("localhost", 8080, timeout=10)
     body = json.dumps({
@@ -480,10 +509,12 @@ def process_signal_event(
     log(f"Processing event: envelope keys={list(envelope.keys())}")
 
     source_number = envelope.get("sourceNumber")
+    source_uuid = envelope.get("sourceUuid")
+    source_name = envelope.get("sourceName")
     data_message = envelope.get("dataMessage")
 
     if not data_message:
-        log(f"No dataMessage in envelope, skipping (source={source_number})")
+        log(f"No dataMessage in envelope, skipping (sourceNumber={source_number}, sourceUuid={source_uuid})")
         return
 
     message_text: str | None = data_message.get("message")
@@ -556,15 +587,42 @@ def process_signal_event(
             log(f"Attachment {index}: base64-encoded {file_size} bytes for forwarding")
 
     if not message_text and not file_attachments:
-        log(f"No message text or file attachments, skipping (source={source_number})")
+        log(f"No message text or file attachments, skipping (sourceNumber={source_number}, sourceUuid={source_uuid})")
         return
 
-    log(f"Received message from {source_number}: {message_text!r} (file_attachments={len(file_attachments)})")
+    # A participant is identified by their phone number when signal-cli provides
+    # one, falling back to their UUID. Group messages are routed by group ID so
+    # the whole group is treated as a single sender.
+    sender_id = source_number if isinstance(source_number, str) and source_number else source_uuid
+    group_info = data_message.get("groupInfo")
+    participant: dict | None = None
+    sender_label: str | None = None
+    if isinstance(group_info, dict):
+        sender = group_info.get("groupId")
+        participant = {
+            "id": sender_id,
+            "name": source_name if isinstance(source_name, str) and source_name else sender_id,
+        }
+        group_name = group_info.get("groupName")
+        if isinstance(group_name, str) and group_name:
+            sender_label = group_name
+    else:
+        sender = sender_id
+        if isinstance(source_name, str) and source_name:
+            sender_label = source_name
+
+    log(f"Received message from {sender} (sender_id={sender_id}): {message_text!r} (file_attachments={len(file_attachments)})")
 
     # The bridge does not reply directly on Signal. The agent uses the
     # send_signal_message tool to send replies, which hits our /send endpoint.
     try:
-        agent_response = send_agent_request(message_text, source_number, file_attachments if file_attachments else None)
+        agent_response = send_agent_request(
+            message_text,
+            sender,
+            file_attachments if file_attachments else None,
+            participant,
+            sender_label,
+        )
         log(f"Agent response: {agent_response}")
     except (OSError, RuntimeError, json.JSONDecodeError, KeyError, TypeError) as error:
         log(f"Error processing message: {error}")

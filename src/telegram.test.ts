@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { applyTelegramEntitiesToMarkdown, startTelegramPolling, runTelegramPollingLoop } from "./telegram.js";
+import { applyTelegramEntitiesToMarkdown, startTelegramPolling, runTelegramPollingLoop, handleTelegramUpdate } from "./telegram.js";
 import { enqueueMessage } from "./queue.js";
+import { isInAllowlist, recordRejectedSender } from "./allowlist.js";
 import { log } from "./log.js";
 import type { TelegramConfig } from "./config.js";
 
@@ -13,6 +14,7 @@ vi.mock("./queue.js", () => ({
 
 vi.mock("./allowlist.js", () => ({
   isInAllowlist: vi.fn().mockReturnValue(true),
+  recordRejectedSender: vi.fn(),
 }));
 
 function jsonResponse(payload: unknown): Response {
@@ -172,6 +174,122 @@ describe("applyTelegramEntitiesToMarkdown", () => {
   });
 });
 
+describe("handleTelegramUpdate participant and sender label", () => {
+  const config: TelegramConfig = { botToken: "test-token" };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("passes a participant and the chat title for group messages", async () => {
+    await handleTelegramUpdate(
+      {
+        message: {
+          chat: { id: -100123, type: "supergroup", title: "The Group" },
+          from: { id: 42, first_name: "Ada", last_name: "Lovelace" },
+          text: "hello group",
+        },
+      },
+      config,
+    );
+
+    expect(enqueueMessage).toHaveBeenCalledWith(
+      "hello group",
+      "telegram",
+      "-100123",
+      undefined,
+      undefined,
+      { id: "42", name: "Ada Lovelace" },
+      "The Group",
+    );
+  });
+
+  it("does not pass a participant for private messages and labels them with the sender name", async () => {
+    await handleTelegramUpdate(
+      {
+        message: {
+          chat: { id: 12345, type: "private" },
+          from: { id: 12345, first_name: "Owner" },
+          text: "hello privately",
+        },
+      },
+      config,
+    );
+
+    expect(enqueueMessage).toHaveBeenCalledWith(
+      "hello privately",
+      "telegram",
+      "12345",
+      undefined,
+      undefined,
+      undefined,
+      "Owner",
+    );
+  });
+
+  it("falls back to the username, then the id, when building a participant name", async () => {
+    await handleTelegramUpdate(
+      {
+        message: {
+          chat: { id: -100456, type: "group", title: "Second Group" },
+          from: { id: 7, username: "user_name" },
+          text: "one",
+        },
+      },
+      config,
+    );
+    await handleTelegramUpdate(
+      {
+        message: {
+          chat: { id: -100456, type: "group", title: "Second Group" },
+          from: { id: 8 },
+          text: "two",
+        },
+      },
+      config,
+    );
+
+    expect(enqueueMessage).toHaveBeenNthCalledWith(
+      1,
+      "one",
+      "telegram",
+      "-100456",
+      undefined,
+      undefined,
+      { id: "7", name: "user_name" },
+      "Second Group",
+    );
+    expect(enqueueMessage).toHaveBeenNthCalledWith(
+      2,
+      "two",
+      "telegram",
+      "-100456",
+      undefined,
+      undefined,
+      { id: "8", name: "8" },
+      "Second Group",
+    );
+  });
+
+  it("records a rejected group chat and does not enqueue when the allowlist blocks it", async () => {
+    vi.mocked(isInAllowlist).mockReturnValueOnce(false);
+
+    await handleTelegramUpdate(
+      {
+        message: {
+          chat: { id: -100789, type: "supergroup", title: "Rejected Group" },
+          from: { id: 42, first_name: "Ada" },
+          text: "hello",
+        },
+      },
+      config,
+    );
+
+    expect(recordRejectedSender).toHaveBeenCalledWith("telegram", "-100789", "Rejected Group");
+    expect(enqueueMessage).not.toHaveBeenCalled();
+  });
+});
+
 describe("Telegram long polling", () => {
   const config: TelegramConfig = { botToken: "test-token" };
 
@@ -191,8 +309,8 @@ describe("Telegram long polling", () => {
         return jsonResponse({
           ok: true,
           result: [
-            { update_id: 100, message: { chat: { id: 1 }, text: "first" } },
-            { update_id: 101, message: { chat: { id: 1 }, text: "second" } },
+            { update_id: 100, message: { chat: { id: 1, type: "private" }, from: { id: 1, first_name: "Alice" }, text: "first" } },
+            { update_id: 101, message: { chat: { id: 1, type: "private" }, from: { id: 1, first_name: "Alice" }, text: "second" } },
           ],
         });
       }
@@ -205,8 +323,8 @@ describe("Telegram long polling", () => {
     await expect(runTelegramPollingLoop(config, fetchFunction, sleepFunction)).rejects.toThrow("stop");
 
     expect(enqueueMessage).toHaveBeenCalledTimes(2);
-    expect(enqueueMessage).toHaveBeenNthCalledWith(1, "first", "telegram", "1");
-    expect(enqueueMessage).toHaveBeenNthCalledWith(2, "second", "telegram", "1");
+    expect(enqueueMessage).toHaveBeenNthCalledWith(1, "first", "telegram", "1", undefined, undefined, undefined, "Alice");
+    expect(enqueueMessage).toHaveBeenNthCalledWith(2, "second", "telegram", "1", undefined, undefined, undefined, "Alice");
     expect(calls).toHaveLength(2);
     expect(calls[1].body.offset).toBe(102);
     expect(calls[1].body.timeout).toBe(30);
@@ -224,7 +342,7 @@ describe("Telegram long polling", () => {
         throw new Error("network down");
       }
       if (callCount === 2) {
-        return jsonResponse({ ok: true, result: [{ update_id: 7, message: { chat: { id: 1 }, text: "hi" } }] });
+        return jsonResponse({ ok: true, result: [{ update_id: 7, message: { chat: { id: 1, type: "private" }, from: { id: 1, first_name: "Alice" }, text: "hi" } }] });
       }
       return jsonResponse({ ok: false, error_code: 500, description: "boom" });
     });
@@ -261,8 +379,8 @@ describe("Telegram long polling", () => {
         return jsonResponse({
           ok: true,
           result: [
-            { update_id: 10, message: { chat: { id: 1 }, text: "first" } },
-            { update_id: 11, message: { chat: { id: 1 }, text: "second" } },
+            { update_id: 10, message: { chat: { id: 1, type: "private" }, from: { id: 1, first_name: "Alice" }, text: "first" } },
+            { update_id: 11, message: { chat: { id: 1, type: "private" }, from: { id: 1, first_name: "Alice" }, text: "second" } },
           ],
         });
       }

@@ -7,8 +7,8 @@ import { Agent, type AgentTool, type AgentToolResult, type AgentMessage, type Th
 import type { Config } from "../config.js";
 import type { FileAttachment } from "../uploads.js";
 import { getApiKey, AuthError } from "../auth.js";
-import { executeSql, loadMessages, saveMessage, saveCompaction, loadLatestCompaction, loadAllMemories, upsertMemory, deleteMemory, upsertScratchpad, deleteScratchpad, readScratchpad, createCronEntry, updateCronEntry, deleteCronEntry, listCronEntries, loadAllScratchpadTitles, getMainAgentId, loadAgent, type Memory, type Agent as AgentRow } from "../database.js";
-import type { RoutingResult } from "../queue.js";
+import { executeSql, loadMessages, saveMessage, saveCompaction, loadLatestCompaction, loadAllMemories, upsertMemory, deleteMemory, upsertScratchpad, deleteScratchpad, readScratchpad, createCronEntry, updateCronEntry, deleteCronEntry, listCronEntries, loadAllScratchpadTitles, getMainAgentId, isOwnerIdentity, loadAgent, type Memory, type Agent as AgentRow } from "../database.js";
+import type { Participant, RoutingResult } from "../queue.js";
 import { reloadScheduler } from "../scheduler.js";
 import { createManagePluginsTool, createRunPluginToolTool, createRequestCodingTaskTool } from "../plugin-tools.js";
 import { createRunPythonTool } from "../python.js";
@@ -530,11 +530,16 @@ function formatDate(date: Date): string {
   return `${day} ${year}-${month}-${dayOfMonth} ${hours}:${minutes}:${seconds}`;
 }
 
-export function formatUserMessage(userMessage: string, source?: string, sender?: string): string {
+export function formatUserMessage(userMessage: string, source?: string, sender?: string, participant?: Participant): string {
   const time = formatDate(new Date());
   const resolvedSource = source ?? "cli";
   const resolvedSender = sender ?? "unknown";
-  return `Time: ${time}\nSource: ${resolvedSource}\nSender: ${resolvedSender}\nText: ${userMessage}`;
+  let formatted = `Time: ${time}\nSource: ${resolvedSource}\nSender: ${resolvedSender}`;
+  if (participant !== undefined) {
+    const ownerMarker = isOwnerIdentity(resolvedSource, participant.id) ? " [owner]" : "";
+    formatted += `\nParticipant: ${participant.name} (${participant.id})${ownerMarker}`;
+  }
+  return `${formatted}\nText: ${userMessage}`;
 }
 
 function buildMainAgentSystemPrompt(config: Config, allPlugins: PluginEntry[] | undefined, memories: Memory[], scratchpadTitles: { id: number; title: string }[]): string {
@@ -737,7 +742,8 @@ export function handlePrompt(
   routing: RoutingResult,
   source?: string,
   attachments?: FileAttachment[],
-  isRetry: boolean = false
+  isRetry: boolean = false,
+  participant?: Participant,
 ): Promise<string> {
   // The single shared Agent instance is only safe to drive one turn at a time.
   // The queue serialises turns so this re-entrancy check should never fire; if
@@ -747,7 +753,7 @@ export function handlePrompt(
     throw new Error("handlePrompt re-entered while another turn is still in progress; this is a queue bug.");
   }
   handlePromptInProgress = true;
-  return runHandlePrompt(agent, pool, userMessage, config, routing, source, attachments, isRetry)
+  return runHandlePrompt(agent, pool, userMessage, config, routing, source, attachments, isRetry, participant)
     .finally(() => {
       handlePromptInProgress = false;
     });
@@ -761,7 +767,8 @@ async function runHandlePrompt(
   routing: RoutingResult,
   source?: string,
   attachments?: FileAttachment[],
-  isRetry: boolean = false
+  isRetry: boolean = false,
+  participant?: Participant,
 ): Promise<string> {
   pendingAutoSearchBlocks.delete(agent);
 
@@ -872,7 +879,7 @@ async function runHandlePrompt(
   // pending auto-search block on every exit path, including exceptions thrown
   // by getApiKey, setTools, or subscribe before agent.prompt is reached.
   try {
-    const messageToSend = formatUserMessage(resolvedMessage ?? "", source, senderLabel);
+    const messageToSend = formatUserMessage(resolvedMessage ?? "", source, senderLabel, participant);
 
     // Filter tools for subagents based on their allowed_tools list. The main
     // agent always gets the full tool set. For subagents, we temporarily swap

@@ -51,6 +51,21 @@ queue, so its serialization, routing, `/stop`, and owner-steering behavior remai
 same. A present non-boolean `async` value is rejected before raw file attachments are
 written.
 
+`POST /chat` also accepts two optional fields that channels may supply:
+`participant` (`{ id, name }`, the individual who sent a group message) and
+`senderLabel` (a human-readable platform label for the sender). Malformed values are
+ignored. The participant is threaded through the queue into `formatUserMessage`, which
+adds a `Participant: <name> (<id>)` line between Sender and Text and appends ` [owner]`
+when the participant id matches an owner identity. `senderLabel` is used only to annotate
+rejected senders in the buffer below; it never overrides the Sender line, which is the
+owner-controlled interlocutor display name.
+
+Group messages are routed by the group's channel ID, carried in `sender`: a Telegram group
+uses its negative chat ID and a Signal group uses its group ID. The allowlist and the
+interlocutor lookup match against that ID, so a group is a first-class interlocutor rather
+than a collection of its members. The `Participant` line names the individual member who
+sent the message within the group.
+
 Owner messages arriving while a turn is in progress are **steered** into the running
 turn via `Agent.steer()` rather than queued. Non-owner messages are always queued.
 
@@ -335,11 +350,23 @@ public.
 ## Allowlist (src/allowlist.ts)
 
 - Stored in `allowlist.json` (path overridable via `ALLOWLIST_PATH` env var).
-- Per-service arrays: `signal` (strings), `telegram` (numbers or `"*"`), `whatsapp`
-  (strings), `email` (strings, supports `*` glob wildcard before `@`).
+- Per-service arrays: `signal` (strings; E.164 phone numbers, UUIDs, or group IDs),
+  `telegram` (numbers or `"*"`), `whatsapp` (strings), `email` (strings, supports `*`
+  glob wildcard before `@`).
 - Owner identities are auto-seeded into the allowlist from `config.toml` on startup.
-- The allowlist is a **hard gate** in the queue: messages from senders not in the list
-  are silently dropped before reaching the agent.
+- The allowlist is a **hard gate**: messages from senders not in the list are dropped
+  before reaching the agent. The channel handlers for Telegram, email, and WhatsApp
+  check the allowlist themselves and return before enqueuing, so they call
+  `recordRejectedSender` at that early gate; the queue calls it for external sources
+  that do not pre-check (the Signal bridge posts straight to `/chat`). Each rejection is
+  therefore counted exactly once.
+- Senders dropped by the hard gate are kept in an in-memory `recordRejectedSender` /
+  `getRejectedSenders` buffer (last 50, newest first, deduplicated by
+  `service` + `identifier`, each with `label`, `lastSeen`, and `count`). Soft-gate drops
+  (unknown interlocutor) are not recorded. `GET /api/settings/allowlist` returns the
+  buffer as `rejected`, and the settings page lists it under "Recently rejected" with an
+  Add button that inserts the identifier into the matching allowlist. The buffer is
+  in-memory only and is cleared on restart.
 - A **soft gate** follows: the sender must also exist in `interlocutor_identities` for
   an enabled interlocutor with an assigned agent.
 - Outbound send tools (`send_signal_message`, `send_telegram_message`, etc.) also check
@@ -445,7 +472,7 @@ to the endpoint (as `reasoning_effort` for `openai-completions`). It is ignored 
 | Source string | Origin |
 |---|---|
 | `undefined` | Direct HTTP call (no source header) |
-| `"signal"` | Signal bridge webhook |
+| `"signal"` | Signal bridge |
 | `"telegram"` | Telegram long polling |
 | `"whatsapp"` | WhatsApp (Baileys) |
 | `"email"` | Email webhook |
@@ -460,6 +487,27 @@ Internal sources (`cli`, `cron`, `coder`, `plugin:*`, `upload`) always route to 
 main agent. External sources (`signal`, `telegram`, `whatsapp`, `email`) go through
 allowlist + interlocutor lookup to determine the target agent. The Basic-authenticated
 `pebble-index` source routes directly to the main agent without those gates.
+
+---
+
+## Signal bridge (signal-bridge/bridge.py)
+
+The `signal-bridge` container runs `signal-cli` in JSON-RPC daemon mode. It exposes an
+HTTP server on port 8081 (the app calls it to send) and, for each inbound message, POSTs
+to `app:3000/chat` with `source: "signal"` (it never replies on Signal directly).
+
+Inbound: the bridge extracts text and attachments from each signal-cli envelope. A
+message that carries `groupInfo` is routed by the group ID, with `participant` set to the
+individual sender (`{ id, name }`) and `senderLabel` set to the group name. Outside a
+group, the sender is the individual's phone number or, when no phone number is present
+(e.g. phone number privacy is enabled), their UUID; `senderLabel` is the profile name.
+Messages with neither text nor attachments are skipped.
+
+Outbound: `POST /send` accepts `{ recipient, message?, attachment?, attachmentFilename? }`.
+A recipient that is an E.164 phone number (`+` followed by digits) or a UUID is addressed
+with signal-cli's `recipient` list; anything else is treated as a base64 group ID and
+addressed with the `groupId` parameter. `POST /challenge` supplies a captcha token when
+Signal rate-limits the account.
 
 ---
 
@@ -484,6 +532,7 @@ allowlist + interlocutor lookup to determine the target agent. The Basic-authent
 | `prompts/compaction-prompt.txt` | Prompt used by the background compaction summariser |
 | `plugin-runner/src/index.ts` | Plugin HTTP server (all logic in one file) |
 | `coder/server.py` | Coder HTTP server, `claude -p` subprocess management |
+| `signal-bridge/bridge.py` | Signal bridge: signal-cli event handling, `/send`, `/challenge` |
 
 ---
 

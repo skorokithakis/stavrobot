@@ -39,11 +39,12 @@ vi.mock("./database.js", () => ({
 }));
 vi.mock("./allowlist.js", () => ({
   isInAllowlist: vi.fn().mockReturnValue(false),
+  recordRejectedSender: vi.fn(),
 }));
 
 import { handlePrompt, formatUserMessage } from "./agent/index.js";
 import { getMainAgentId, isOwnerIdentity, resolveInterlocutor } from "./database.js";
-import { isInAllowlist } from "./allowlist.js";
+import { isInAllowlist, recordRejectedSender } from "./allowlist.js";
 import { sendSignalMessage } from "./signal.js";
 import { sendTelegramMessage } from "./telegram-api.js";
 import { sendWhatsappTextMessage } from "./whatsapp-api.js";
@@ -56,6 +57,7 @@ const mockGetMainAgentId = vi.mocked(getMainAgentId);
 const mockIsOwnerIdentity = vi.mocked(isOwnerIdentity);
 const mockResolveInterlocutor = vi.mocked(resolveInterlocutor);
 const mockIsInAllowlist = vi.mocked(isInAllowlist);
+const mockRecordRejectedSender = vi.mocked(recordRejectedSender);
 const mockSendSignalMessage = vi.mocked(sendSignalMessage);
 const mockSendTelegramMessage = vi.mocked(sendTelegramMessage);
 const mockSendWhatsappTextMessage = vi.mocked(sendWhatsappTextMessage);
@@ -370,14 +372,16 @@ describe("message routing", () => {
     expect(routingArg.senderIdentityId).toBe(10);
   });
 
-  it("drops messages from senders not in the allowlist", async () => {
+  it("drops messages from senders not in the allowlist and records the rejected sender", async () => {
     // isInAllowlist already returns false from beforeEach.
-    const result = await enqueueMessage("hi", "signal", "+0000000000");
+    const result = await enqueueMessage("hi", "signal", "+0000000000", undefined, undefined, undefined, "Unknown sender");
 
     expect(result).toBe("");
     expect(mockHandlePrompt).not.toHaveBeenCalled();
     // The message must be dropped before the DB lookup.
     expect(mockResolveInterlocutor).not.toHaveBeenCalled();
+    expect(mockRecordRejectedSender).toHaveBeenCalledOnce();
+    expect(mockRecordRejectedSender).toHaveBeenCalledWith("signal", "+0000000000", "Unknown sender");
   });
 
   it("drops messages from unknown interlocutors and resolves with empty string", async () => {
@@ -388,6 +392,37 @@ describe("message routing", () => {
 
     expect(result).toBe("");
     expect(mockHandlePrompt).not.toHaveBeenCalled();
+    // The soft gate drop must not be recorded as a rejected sender.
+    expect(mockRecordRejectedSender).not.toHaveBeenCalled();
+  });
+
+  it("passes participant through to handlePrompt and does not pass senderLabel", async () => {
+    mockIsInAllowlist.mockReturnValue(true);
+    mockResolveInterlocutor.mockResolvedValue({
+      interlocutorId: 42,
+      identityId: 10,
+      agentId: 5,
+      isOwner: false,
+      displayName: "Group chat",
+    });
+
+    await enqueueMessage("hi", "telegram", "-100", undefined, undefined, { id: "42", name: "Alice" }, "Platform label");
+
+    expect(mockHandlePrompt).toHaveBeenCalledOnce();
+    // Arguments: agent, pool, message, config, routing, source, attachments, isRetry, participant.
+    expect(mockHandlePrompt.mock.calls[0][8]).toEqual({ id: "42", name: "Alice" });
+    expect(mockHandlePrompt).toHaveBeenCalledWith(
+      stubAgent,
+      stubPool,
+      "hi",
+      stubConfig,
+      expect.anything(),
+      "telegram",
+      undefined,
+      false,
+      { id: "42", name: "Alice" },
+    );
+    expect(mockHandlePrompt.mock.calls[0]).toHaveLength(9);
   });
 
   it("drops a non-internal message that has a source but no sender", async () => {
@@ -606,5 +641,42 @@ describe("steering", () => {
 
     await promptPromise;
     await ownerMessage;
+  });
+
+  it("queues rather than steers a group message whose participant is an owner, and records it when not allowlisted", async () => {
+    // The owner is recognised both by their own number and by the participant id.
+    mockIsOwnerIdentity.mockImplementation(
+      (_source: string, sender: string) => sender === "+1111111111" || sender === "42",
+    );
+    mockHandlePrompt.mockImplementationOnce(
+      () => new Promise<string>((resolve) => {
+        setTimeout(() => resolve("done"), 10);
+      }),
+    );
+
+    // The first message is from the owner, so the active turn is an owner conversation.
+    const ownerTurn = enqueueMessage("owner message", "signal", "+1111111111");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // A group is routed by its group ID, so an owner participant does not make it steer.
+    const groupMessage = enqueueMessage(
+      "group message",
+      "signal",
+      "group.abc123",
+      undefined,
+      undefined,
+      { id: "42", name: "Owner" },
+      "The Group",
+    );
+
+    expect(mockSteer).not.toHaveBeenCalled();
+
+    await ownerTurn;
+    const groupResult = await groupMessage;
+
+    // isInAllowlist returns false by default, so the hard gate drops and records it.
+    expect(groupResult).toBe("");
+    expect(mockRecordRejectedSender).toHaveBeenCalledOnce();
+    expect(mockRecordRejectedSender).toHaveBeenCalledWith("signal", "group.abc123", "The Group");
   });
 });

@@ -17,7 +17,8 @@ create — Create a new interlocutor.
   agent_id (optional): ID of the agent that handles inbound messages from this interlocutor. Required unless enabled is false.
   enabled (optional): Boolean. Whether the interlocutor is enabled. Defaults to true. An enabled interlocutor must have an agent_id.
   service (optional): Channel name, e.g. "signal", "telegram", or "email".
-  identifier (optional): Channel-native ID, e.g. phone number, Telegram chat ID, or email address.
+  identifier (optional): Channel-native ID, e.g. a Signal phone number or UUID, a
+    Telegram chat or group ID, a Signal group ID, or an email address.
   If service and identifier are provided, the identity is created along with the interlocutor.
   Both must be present or both absent.
   Returns the created interlocutor record.
@@ -34,7 +35,8 @@ delete — Remove all channel identities from an interlocutor (the interlocutor 
 add_identity — Add a channel identity to an existing interlocutor. Refuses to modify the owner's identities (those are managed by the config file).
   id (required): Interlocutor ID.
   service (required): Channel name, e.g. "signal", "telegram", or "email".
-  identifier (required): Channel-native ID, e.g. phone number, Telegram chat ID, or email address.
+  identifier (required): Channel-native ID, e.g. a Signal phone number or UUID, a
+    Telegram chat or group ID, a Signal group ID, or an email address.
 
 remove_identity — Soft-delete a channel identity (nulls out the identifier, keeps the row). Refuses to modify the owner's identities.
   id (required): Interlocutor ID.
@@ -48,6 +50,8 @@ list — List all interlocutors with their identities. Shows owner: true/false a
 Guidance on talking to people:
 
 Interlocutors are contact records — people the bot can communicate with. Each has a display name, optional channel identities (service + identifier), and an optional agent assignment. An identity is basically a way to communicate with an interlocutor on a given service (e.g. their Signal username).
+
+A group chat is also an interlocutor, but its identity is the group's channel ID rather than a person's: a Telegram group uses the negative chat ID and a Signal group uses the group ID. Messages are routed by that ID, so the whole group is a single interlocutor. Group messages carry a "Participant" line with the individual sender's name and ID; an "[owner]" marker after it means the sender matched one of the owner's identities. On Signal a person may be identified by a phone number or a UUID, and one interlocutor can hold both, so either can be used to reach them.
 
 To talk to another person to complete some task:
 1. Create an interlocutor record with their display name and channel identity (service + identifier).

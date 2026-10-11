@@ -2,9 +2,9 @@ import { describe, it, expect, vi, type MockedFunction, beforeEach } from "vites
 import type { Agent, AgentMessage, AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { complete } from "@earendil-works/pi-ai/compat";
 import type { Pool } from "pg";
-import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool, createManageCronTool, injectAutoSearchBlock, pendingAutoSearchBlocks, handlePrompt, createAgent, escalatingSummarize, selectCompactionCutIndex, isTurnBoundary, triggerCompactionIfNeeded, CHARS_PER_TOKEN, COMPACTION_THRESHOLD_FRACTION, LEVEL3_MAX_OUTPUT_FRACTION } from "./agent/index.js";
+import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool, createManageCronTool, injectAutoSearchBlock, pendingAutoSearchBlocks, handlePrompt, createAgent, escalatingSummarize, selectCompactionCutIndex, isTurnBoundary, triggerCompactionIfNeeded, formatUserMessage, CHARS_PER_TOKEN, COMPACTION_THRESHOLD_FRACTION, LEVEL3_MAX_OUTPUT_FRACTION } from "./agent/index.js";
 import { getApiKey } from "./auth.js";
-import { loadMessages, loadAllMemories, loadAllScratchpadTitles, getMainAgentId, saveMessage, loadAgent, loadLatestCompaction, saveCompaction } from "./database.js";
+import { loadMessages, loadAllMemories, loadAllScratchpadTitles, getMainAgentId, saveMessage, loadAgent, loadLatestCompaction, saveCompaction, isOwnerIdentity } from "./database.js";
 import { runSearch } from "./search.js";
 import { internalFetch } from "./internal-fetch.js";
 import { TurnProgressPersistedError } from "./errors.js";
@@ -30,6 +30,7 @@ vi.mock("./database.js", () => ({
   resolveRecipient: vi.fn(),
   resolveInterlocutorByName: vi.fn(),
   getMainAgentId: vi.fn(),
+  isOwnerIdentity: vi.fn().mockReturnValue(false),
   loadAgent: vi.fn(),
 }));
 vi.mock("./config.js", () => ({
@@ -1920,5 +1921,41 @@ describe("isTurnBoundary", () => {
       userMsg(10),
     ];
     expect(isTurnBoundary(messages, 1)).toBe(true);
+  });
+});
+
+describe("formatUserMessage", () => {
+  const mockIsOwnerIdentity = vi.mocked(isOwnerIdentity);
+
+  it("omits the Participant line when no participant is given", () => {
+    const formatted = formatUserMessage("hello", "telegram", "Group chat");
+    expect(formatted).toContain("Source: telegram\nSender: Group chat\nText: hello");
+    expect(formatted).not.toContain("Participant:");
+  });
+
+  it("uses the default cli source and unknown sender when both are omitted", () => {
+    const formatted = formatUserMessage("hello");
+    expect(formatted).toContain("Source: cli\nSender: unknown\nText: hello");
+    expect(formatted).not.toContain("Participant:");
+  });
+
+  it("inserts the Participant line between Sender and Text", () => {
+    mockIsOwnerIdentity.mockReturnValue(false);
+    const formatted = formatUserMessage("hi group", "telegram", "Group chat", { id: "42", name: "Alice" });
+    expect(formatted).toContain("Sender: Group chat\nParticipant: Alice (42)\nText: hi group");
+  });
+
+  it("appends the owner marker when the participant id is an owner identity", () => {
+    mockIsOwnerIdentity.mockReturnValue(true);
+    const formatted = formatUserMessage("hi group", "telegram", "Group chat", { id: "42", name: "Alice" });
+    expect(formatted).toContain("Participant: Alice (42) [owner]");
+    expect(mockIsOwnerIdentity).toHaveBeenCalledWith("telegram", "42");
+  });
+
+  it("does not append the owner marker for non-owner participants", () => {
+    mockIsOwnerIdentity.mockReturnValue(false);
+    const formatted = formatUserMessage("hi group", "telegram", "Group chat", { id: "42", name: "Alice" });
+    expect(formatted).toContain("Participant: Alice (42)\n");
+    expect(formatted).not.toContain("[owner]");
   });
 });

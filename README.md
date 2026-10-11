@@ -185,7 +185,9 @@ Request body is a JSON object (maximum 25 MB) with these fields. At least one of
 | `message` | string | The text to send to the agent. |
 | `async` | boolean | Optional. Set to the literal `true` to receive `202` with `{"accepted":true}` after submission instead of waiting for the reply. Omit it or set it to `false` to wait normally. Other values are rejected. |
 | `source` | string | The channel the message came from. Controls routing (see below) and is shown to the agent alongside the message. Omit it for direct calls; the agent then sees `cli`. |
-| `sender` | string | Who sent the message within that channel: an E.164 phone number for `signal` and `whatsapp`, a chat ID for `telegram`, an email address for `email`. Shown to the agent. |
+| `sender` | string | Who sent the message within that channel: an E.164 phone number for `signal` and `whatsapp`, a chat ID for `telegram`, an email address for `email`. For a group chat this is the group ID. Shown to the agent. |
+| `participant` | object | Optional. `{ "id": "...", "name": "..." }` for the individual who sent a group message. Added to the agent's view as a `Participant` line and marked `[owner]` when `id` matches one of your identities. Ignored if malformed. |
+| `senderLabel` | string | Optional. A human-readable platform label for the sender (e.g. a group name). Used to annotate dropped senders in the "Recently rejected" list on `/settings`. |
 | `files` | array | Files sent inline. Each entry is `{ "data": "<base64>", "filename": "...", "mimeType": "..." }`. Files larger than 10 MB after decoding are skipped with a warning in the logs. Use this from outside the app container. |
 | `attachments` | array | Files already present in the app container's temporary upload directory. Each entry is `{ "storedPath", "originalFilename", "mimeType", "size" }`. Paths outside the upload directory are rejected. This is for internal callers only; external callers should use `files`. |
 
@@ -393,6 +395,31 @@ A typical flow: you add your friend's phone number to the allowlist via `/settin
 then tell the bot "find a time for dinner with Alex next week". The bot creates a contact
 record for Alex, spins up a subagent, messages Alex on Signal, goes back and forth to
 find a date, and reports the result to you.
+
+## Group chats
+
+The bot can take part in groups on Telegram and Signal. A group is treated as a single
+interlocutor whose identity is the group's channel ID, and every message is labelled with
+a `Participant` line so the agent knows which member sent it.
+
+To set up a group:
+
+1. Send a message in the group so the bot receives it and records the sender.
+2. Open `/settings` and look at the "Recently rejected" section at the bottom of the
+   allowlist page. It shows the sender (the group ID) with an Add button.
+3. Add the group ID to the allowlist, then ask the bot to create an interlocutor and a
+   subagent for the group, exactly as you would for an individual.
+
+The group ID is Telegram's negative chat ID or Signal's opaque group ID.
+
+Telegram groups need extra setup: a bot only receives every message if its privacy mode
+is disabled (talk to @BotFather and turn off Group Privacy) or if the bot is an
+administrator of the group. Otherwise it only sees commands and replies addressed to it.
+
+On Signal, a person may be identified by a phone number or a UUID. When phone number
+privacy is enabled, Signal reports senders by UUID instead of phone number, so add the
+UUID to the Signal allowlist (and, for your own account, use the UUID for `[owner].signal`
+in `config.toml`). One interlocutor can hold both a phone number and a UUID.
 
 ## Skills
 

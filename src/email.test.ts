@@ -12,6 +12,7 @@ vi.mock("./queue.js", () => ({
 
 vi.mock("./allowlist.js", () => ({
   isInAllowlist: vi.fn(),
+  recordRejectedSender: vi.fn(),
 }));
 
 vi.mock("./uploads.js", () => ({

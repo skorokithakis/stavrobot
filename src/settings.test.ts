@@ -6,14 +6,16 @@ vi.mock("./allowlist.js", () => ({
   getAllowlist: vi.fn(),
   saveAllowlist: vi.fn(),
   getOwnerIdentities: vi.fn(),
+  getRejectedSenders: vi.fn(),
 }));
 
-import { getAllowlist, saveAllowlist, getOwnerIdentities } from "./allowlist.js";
+import { getAllowlist, saveAllowlist, getOwnerIdentities, getRejectedSenders } from "./allowlist.js";
 import { handleGetAllowlistRequest, handlePutAllowlistRequest, serveAllowlistPage } from "./settings.js";
 
 const mockGetAllowlist = vi.mocked(getAllowlist);
 const mockSaveAllowlist = vi.mocked(saveAllowlist);
 const mockGetOwnerIdentities = vi.mocked(getOwnerIdentities);
+const mockGetRejectedSenders = vi.mocked(getRejectedSenders);
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
   return {
@@ -73,6 +75,7 @@ function makeMockRequest(body: string, headers: Record<string, string> = {}): ht
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockGetRejectedSenders.mockReturnValue([]);
 });
 
 describe("handleGetAllowlistRequest", () => {
@@ -114,6 +117,35 @@ describe("handleGetAllowlistRequest", () => {
 
     const parsed = JSON.parse(response.body!);
     expect(parsed.allowlist.notes).toEqual({ "+1111111111": "Mom" });
+  });
+
+  it("returns rejected senders with lastSeen serialized as an ISO string", () => {
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
+    mockGetRejectedSenders.mockReturnValue([
+      { service: "telegram", identifier: "-100123", label: "Group", lastSeen: new Date("2026-10-11T10:00:00.000Z"), count: 3 },
+      { service: "signal", identifier: "+2222222222", label: undefined, lastSeen: new Date("2026-10-11T09:00:00.000Z"), count: 1 },
+    ]);
+
+    const response = makeMockResponse();
+    handleGetAllowlistRequest(response as unknown as http.ServerResponse, makeConfig());
+
+    const parsed = JSON.parse(response.body!);
+    expect(parsed.rejected).toEqual([
+      { service: "telegram", identifier: "-100123", label: "Group", lastSeen: "2026-10-11T10:00:00.000Z", count: 3 },
+      { service: "signal", identifier: "+2222222222", lastSeen: "2026-10-11T09:00:00.000Z", count: 1 },
+    ]);
+  });
+
+  it("returns an empty rejected array when there are no rejected senders", () => {
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
+    mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
+
+    const response = makeMockResponse();
+    handleGetAllowlistRequest(response as unknown as http.ServerResponse, makeConfig());
+
+    const parsed = JSON.parse(response.body!);
+    expect(parsed.rejected).toEqual([]);
   });
 });
 
@@ -270,31 +302,35 @@ describe("handlePutAllowlistRequest", () => {
     expect(parsed.ownerIdentities.telegram).toEqual([12345]);
   });
 
-  it("returns 400 when signal contains a non-E.164 number", async () => {
+  it("returns 400 when signal contains whitespace", async () => {
     mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
 
-    const request = makeMockRequest(JSON.stringify({ signal: ["banana"], telegram: [], whatsapp: [], email: [] }));
+    const request = makeMockRequest(JSON.stringify({ signal: ["not a number"], telegram: [], whatsapp: [], email: [] }));
     const response = makeMockResponse();
 
     await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
 
     expect(response.statusCode).toBe(400);
     const parsed = JSON.parse(response.body!);
-    expect(parsed.error).toMatch(/banana/);
-    expect(parsed.error).toMatch(/E\.164/i);
+    expect(parsed.error).toMatch(/not a number/);
+    expect(parsed.error).toMatch(/whitespace/i);
   });
 
-  it("returns 400 when signal number is missing the leading plus sign", async () => {
+  it("accepts UUID and group ID signal entries", async () => {
+    mockGetAllowlist.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [], notes: {} });
     mockGetOwnerIdentities.mockReturnValue({ signal: [], telegram: [], whatsapp: [], email: [] });
+    mockSaveAllowlist.mockImplementation(() => undefined);
 
-    const request = makeMockRequest(JSON.stringify({ signal: ["12345678901"], telegram: [], whatsapp: [], email: [] }));
+    const uuid = "123e4567-e89b-12d3-a456-426614174000";
+    const groupId = "group.abc123+/=";
+    const request = makeMockRequest(JSON.stringify({ signal: [uuid, groupId], telegram: [], whatsapp: [], email: [] }));
     const response = makeMockResponse();
 
     await handlePutAllowlistRequest(request, response as unknown as http.ServerResponse, makeConfig());
 
-    expect(response.statusCode).toBe(400);
-    const parsed = JSON.parse(response.body!);
-    expect(parsed.error).toMatch(/E\.164/i);
+    expect(response.statusCode).toBe(200);
+    const saved = mockSaveAllowlist.mock.calls[0][0];
+    expect(saved.signal).toEqual([uuid, groupId]);
   });
 
   it("returns 400 when signal contains whitespace-only strings", async () => {
@@ -770,5 +806,22 @@ describe("serveAllowlistPage", () => {
     expect(response.body).toContain("Telegram allowlist");
     expect(response.body).toContain("WhatsApp allowlist");
     expect(response.body).toContain("Email allowlist");
+  });
+
+  it("returns HTML containing the recently rejected section", () => {
+    const response = makeMockResponse();
+
+    serveAllowlistPage(response as unknown as http.ServerResponse);
+
+    expect(response.body).toContain("Recently rejected");
+    expect(response.body).toContain("rejected-list");
+  });
+
+  it("describes the Signal input as accepting a phone number, UUID, or group ID", () => {
+    const response = makeMockResponse();
+
+    serveAllowlistPage(response as unknown as http.ServerResponse);
+
+    expect(response.body).toContain("Phone number, UUID, or group ID");
   });
 });

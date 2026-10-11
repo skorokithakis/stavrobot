@@ -741,3 +741,53 @@ describe("getOwnerIdentities", () => {
     expect(identities.email).toEqual(["owner@example.com"]);
   });
 });
+
+describe("rejected-sender buffer", () => {
+  it("records a new sender with count 1, most recent first", async () => {
+    const { recordRejectedSender, getRejectedSenders } = await import("./allowlist.js");
+    recordRejectedSender("telegram", "111", "Group A");
+    recordRejectedSender("signal", "+222", undefined);
+
+    const senders = getRejectedSenders();
+    expect(senders.map((entry) => [entry.service, entry.identifier])).toEqual([
+      ["signal", "+222"],
+      ["telegram", "111"],
+    ]);
+    expect(senders[1].label).toBe("Group A");
+    expect(senders[1].count).toBe(1);
+    expect(senders[1].lastSeen).toBeInstanceOf(Date);
+    expect(senders[0].label).toBeUndefined();
+  });
+
+  it("dedupes by service+identifier, bumping count and moving the entry to the front", async () => {
+    const { recordRejectedSender, getRejectedSenders } = await import("./allowlist.js");
+    recordRejectedSender("telegram", "111", "Group A");
+    recordRejectedSender("signal", "+222", undefined);
+    recordRejectedSender("telegram", "111", "Group A renamed");
+
+    const senders = getRejectedSenders();
+    expect(senders).toHaveLength(2);
+    expect(senders[0].identifier).toBe("111");
+    expect(senders[0].count).toBe(2);
+    expect(senders[0].label).toBe("Group A renamed");
+  });
+
+  it("treats the same identifier on different services as separate entries", async () => {
+    const { recordRejectedSender, getRejectedSenders } = await import("./allowlist.js");
+    recordRejectedSender("telegram", "111", undefined);
+    recordRejectedSender("signal", "111", undefined);
+    expect(getRejectedSenders()).toHaveLength(2);
+  });
+
+  it("caps the buffer at 50 entries, dropping the oldest", async () => {
+    const { recordRejectedSender, getRejectedSenders } = await import("./allowlist.js");
+    for (let index = 0; index < 55; index += 1) {
+      recordRejectedSender("telegram", String(index), undefined);
+    }
+
+    const senders = getRejectedSenders();
+    expect(senders).toHaveLength(50);
+    expect(senders[0].identifier).toBe("54");
+    expect(senders[49].identifier).toBe("5");
+  });
+});

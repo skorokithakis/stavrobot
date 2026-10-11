@@ -88,7 +88,10 @@ too formal.
 # own numbers). Include whichever channels the owner uses.
 [owner]
 name = "Stavros"
+# signal accepts a phone number or a UUID. Use the UUID if phone number privacy is
+# enabled on your Signal account, since signal-cli then reports your number as a UUID.
 # signal = "+1234567890"
+# signal = "01234567-89ab-cdef-0123-456789abcdef"
 # telegram = "123456789"
 # whatsapp = "+1234567890"
 # email = "owner@example.com"          # specific address

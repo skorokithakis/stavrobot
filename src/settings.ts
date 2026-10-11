@@ -1,6 +1,6 @@
 import http from "http";
 import type { Config } from "./config.js";
-import { getAllowlist, saveAllowlist, getOwnerIdentities } from "./allowlist.js";
+import { getAllowlist, saveAllowlist, getOwnerIdentities, getRejectedSenders } from "./allowlist.js";
 import type { Allowlist } from "./allowlist.js";
 import { log } from "./log.js";
 import { getBaseStyles } from "./theme.js";
@@ -17,11 +17,18 @@ export function handleGetAllowlistRequest(
   response: http.ServerResponse,
   config: Config,
 ): void {
-  log.debug("[stavrobot] handleGetAllowlistRequest: returning allowlist and owner identities");
+  log.debug("[stavrobot] handleGetAllowlistRequest: returning allowlist, owner identities, and rejected senders");
   const allowlist = getAllowlist();
   const ownerIdentities = getOwnerIdentities(config);
+  const rejected = getRejectedSenders().map((entry) => ({
+    service: entry.service,
+    identifier: entry.identifier,
+    label: entry.label,
+    lastSeen: entry.lastSeen.toISOString(),
+    count: entry.count,
+  }));
   response.writeHead(200, { "Content-Type": "application/json" });
-  response.end(JSON.stringify({ allowlist, ownerIdentities }));
+  response.end(JSON.stringify({ allowlist, ownerIdentities, rejected }));
 }
 
 export async function handlePutAllowlistRequest(
@@ -89,17 +96,21 @@ export async function handlePutAllowlistRequest(
     return;
   }
 
-  const e164Pattern = /^\+[1-9]\d{1,14}$/;
-  const invalidSignal = trimmedSignal.find((item) => item !== "*" && !e164Pattern.test(item));
+  // Signal identities may be a phone number (E.164), a UUID, or a group ID
+  // (an opaque base64-ish string), so we only reject entries containing
+  // whitespace. Empty strings are already rejected above.
+  const invalidSignal = trimmedSignal.find((item) => item !== "*" && /\s/.test(item));
   if (invalidSignal !== undefined) {
     response.writeHead(400, { "Content-Type": "application/json" });
     response.end(
       JSON.stringify({
-        error: `Invalid Signal number "${invalidSignal}": must be in E.164 format (e.g. +1234567890).`,
+        error: `Invalid Signal entry "${invalidSignal}": must not contain whitespace.`,
       }),
     );
     return;
   }
+
+  const e164Pattern = /^\+[1-9]\d{1,14}$/;
 
   if (
     !Array.isArray(obj.telegram) ||
@@ -303,7 +314,7 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
       <h2>Signal allowlist</h2>
       <ul class="entry-list" id="signal-list"></ul>
       <div class="add-row">
-        <input type="text" id="signal-input" placeholder="+1234567890" />
+        <input type="text" id="signal-input" placeholder="Phone number, UUID, or group ID" />
         <input type="text" id="signal-note-input" placeholder="Note (optional)" />
         <button class="btn" onclick="addSignalEntry()">Add</button>
       </div>
@@ -339,6 +350,11 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
       </div>
     </div>
 
+    <div class="section" id="rejected-section" style="display:none">
+      <h2>Recently rejected</h2>
+      <ul class="entry-list" id="rejected-list"></ul>
+    </div>
+
     <span id="status"></span>
   </div>
 
@@ -352,6 +368,7 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
     let ownerWhatsapp = [];
     let ownerEmail = [];
     let notes = {};
+    let rejectedEntries = [];
 
     function escapeHtml(text) {
       const div = document.createElement("div");
@@ -440,6 +457,100 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
       }).join("");
     }
 
+    function serviceEntries(service) {
+      if (service === "signal") return signalEntries;
+      if (service === "telegram") return telegramEntries;
+      if (service === "whatsapp") return whatsappEntries;
+      if (service === "email") return emailEntries;
+      return null;
+    }
+
+    function serviceLabel(service) {
+      if (service === "signal") return "Signal";
+      if (service === "telegram") return "Telegram";
+      if (service === "whatsapp") return "WhatsApp";
+      if (service === "email") return "Email";
+      return service;
+    }
+
+    function normalizeRejectedIdentifier(entry) {
+      if (entry.service === "telegram") {
+        const value = parseInt(entry.identifier, 10);
+        if (!Number.isInteger(value) || String(value) !== entry.identifier) {
+          return null;
+        }
+        return value;
+      }
+      if (entry.service === "email") {
+        return entry.identifier.trim().toLowerCase();
+      }
+      return entry.identifier.replace(/[\\u200B-\\u200F\\u2028-\\u202F\\u2060-\\u206F\\uFEFF]/g, "").trim();
+    }
+
+    function isRejectedIdentifierPresent(entry) {
+      const value = normalizeRejectedIdentifier(entry);
+      if (value === null) return false;
+      const list = serviceEntries(entry.service);
+      if (list === null) return false;
+      return list.map(String).includes(String(value));
+    }
+
+    function renderRejectedList() {
+      const section = document.getElementById("rejected-section");
+      const list = document.getElementById("rejected-list");
+      const rows = rejectedEntries
+        .map((entry, index) => ({ entry, index }))
+        .filter((row) => !isRejectedIdentifierPresent(row.entry));
+      if (rows.length === 0) {
+        section.style.display = "none";
+        list.innerHTML = "";
+        return;
+      }
+      section.style.display = "";
+      list.innerHTML = rows.map((row) => {
+        const entry = row.entry;
+        const label = entry.label ? \`<span class="note-text">\${escapeHtml(entry.label)}</span>\` : "";
+        const countText = entry.count + (entry.count === 1 ? " message" : " messages");
+        const count = \`<span class="note-text">\${escapeHtml(countText)}</span>\`;
+        const time = \`<span class="note-text">\${escapeHtml(new Date(entry.lastSeen).toLocaleString())}</span>\`;
+        return \`<li>
+          <span class="entry-value">\${escapeHtml(serviceLabel(entry.service))} · \${escapeHtml(entry.identifier)}</span>
+          \${label}
+          \${count}
+          \${time}
+          <button class="btn" onclick="addRejectedEntry(\${row.index})">Add</button>
+        </li>\`;
+      }).join("");
+    }
+
+    function addRejectedEntry(index) {
+      const entry = rejectedEntries[index];
+      if (!entry) return;
+      const list = serviceEntries(entry.service);
+      if (list === null) return;
+      const value = normalizeRejectedIdentifier(entry);
+      if (value === null) {
+        setStatus("Cannot add " + entry.identifier + ": Telegram chat ID must be an integer.", true);
+        return;
+      }
+      const key = String(value);
+      if (list.map(String).includes(key)) {
+        setStatus("That entry is already in the list.", true);
+        return;
+      }
+      if (entry.label) {
+        notes[key] = entry.label;
+      }
+      list.push(value);
+      renderSignalList();
+      renderTelegramList();
+      renderWhatsappList();
+      renderEmailList();
+      renderRejectedList();
+      setStatus("", false);
+      saveAllowlist();
+    }
+
     function isIdentifierInAnyList(key) {
       return signalEntries.includes(key) ||
         telegramEntries.map(String).includes(key) ||
@@ -493,8 +604,8 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
       const noteInput = document.getElementById("signal-note-input");
       const value = input.value.replace(/[\\u200B-\\u200F\\u2028-\\u202F\\u2060-\\u206F\\uFEFF]/g, "").trim();
       if (!value) return;
-      if (value !== "*" && !/^\\+[1-9]\\d{1,14}$/.test(value)) {
-        setStatus("Invalid number: must be in E.164 format (e.g. +1234567890).", true);
+      if (value !== "*" && /\\s/.test(value)) {
+        setStatus("Invalid entry: must not contain whitespace.", true);
         return;
       }
       if (signalEntries.includes(value)) {
@@ -631,6 +742,7 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
         ownerTelegram = data.ownerIdentities.telegram.slice();
         ownerWhatsapp = data.ownerIdentities.whatsapp.slice();
         ownerEmail = data.ownerIdentities.email.slice();
+        rejectedEntries = (data.rejected || []).slice();
 
         document.getElementById("loading").style.display = "none";
         document.getElementById("content").style.display = "";
@@ -639,6 +751,7 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
         renderTelegramList();
         renderWhatsappList();
         renderEmailList();
+        renderRejectedList();
       } catch (error) {
         document.getElementById("loading").style.display = "none";
         document.getElementById("content").style.display = "";

@@ -140,9 +140,9 @@ export function createSendSignalMessageTool(pool: pg.Pool, config: Config): Agen
   return {
     name: "send_signal_message",
     label: "Send Signal message",
-    description: "Send a message via Signal to a display name or phone number. Can send text, a file attachment (from manage_files or a plugin tool), or both.",
+    description: "Send a message via Signal to a display name, phone number, UUID, or group ID. Can send text, a file attachment (from manage_files or a plugin tool), or both.",
     parameters: Type.Object({
-      recipient: Type.String({ description: "Display name of the recipient (e.g., \"Mom\") or phone number in international format (e.g., \"+1234567890\")." }),
+      recipient: Type.String({ description: "Display name of the recipient (e.g., \"Mom\"), phone number or UUID, or group ID." }),
       message: Type.Optional(Type.String({ description: "Text message to send." })),
       attachmentPath: Type.Optional(Type.String({ description: "File path to an attachment under the temp directory (e.g., from manage_files write or a plugin tool)." })),
     }),

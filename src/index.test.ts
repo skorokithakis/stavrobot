@@ -474,6 +474,52 @@ describe("handleChatRequest base64 file handling", () => {
   });
 });
 
+describe("handleChatRequest participant and senderLabel parsing", () => {
+  it("passes a well-formed participant and senderLabel to enqueueMessage", async () => {
+    const mockEnqueue = vi.mocked(enqueueMessage);
+    mockEnqueue.mockClear();
+
+    const request = makeBodyRequest(Buffer.from(JSON.stringify({
+      message: "hello",
+      source: "telegram",
+      sender: "-100",
+      participant: { id: "42", name: "Alice" },
+      senderLabel: "Group chat",
+    })));
+    const response = makeMockResponse();
+
+    await handleChatRequest(request, response as unknown as http.ServerResponse);
+
+    expect(mockEnqueue).toHaveBeenCalledOnce();
+    expect(mockEnqueue).toHaveBeenCalledWith(
+      "hello",
+      "telegram",
+      "-100",
+      undefined,
+      undefined,
+      { id: "42", name: "Alice" },
+      "Group chat",
+    );
+  });
+
+  it("ignores malformed participant and senderLabel values", async () => {
+    const mockEnqueue = vi.mocked(enqueueMessage);
+    mockEnqueue.mockClear();
+
+    const request = makeBodyRequest(Buffer.from(JSON.stringify({
+      message: "hello",
+      participant: { id: 42, name: "Alice" },
+      senderLabel: 7,
+    })));
+    const response = makeMockResponse();
+
+    await handleChatRequest(request, response as unknown as http.ServerResponse);
+
+    expect(mockEnqueue).toHaveBeenCalledOnce();
+    expect(mockEnqueue).toHaveBeenCalledWith("hello", undefined, undefined, undefined, undefined, undefined, undefined);
+  });
+});
+
 describe("handleChatRequest async acknowledgement", () => {
   it("acknowledges a request while its queue processing remains pending", async () => {
     const mockEnqueue = vi.mocked(enqueueMessage);
@@ -494,7 +540,7 @@ describe("handleChatRequest async acknowledgement", () => {
     expect(response.statusCode).toBe(202);
     expect(response.body).toBe(JSON.stringify({ accepted: true }));
     expect(mockEnqueue).toHaveBeenCalledOnce();
-    expect(mockEnqueue).toHaveBeenCalledWith("test", "signal", "+1234567890", undefined);
+    expect(mockEnqueue).toHaveBeenCalledWith("test", "signal", "+1234567890", undefined, undefined, undefined, undefined);
 
     deferred.resolve("complete");
   });

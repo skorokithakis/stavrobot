@@ -1,7 +1,7 @@
 import http from "http";
 import { simpleParser } from "mailparser";
 import type { EmailConfig } from "./config.js";
-import { isInAllowlist } from "./allowlist.js";
+import { isInAllowlist, recordRejectedSender } from "./allowlist.js";
 import { enqueueMessage } from "./queue.js";
 import { saveAttachment, type FileAttachment } from "./uploads.js";
 import { log } from "./log.js";
@@ -72,6 +72,10 @@ export async function handleEmailWebhook(payload: EmailWebhookPayload): Promise<
       : bodyText;
 
   if (!isInAllowlist("email", from)) {
+    const fromDisplayName = parsed.from?.value[0]?.name;
+    const senderLabel =
+      fromDisplayName !== undefined && fromDisplayName.trim() !== "" ? fromDisplayName : undefined;
+    recordRejectedSender("email", from, senderLabel);
     log.info("[stavrobot] Email from disallowed address:", from);
     return;
   }

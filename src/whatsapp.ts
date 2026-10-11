@@ -8,7 +8,7 @@ import {
 } from "@whiskeysockets/baileys";
 import type { Boom } from "@hapi/boom";
 import type { WhatsappConfig } from "./config.js";
-import { isInAllowlist } from "./allowlist.js";
+import { isInAllowlist, recordRejectedSender } from "./allowlist.js";
 import { enqueueMessage } from "./queue.js";
 import { saveAttachment, type FileAttachment } from "./uploads.js";
 import { setWhatsappSocket, getWhatsappSocket, jidToE164, e164ToJid } from "./whatsapp-api.js";
@@ -205,6 +205,9 @@ async function processInboundMessage(waMessage: WAMessage): Promise<void> {
   const phoneNumber = jidToE164(effectiveJid);
 
   if (!isInAllowlist("whatsapp", phoneNumber)) {
+    const pushName = waMessage.pushName;
+    const senderLabel = typeof pushName === "string" && pushName.trim() !== "" ? pushName : undefined;
+    recordRejectedSender("whatsapp", phoneNumber, senderLabel);
     log.info("[stavrobot] WhatsApp message from disallowed number:", phoneNumber);
     return;
   }

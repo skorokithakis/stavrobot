@@ -12,6 +12,47 @@ export interface Allowlist {
 
 const ALLOWLIST_PATH = process.env.ALLOWLIST_PATH ?? "allowlist.json";
 
+const MAX_REJECTED_SENDERS = 50;
+
+export interface RejectedSender {
+  service: string;
+  identifier: string;
+  label: string | undefined;
+  lastSeen: Date;
+  count: number;
+}
+
+const rejectedSenders: RejectedSender[] = [];
+
+// Records a sender dropped by the allowlist hard gate. Entries are kept
+// newest-first and deduplicated by (service, identifier) so a repeat sender
+// only bumps lastSeen and count. A non-undefined label replaces a previously
+// stored one; an undefined label never erases a known one.
+export function recordRejectedSender(service: string, identifier: string, label: string | undefined): void {
+  const existingIndex = rejectedSenders.findIndex(
+    (entry) => entry.service === service && entry.identifier === identifier,
+  );
+  const now = new Date();
+  if (existingIndex !== -1) {
+    const [existing] = rejectedSenders.splice(existingIndex, 1);
+    existing.lastSeen = now;
+    existing.count += 1;
+    if (label !== undefined) {
+      existing.label = label;
+    }
+    rejectedSenders.unshift(existing);
+    return;
+  }
+  rejectedSenders.unshift({ service, identifier, label, lastSeen: now, count: 1 });
+  if (rejectedSenders.length > MAX_REJECTED_SENDERS) {
+    rejectedSenders.length = MAX_REJECTED_SENDERS;
+  }
+}
+
+export function getRejectedSenders(): RejectedSender[] {
+  return rejectedSenders.map((entry) => ({ ...entry }));
+}
+
 let currentAllowlist: Allowlist = { signal: [], telegram: [], whatsapp: [], email: [], notes: {} };
 
 function validateAllowlist(value: unknown): Allowlist {

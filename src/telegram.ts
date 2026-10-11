@@ -1,7 +1,7 @@
 import { Marked, type RendererObject, type Tokens } from "marked";
 import type { TelegramConfig } from "./config.js";
-import { isInAllowlist } from "./allowlist.js";
-import { enqueueMessage } from "./queue.js";
+import { isInAllowlist, recordRejectedSender } from "./allowlist.js";
+import { enqueueMessage, type Participant } from "./queue.js";
 import { saveAttachment, type FileAttachment } from "./uploads.js";
 import { log } from "./log.js";
 
@@ -18,8 +18,16 @@ interface TelegramEntity {
   language?: string;
 }
 
+interface TelegramUser {
+  id: number;
+  first_name?: string;
+  last_name?: string;
+  username?: string;
+}
+
 interface TelegramMessage {
-  chat: { id: number };
+  chat: { id: number; type: string; title?: string };
+  from?: TelegramUser;
   text?: string;
   caption?: string;
   entities?: TelegramEntity[];
@@ -391,6 +399,22 @@ async function downloadTelegramFile(config: TelegramConfig, fileId: string): Pro
 }
 
 
+// Telegram users may have a full name, only a username, or neither. Build the
+// most human-readable name available, falling back to the numeric id.
+function telegramUserName(from: TelegramUser): string {
+  const fullName = [from.first_name, from.last_name]
+    .filter((part): part is string => part !== undefined && part.trim() !== "")
+    .join(" ")
+    .trim();
+  if (fullName !== "") {
+    return fullName;
+  }
+  if (from.username !== undefined && from.username.trim() !== "") {
+    return from.username;
+  }
+  return String(from.id);
+}
+
 export async function handleTelegramUpdate(
   body: unknown,
   config: TelegramConfig
@@ -416,10 +440,20 @@ export async function handleTelegramUpdate(
   const message = rawMessage;
   const chatId = message.chat.id;
 
+  // Group messages are still routed per chat ID; the participant identifies the
+  // individual member who sent them, and the sender label labels the chat for
+  // the rejected-sender buffer.
+  const isGroupChat = message.chat.type !== "private";
+  const fromName = message.from !== undefined ? telegramUserName(message.from) : String(chatId);
+  const participant: Participant | undefined =
+    isGroupChat && message.from !== undefined ? { id: String(message.from.id), name: fromName } : undefined;
+  const senderLabel = isGroupChat ? message.chat.title ?? String(chatId) : fromName;
+
   const updateType = message.voice || message.audio ? "voice" : message.photo ? "photo" : message.document ? "document" : message.text ? "text" : "unknown";
   log.debug(`[stavrobot] [debug] Update accepted: chatId=${chatId}, type=${updateType}`);
 
   if (!isInAllowlist("telegram", String(chatId))) {
+    recordRejectedSender("telegram", String(chatId), senderLabel);
     log.info("[stavrobot] Telegram message from disallowed chat ID:", chatId);
     return;
   }
@@ -448,7 +482,7 @@ export async function handleTelegramUpdate(
         mimeType,
         size: buffer.length,
       };
-      void enqueueMessage(formattedText ?? formattedCaption, "telegram", String(chatId), [attachment]);
+      void enqueueMessage(formattedText ?? formattedCaption, "telegram", String(chatId), [attachment], undefined, participant, senderLabel);
     }).catch((error: unknown) => {
       log.error("[stavrobot] Error downloading Telegram voice/audio:", error);
     });
@@ -471,7 +505,7 @@ export async function handleTelegramUpdate(
         mimeType,
         size: buffer.length,
       };
-      void enqueueMessage(formattedCaption, "telegram", String(chatId), [attachment]);
+      void enqueueMessage(formattedCaption, "telegram", String(chatId), [attachment], undefined, participant, senderLabel);
     }).catch((error: unknown) => {
       log.error("[stavrobot] Error downloading Telegram photo:", error);
     });
@@ -493,7 +527,7 @@ export async function handleTelegramUpdate(
         mimeType,
         size: buffer.length,
       };
-      void enqueueMessage(formattedCaption, "telegram", String(chatId), [attachment]);
+      void enqueueMessage(formattedCaption, "telegram", String(chatId), [attachment], undefined, participant, senderLabel);
     }).catch((error: unknown) => {
       log.error("[stavrobot] Error downloading Telegram document:", error);
     });
@@ -503,7 +537,7 @@ export async function handleTelegramUpdate(
   if (formattedText !== undefined) {
     log.debug("[stavrobot] Telegram text message from chat:", chatId);
     // Fire-and-forget: Telegram requires a fast 200 response, so we don't await.
-    void enqueueMessage(formattedText, "telegram", String(chatId));
+    void enqueueMessage(formattedText, "telegram", String(chatId), undefined, undefined, participant, senderLabel);
     return;
   }
 

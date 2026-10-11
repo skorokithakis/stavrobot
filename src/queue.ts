@@ -4,7 +4,7 @@ import type { Config } from "./config.js";
 import { handlePrompt, formatUserMessage } from "./agent/index.js";
 import { AbortError, TurnProgressPersistedError } from "./errors.js";
 import { AuthError, invalidateCredentials } from "./auth.js";
-import { isInAllowlist } from "./allowlist.js";
+import { isInAllowlist, recordRejectedSender } from "./allowlist.js";
 import { sendSignalMessage } from "./signal.js";
 import { sendTelegramMessage } from "./telegram-api.js";
 import { sendWhatsappTextMessage } from "./whatsapp-api.js";
@@ -50,12 +50,19 @@ export interface RoutingResult {
   isMainAgent: boolean;
 }
 
+export interface Participant {
+  id: string;
+  name: string;
+}
+
 interface QueueEntry {
   message: string | undefined;
   source: string | undefined;
   sender: string | undefined;
   attachments: FileAttachment[] | undefined;
   targetAgentId: number | undefined;
+  participant: Participant | undefined;
+  senderLabel: string | undefined;
   retries: number;
   resolve: (value: string) => void;
   reject: (reason: unknown) => void;
@@ -90,6 +97,7 @@ async function resolveTargetAgent(
   source: string | undefined,
   sender: string | undefined,
   targetAgentId: number | undefined,
+  senderLabel: string | undefined,
 ): Promise<RoutingResult | null> {
   const mainAgentId = getMainAgentId();
 
@@ -180,6 +188,7 @@ async function resolveTargetAgent(
   // Hard gate: sender must be in the allowlist. Owner messages bypass this
   // check above, and internal sources are handled earlier in this function.
   if (!isInAllowlist(source, sender)) {
+    recordRejectedSender(source, sender, senderLabel);
     log.info(`[stavrobot] Dropping message from sender not in allowlist: source=${source}, sender=${sender}`);
     return null;
   }
@@ -259,13 +268,13 @@ async function processQueue(): Promise<void> {
     log.info(`[stavrobot] message in: ${entry.source} - ${entry.sender} - ${preview}`);
     currentEntry = entry;
     try {
-      const routing = await resolveTargetAgent(queuePool!, entry.source, entry.sender, entry.targetAgentId);
+      const routing = await resolveTargetAgent(queuePool!, entry.source, entry.sender, entry.targetAgentId, entry.senderLabel);
       if (routing === null) {
         log.warn(`[stavrobot] Dropping message: could not resolve target agent. source=${entry.source}, sender=${entry.sender}`);
         entry.resolve("");
         continue;
       }
-      const response = await handlePrompt(queueAgent!, queuePool!, entry.message, queueConfig!, routing, entry.source, entry.attachments, entry.retries > 0);
+      const response = await handlePrompt(queueAgent!, queuePool!, entry.message, queueConfig!, routing, entry.source, entry.attachments, entry.retries > 0, entry.participant);
       entry.resolve(response);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -330,6 +339,8 @@ export function enqueueMessage(
   sender?: string,
   attachments?: FileAttachment[],
   targetAgentId?: number,
+  participant?: Participant,
+  senderLabel?: string,
 ): Promise<string> {
   if (message !== undefined && message.trim().toLowerCase() === "/stop") {
     if (processing) {
@@ -354,7 +365,7 @@ export function enqueueMessage(
   }
 
   return new Promise<string>((resolve, reject) => {
-    queue.push({ message, source, sender, attachments, targetAgentId, retries: 0, resolve, reject });
+    queue.push({ message, source, sender, attachments, targetAgentId, participant, senderLabel, retries: 0, resolve, reject });
     if (!processing) {
       void processQueue();
     }
