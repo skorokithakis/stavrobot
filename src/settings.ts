@@ -237,16 +237,59 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
       font-size: 14px;
     }
     .entry-list li:last-child { border-bottom: none; }
-    .entry-value { flex: 1; }
+    .entry-main {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      overflow-wrap: anywhere;
+    }
+    .entry-line {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+    .entry-value {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .entry-line .entry-value { flex: 1; }
+    .entry-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .entry-meta > * { min-width: 0; max-width: 100%; }
     .owner-label {
+      flex-shrink: 0;
       font-size: 12px;
       color: var(--color-text-muted);
       font-style: italic;
     }
+    .entry-list li > .btn { flex-shrink: 0; }
     .note-text {
       font-size: 13px;
       color: var(--color-text-muted);
     }
+    .copy-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      border: none;
+      border-radius: 4px;
+      background: none;
+      color: var(--color-text-muted);
+      cursor: pointer;
+    }
+    .copy-btn:hover { background: var(--color-bg); color: var(--color-text); }
+    .copy-btn svg { display: block; width: 14px; height: 14px; }
+    .copy-btn.copied { color: var(--color-success); }
     .add-row {
       display: flex;
       gap: 8px;
@@ -254,7 +297,7 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
       flex-wrap: wrap;
     }
     .add-row input[type="text"] {
-      flex: 1;
+      flex: 1 1 160px;
       min-width: 0;
       padding: 7px 10px;
       border: 1px solid var(--color-border);
@@ -386,8 +429,10 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
         const isOwner = ownerSignal.includes(entry);
         const note = notes[entry];
         return \`<li>
-          <span class="entry-value">\${escapeHtml(entry)}</span>
-          \${note ? \`<span class="note-text">\${escapeHtml(note)}</span>\` : ""}
+          <span class="entry-main">
+            <span class="entry-value">\${escapeHtml(entry)}</span>
+            \${note ? \`<span class="note-text">\${escapeHtml(note)}</span>\` : ""}
+          </span>
           \${isOwner
             ? '<span class="owner-label">(owner)</span>'
             : \`<button class="btn btn-danger" onclick="removeSignalEntry(\${index})">Delete</button>\`
@@ -407,8 +452,10 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
         const key = String(entry);
         const note = notes[key];
         return \`<li>
-          <span class="entry-value">\${escapeHtml(String(entry))}</span>
-          \${note ? \`<span class="note-text">\${escapeHtml(note)}</span>\` : ""}
+          <span class="entry-main">
+            <span class="entry-value">\${escapeHtml(String(entry))}</span>
+            \${note ? \`<span class="note-text">\${escapeHtml(note)}</span>\` : ""}
+          </span>
           \${isOwner
             ? '<span class="owner-label">(owner)</span>'
             : \`<button class="btn btn-danger" onclick="removeTelegramEntry(\${index})">Delete</button>\`
@@ -427,8 +474,10 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
         const isOwner = ownerWhatsapp.includes(entry);
         const note = notes[entry];
         return \`<li>
-          <span class="entry-value">\${escapeHtml(entry)}</span>
-          \${note ? \`<span class="note-text">\${escapeHtml(note)}</span>\` : ""}
+          <span class="entry-main">
+            <span class="entry-value">\${escapeHtml(entry)}</span>
+            \${note ? \`<span class="note-text">\${escapeHtml(note)}</span>\` : ""}
+          </span>
           \${isOwner
             ? '<span class="owner-label">(owner)</span>'
             : \`<button class="btn btn-danger" onclick="removeWhatsappEntry(\${index})">Delete</button>\`
@@ -447,8 +496,10 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
         const isOwner = ownerEmail.includes(entry);
         const note = notes[entry];
         return \`<li>
-          <span class="entry-value">\${escapeHtml(entry)}</span>
-          \${note ? \`<span class="note-text">\${escapeHtml(note)}</span>\` : ""}
+          <span class="entry-main">
+            <span class="entry-value">\${escapeHtml(entry)}</span>
+            \${note ? \`<span class="note-text">\${escapeHtml(note)}</span>\` : ""}
+          </span>
           \${isOwner
             ? '<span class="owner-label">(owner)</span>'
             : \`<button class="btn btn-danger" onclick="removeEmailEntry(\${index})">Delete</button>\`
@@ -514,10 +565,19 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
         const count = \`<span class="note-text">\${escapeHtml(countText)}</span>\`;
         const time = \`<span class="note-text">\${escapeHtml(new Date(entry.lastSeen).toLocaleString())}</span>\`;
         return \`<li>
-          <span class="entry-value">\${escapeHtml(serviceLabel(entry.service))} · \${escapeHtml(entry.identifier)}</span>
-          \${label}
-          \${count}
-          \${time}
+          <span class="entry-main">
+            <span class="entry-line">
+              <span class="entry-value">\${escapeHtml(serviceLabel(entry.service))} · \${escapeHtml(entry.identifier)}</span>
+              <button class="copy-btn" type="button" title="Copy" aria-label="Copy" onclick="copyRejectedEntry(\${row.index}, this)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              </button>
+            </span>
+            <span class="entry-meta">
+              \${label}
+              \${count}
+              \${time}
+            </span>
+          </span>
           <button class="btn" onclick="addRejectedEntry(\${row.index})">Add</button>
         </li>\`;
       }).join("");
@@ -549,6 +609,25 @@ const SETTINGS_PAGE_HTML = `<!DOCTYPE html>
       renderRejectedList();
       setStatus("", false);
       saveAllowlist();
+    }
+
+    function copyRejectedEntry(index, button) {
+      const entry = rejectedEntries[index];
+      if (!entry) return;
+      if (!navigator.clipboard) {
+        setStatus("Clipboard is not available.", true);
+        return;
+      }
+      navigator.clipboard.writeText(entry.identifier).then(() => {
+        button.classList.add("copied");
+        button.setAttribute("aria-label", "Copied");
+        setTimeout(() => {
+          button.classList.remove("copied");
+          button.setAttribute("aria-label", "Copy");
+        }, 1000);
+      }).catch(() => {
+        setStatus("Could not copy to clipboard.", true);
+      });
     }
 
     function isIdentifierInAnyList(key) {
