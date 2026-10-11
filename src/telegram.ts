@@ -367,7 +367,12 @@ export async function runTelegramPollingLoop(
         }
       }
     } catch (error) {
-      log.error("[stavrobot] Telegram polling error:", error);
+      // Node's fetch wraps socket failures as "fetch failed" with the real reason in cause,
+      // so include the cause code to make transient resets readable without a stack dump.
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const cause = error instanceof Error ? error.cause : undefined;
+      const causeCode = cause instanceof Error && "code" in cause ? String(cause.code) : undefined;
+      log.error(`[stavrobot] Telegram polling error: ${errorMessage}${causeCode !== undefined ? ` (${causeCode})` : ""}, retrying in ${TELEGRAM_POLL_ERROR_RETRY_MILLISECONDS / 1000}s`);
       await sleepFunction(TELEGRAM_POLL_ERROR_RETRY_MILLISECONDS);
     }
   }
