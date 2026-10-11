@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Overview (desktop, light)</title>
+<link rel="stylesheet" href="./sb.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>body{margin:0}</style>
+</head>
+<body>
+<div class="sb sb-light sb-app" style="width: 1440px; height: 1180px; overflow: hidden">
+
+<nav aria-label="Main" class="sb-sidebar">
+<div class="sb-brand"><div class="sb-logo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="12" rx="3"></rect><path d="M12 7V4"></path><circle cx="9" cy="13" r="1" fill="currentColor"></circle><circle cx="15" cy="13" r="1" fill="currentColor"></circle></svg></div>Stavrobot</div>
+<a class="sb-nav-item is-active" href="Overview.html" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"></path></svg>Overview</a>
+<a class="sb-nav-item" href="Allowlist.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6z"></path></svg>Allowlist</a>
+<a class="sb-nav-item" href="Plugins.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5"></path></svg>Plugins</a>
+<a class="sb-nav-item" href="Database.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"></ellipse><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"></path></svg>Database</a>
+<a class="sb-nav-item" href="Config.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"></path><circle cx="15" cy="6" r="2"></circle><circle cx="9" cy="12" r="2"></circle><circle cx="17" cy="18" r="2"></circle></svg>Config</a>
+<div class="sb-sidebar-foot"><span class="sb-status is-on" style="font-size: 13px"><span class="sb-dot sb-dot-on"></span>Online</span><span class="sb-mono sb-muted" style="font-size: 12px">claude-opus-5-5</span></div>
+</nav>
+
+<main class="sb-main">
+<div class="sb-page-h"><h1 class="sb-h1">Overview</h1><span class="sb-pill"><span class="sb-dot sb-dot-on"></span>Online · 2h 42m</span></div>
+
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; height: 1012px">
+
+<section class="sb-card sb-chat" aria-label="Chat with Stavrobot" style="height: 1012px">
+<div class="sb-card-h"><h2 class="sb-h2">Chat</h2><span class="sb-small sb-muted">Talks to the main agent</span></div>
+<div class="sb-chat-log" role="log" aria-live="polite" style="justify-content: flex-end">
+<div class="sb-msg sb-msg-bot"><div class="sb-msg-meta"><b>Stavrobot</b>Yesterday 21:14</div><div class="sb-bubble sb-md"><p>Done. I added "Dentist" to your calendar for Tuesday at 10:30.</p></div></div>
+<div class="sb-msg sb-msg-user"><div class="sb-msg-meta"><b>You</b>13:58</div><div class="sb-bubble">What is on my calendar tomorrow?</div></div>
+<div class="sb-msg sb-msg-bot"><div class="sb-msg-meta"><b>Stavrobot</b>13:58</div><div class="sb-bubble sb-md"><p>You have three events tomorrow:</p><ol><li><strong>09:00</strong> Stand-up</li><li><strong>12:30</strong> Lunch with Sam</li><li><strong>18:30</strong> Tennis, court 3</li></ol><p>The evening is free after 20:00.</p></div></div>
+<div class="sb-msg sb-msg-user"><div class="sb-msg-meta"><b>You</b>14:02</div><div class="sb-bubble">Where is my package LP00123456789CN? Also show me the tool call.</div></div>
+<div class="sb-msg sb-msg-bot"><div class="sb-msg-meta"><b>Stavrobot</b>14:02</div><div class="sb-bubble sb-md">
+<h3>Package status</h3>
+<p>Your package <code>LP00123456789CN</code> is <strong>in transit</strong>. It left the sorting centre this morning.</p>
+<ul><li>Origin: Shenzhen</li><li>Destination: London</li></ul>
+<pre><code>track_package(number="LP00123456789CN", carrier="cainiao", include_events=true, language="en")</code></pre>
+<blockquote>Delivery times are estimates from the carrier.</blockquote>
+<p>Full history: <a href="#">global.cainiao.com</a></p>
+</div></div>
+<div class="sb-msg sb-msg-user"><div class="sb-msg-meta"><b>You</b>14:04</div><div class="sb-bubble">Thanks. Ask Sam if Friday at 19:00 works for tennis.</div></div>
+<div class="sb-msg sb-msg-bot" aria-live="polite"><div class="sb-msg-meta"><b>Stavrobot</b>is thinking</div><div class="sb-bubble sb-typing" aria-label="Stavrobot is thinking"><i></i><i></i><i></i></div></div>
+</div>
+<div class="sb-composer"><label for="msg" class="sb-sr">Message</label><textarea id="msg" class="sb-input" disabled placeholder="Waiting for the reply..."></textarea><button class="sb-btn sb-btn-primary sb-btn-icon sb-btn-lg is-loading" type="button" aria-label="Sending" aria-busy="true"><span class="sb-spinner"></span></button></div>
+<div class="sb-composer-hint">Enter to send, Shift+Enter for a new line</div>
+</section>
+
+<div style="display: flex; flex-direction: column; gap: 24px">
+<section class="sb-card">
+<div class="sb-card-h"><h2 class="sb-h2">Bot info</h2></div>
+<div class="sb-card-b" style="padding-top: 4px; padding-bottom: 4px">
+<div class="sb-kv"><span>Provider</span><span class="sb-mono">anthropic</span></div>
+<div class="sb-kv"><span>Model</span><span class="sb-mono">claude-opus-5-5</span></div>
+<div class="sb-kv"><span>Uptime</span><span>2 hours, 42 minutes</span></div>
+</div>
+</section>
+<section class="sb-card">
+<div class="sb-card-h"><h2 class="sb-h2">Services</h2><a href="Config.html" class="sb-small">Change in Config</a></div>
+<div class="sb-row"><span style="flex: 1">Signal</span><span class="sb-status is-on"><span class="sb-dot sb-dot-on"></span>Enabled</span></div>
+<div class="sb-row"><span style="flex: 1">Telegram</span><span class="sb-status is-off"><span class="sb-dot"></span>Disabled</span></div>
+<div class="sb-row"><span style="flex: 1">WhatsApp</span><span class="sb-status is-off"><span class="sb-dot"></span>Disabled</span></div>
+<div class="sb-row"><span style="flex: 1">Email</span><span class="sb-status is-warn"><span class="sb-dot sb-dot-half"></span>Inbound only</span></div>
+<div class="sb-row"><span style="flex: 1">Coder</span><span class="sb-status is-on"><span class="sb-dot sb-dot-on"></span>Enabled</span></div>
+<div class="sb-row"><span style="flex: 1">Embeddings</span><span class="sb-status is-on"><span class="sb-dot sb-dot-on"></span>Enabled</span></div>
+</section>
+<section class="sb-card">
+<div class="sb-card-h"><h2 class="sb-h2">Message statistics</h2><span class="sb-small sb-muted">All time</span></div>
+<div class="sb-card-b" style="padding-top: 4px; padding-bottom: 4px">
+<div class="sb-kv"><span>From the web chat</span><span class="sb-mono sb-num">312</span></div>
+<div class="sb-kv"><span>From the owner</span><span class="sb-mono sb-num">1,946</span></div>
+<div class="sb-kv"><span>From other people</span><span class="sb-mono sb-num">588</span></div>
+<div class="sb-kv"><span>From agents</span><span class="sb-mono sb-num">1,204</span></div>
+<div class="sb-kv" style="font-weight: 600"><span style="color: var(--text)">Total</span><span class="sb-mono sb-num">4,050</span></div>
+</div>
+</section>
+</div>
+
+</div>
+</main>
+</div>
+</body>
+</html>

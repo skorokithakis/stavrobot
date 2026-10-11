@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Allowlist states (desktop)</title>
+<link rel="stylesheet" href="./sb.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>body{margin:0}</style>
+</head>
+<body>
+<div class="sb sb-dark" style="width: 1440px; min-height: 1100px; padding: 56px 64px; display: flex; flex-direction: column; gap: 40px">
+<div><span class="sb-label">Allowlist</span><h1 class="sb-h1" style="margin-top: 4px">States and errors</h1><p class="sb-muted" style="margin: 6px 0 0; font-size: 14px">The identifier field changes with the chosen service. Every add or remove saves at once; there is no Save button.</p></div>
+
+<section>
+<h2 class="sb-h2" style="margin-bottom: 16px">Identifier field for each service (with its validation error)</h2>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px">
+<div class="sb-card sb-card-b" style="display: flex; flex-direction: column; gap: 12px"><span class="sb-badge" style="align-self: flex-start">signal</span><div class="sb-field"><label for="s1">Phone number</label><input id="s1" class="sb-input sb-mono is-invalid" value="07700 900123" aria-invalid="true" aria-describedby="s1e"><span id="s1e" class="sb-field-error"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>Use the international format, like +44 7700 900000.</span></div><span class="sb-hint">Placeholder: +44 7700 900000</span></div>
+<div class="sb-card sb-card-b" style="display: flex; flex-direction: column; gap: 12px"><span class="sb-badge" style="align-self: flex-start">whatsapp</span><div class="sb-field"><label for="s2">Phone number</label><input id="s2" class="sb-input sb-mono is-invalid" value="+44 77" aria-invalid="true" aria-describedby="s2e"><span id="s2e" class="sb-field-error"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>Use the international format, like +44 7700 900000.</span></div><span class="sb-hint">Placeholder: +44 7700 900000</span></div>
+<div class="sb-card sb-card-b" style="display: flex; flex-direction: column; gap: 12px"><span class="sb-badge" style="align-self: flex-start">telegram</span><div class="sb-field"><label for="s3">Username or user ID</label><input id="s3" class="sb-input sb-mono is-invalid" value="casey example" aria-invalid="true" aria-describedby="s3e"><span id="s3e" class="sb-field-error"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>Use a username that starts with @, or a numeric user ID.</span></div><span class="sb-hint">Placeholder: @username or 123456789</span></div>
+<div class="sb-card sb-card-b" style="display: flex; flex-direction: column; gap: 12px"><span class="sb-badge" style="align-self: flex-start">email</span><div class="sb-field"><label for="s4">Email address</label><input id="s4" class="sb-input sb-mono is-invalid" value="sam@example" aria-invalid="true" aria-describedby="s4e"><span id="s4e" class="sb-field-error"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>Enter a full email address, like name@example.com.</span></div><span class="sb-hint">Placeholder: name@example.com</span></div>
+</div>
+<p class="sb-hint" style="margin: 12px 0 0">All services accept * (anyone on that service). Validate when the user leaves the field or presses Add, not while they type. The error goes away when the value is valid.</p>
+</section>
+
+<section style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; align-items: start">
+<div class="sb-card">
+<div class="sb-card-h"><h2 class="sb-h2">Already on the allowlist</h2></div>
+<div class="sb-card-b" style="display: flex; flex-direction: column; gap: 14px">
+<div class="sb-field"><label for="d1">Phone number</label><input id="d1" class="sb-input sb-mono is-invalid" value="+44 7700 900123" aria-invalid="true" aria-describedby="d1e"><span id="d1e" class="sb-field-error"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>Already on the allowlist.</span></div>
+<span class="sb-hint">Field error from the server, after Add.</span>
+</div>
+</div>
+<div class="sb-card">
+<div class="sb-card-h"><h2 class="sb-h2">Cannot remove the owner</h2></div>
+<div class="sb-card-b" style="display: flex; flex-direction: column; gap: 14px">
+<span class="sb-feedback is-error" role="alert"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>Cannot remove the owner.</span>
+<span class="sb-hint">The UI hides remove on owner rows, so this shows only if the server refuses. It appears in the page header feedback spot.</span>
+</div>
+</div>
+<div class="sb-card">
+<div class="sb-card-h"><h2 class="sb-h2">Save feedback</h2></div>
+<div class="sb-card-b" style="display: flex; flex-direction: column; gap: 14px">
+<span class="sb-feedback" role="status"><span class="sb-spinner"></span>Adding +44 7700 900789...</span>
+<span class="sb-feedback is-success" role="status"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>Added +44 7700 900789 to Signal</span>
+<span class="sb-feedback" role="status"><span class="sb-spinner"></span>Removing alex@example.com...</span>
+<span class="sb-feedback is-success" role="status"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>Removed alex@example.com</span>
+<span class="sb-feedback is-error" role="alert"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>Could not save: the server did not answer. Try again.</span>
+<span class="sb-hint">Shown on the right of the page header. A new row is selected (tinted) for 4 seconds after it is added.</span>
+</div>
+</div>
+</section>
+
+<section style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start">
+<div>
+<h2 class="sb-h2" style="margin-bottom: 12px">Empty list</h2>
+<div class="sb-card" style="overflow: hidden">
+<table class="sb-table">
+<thead><tr><th class="is-upper" style="width: 110px">Service</th><th class="is-upper">Identifier</th><th class="is-upper">Note</th><th style="width: 60px"><span class="sb-sr">Actions</span></th></tr></thead>
+<tbody><tr><td><span class="sb-badge">signal</span></td><td><span style="display: inline-flex; align-items: center; gap: 8px"><span class="sb-mono">+44 7700 900000</span><span class="sb-badge"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>owner</span></span></td><td class="sb-muted">Always allowed</td><td class="is-action"><span class="sb-faint" style="display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Locked"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg></span></td></tr></tbody>
+</table>
+<div class="sb-state" style="border-top: 1px solid var(--border)"><div class="sb-state-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6z"></path></svg></div><strong>Only you can message the bot</strong><p>Add a phone number, a username or an email address to let someone else in.</p></div>
+</div>
+</div>
+<div>
+<h2 class="sb-h2" style="margin-bottom: 12px">Filter with no entries</h2>
+<div class="sb-card" style="overflow: hidden">
+<div class="sb-card-h"><div class="sb-seg" role="group" aria-label="Filter by service"><button type="button">All <span class="sb-seg-count">9</span></button><button type="button">Signal <span class="sb-seg-count">5</span></button><button type="button">Email <span class="sb-seg-count">3</span></button><button type="button">Telegram <span class="sb-seg-count">1</span></button><button class="is-active" type="button">WhatsApp <span class="sb-seg-count">0</span></button></div></div>
+<div class="sb-state"><div class="sb-state-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg></div><strong>No WhatsApp entries</strong><p>Nobody on WhatsApp can message the bot.</p><button class="sb-btn sb-btn-secondary sb-btn-sm" type="button">Show all services</button></div>
+</div>
+</div>
+</section>
+</div>
+</body>
+</html>

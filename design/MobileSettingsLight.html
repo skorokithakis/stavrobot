@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings (mobile, light)</title>
+<link rel="stylesheet" href="./sb.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>body{margin:0}</style>
+</head>
+<body>
+<div class="sb sb-light sb-m" style="width: 390px; height: 844px">
+<header class="sb-m-header"><h1>Settings</h1></header>
+<div class="sb-m-content" style="gap: 20px">
+<section style="display: flex; flex-direction: column; gap: 8px" aria-labelledby="g1">
+<span class="sb-label" id="g1" style="padding-left: 4px">Bot</span>
+<div class="sb-card" style="overflow: hidden">
+<a class="sb-list-item" href="MobileConfig.html" style="min-height: 60px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: var(--muted)"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"></path><circle cx="15" cy="6" r="2"></circle><circle cx="9" cy="12" r="2"></circle><circle cx="17" cy="18" r="2"></circle></svg><span class="sb-list-item-main"><span>Config</span><span class="sb-list-item-sub">Edit config.toml. Saving restarts the bot.</span></span><svg class="sb-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></a>
+</div>
+</section>
+<section style="display: flex; flex-direction: column; gap: 8px" aria-labelledby="g2">
+<span class="sb-label" id="g2" style="padding-left: 4px">Connections</span>
+<div class="sb-card" style="overflow: hidden">
+<a class="sb-list-item" href="MobileLogin.html" style="min-height: 60px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: var(--muted)"><circle cx="8" cy="15" r="4"></circle><path d="m11 12 9-9M16 7l3 3M14 9l2 2"></path></svg><span class="sb-list-item-main"><span>Provider login</span><span class="sb-list-item-sub"><span class="sb-status is-on" style="font-size: 12px"><span class="sb-dot sb-dot-on"></span>Connected to anthropic</span></span></span><svg class="sb-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></a>
+<a class="sb-list-item" href="MobileCaptcha.html" style="min-height: 60px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: var(--muted)"><path d="M4 5h16v11H9l-5 4z"></path><path d="m9 10 2 2 4-4"></path></svg><span class="sb-list-item-main"><span>Signal captcha</span><span class="sb-list-item-sub">Use when Signal asks for a captcha</span></span><svg class="sb-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></a>
+</div>
+</section>
+<section style="display: flex; flex-direction: column; gap: 8px" aria-labelledby="g3">
+<span class="sb-label" id="g3" style="padding-left: 4px">About</span>
+<div class="sb-card" style="padding: 2px 16px">
+<div class="sb-kv"><span>Provider</span><span class="sb-mono">anthropic</span></div>
+<div class="sb-kv"><span>Model</span><span class="sb-mono">claude-opus-5-5</span></div>
+<div class="sb-kv"><span>Uptime</span><span>2 hours, 42 minutes</span></div>
+</div>
+</section>
+<span class="sb-hint">The fifth tab. Less used pages live here, so the tab bar keeps five items.</span>
+</div>
+<nav aria-label="Main" class="sb-tabbar">
+<a class="sb-tab" href="MobileOverview.html"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"></path></svg>Overview</a>
+<a class="sb-tab" href="MobileAllowlist.html"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6z"></path></svg>Allowlist</a>
+<a class="sb-tab" href="MobilePlugins.html"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5"></path></svg>Plugins</a>
+<a class="sb-tab" href="MobileDatabase.html"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"></ellipse><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"></path></svg>Database</a>
+<a class="sb-tab is-active" href="MobileSettings.html" aria-current="page"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"></path></svg>Settings</a>
+</nav>
+</div>
+</body>
+</html>

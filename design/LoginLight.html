@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Provider login (desktop, light)</title>
+<link rel="stylesheet" href="./sb.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>body{margin:0}</style>
+</head>
+<body>
+<div class="sb sb-light" style="width: 1440px; height: 900px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; padding: 40px 16px">
+<div class="sb-brand" style="padding: 0; font-size: 17px"><div class="sb-logo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="12" rx="3"></rect><path d="M12 7V4"></path><circle cx="9" cy="13" r="1" fill="currentColor"></circle><circle cx="15" cy="13" r="1" fill="currentColor"></circle></svg></div>Stavrobot</div>
+<main class="sb-card sb-auth-card" aria-labelledby="lt">
+<div style="padding: 28px 28px 8px">
+<span class="sb-label">Provider login</span>
+<h1 id="lt" style="margin: 4px 0 6px; font-size: 22px; font-weight: 600">Connect to Anthropic</h1>
+<p class="sb-muted" style="margin: 0; font-size: 14px">Stavrobot needs your permission to use your account.</p>
+</div>
+<div style="padding: 20px 28px 28px; display: flex; flex-direction: column; gap: 20px">
+<ol class="sb-steps">
+<li><div style="display: flex; flex-direction: column; gap: 8px"><span>Open this link to log in. It opens in a new tab.</span><a class="sb-btn sb-btn-secondary" href="#" target="_blank" rel="noopener" style="align-self: flex-start">Open the login page<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path></svg></a></div></li>
+<li>Log in and select <strong>Authorize</strong>.</li>
+<li><div style="display: flex; flex-direction: column; gap: 8px; flex: 1"><label for="code" style="font-size: 14px">Paste the full redirect URL or code here</label><input id="code" class="sb-input sb-mono" placeholder="https://console.example.com/oauth/code/callback?code=..."><span class="sb-hint">You see it on the page after you authorize.</span></div></li>
+</ol>
+<button class="sb-btn sb-btn-primary sb-btn-lg sb-btn-block" type="button">Submit</button>
+</div>
+</main>
+<p class="sb-hint" style="margin: 0">Single centered card, max 480 px, no navigation.</p>
+</div>
+</body>
+</html>

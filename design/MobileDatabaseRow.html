@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Row details (mobile)</title>
+<link rel="stylesheet" href="./sb.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>body{margin:0}</style>
+</head>
+<body>
+<div class="sb sb-dark sb-m" style="width: 390px; height: 1200px">
+<header class="sb-m-header has-back"><a class="sb-btn sb-btn-ghost sb-btn-icon sb-btn-lg" href="MobileDatabase.html" aria-label="Back to messages"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg></a><div style="flex: 1; min-width: 0"><div class="sb-label" style="font-size: 11px">messages · row 4049</div><div style="font-weight: 600; font-size: 16px" class="sb-trunc">Message 4049</div></div></header>
+<div style="flex: 1; padding: 4px 16px 32px; background: var(--surface)">
+<div class="sb-pf"><div class="sb-pf-k">id <span class="sb-type">integer</span></div><div class="sb-pf-v sb-mono">4049</div></div>
+<div class="sb-pf"><div class="sb-pf-k">created_at <span class="sb-type">timestamp</span></div><div class="sb-pf-v sb-cell-date">2026-10-11 <span>14:02:31 UTC</span></div></div>
+<div class="sb-pf"><div class="sb-pf-k">source <span class="sb-type">text</span></div><div class="sb-pf-v sb-mono">web</div></div>
+<div class="sb-pf"><div class="sb-pf-k">sender <span class="sb-type">text</span></div><div class="sb-pf-v sb-mono">stavrobot</div></div>
+<div class="sb-pf"><div class="sb-pf-k">body <span class="sb-type">markdown <button class="sb-copy" type="button" aria-label="Copy body" style="height: 32px; min-width: 32px"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5a1 1 0 0 1 1-1h9"></path></svg></button></span></div><div class="sb-pf-v sb-md" style="background: var(--inset); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px"><h3>Package status</h3><p>Your package <code>LP00123456789CN</code> is <strong>in transit</strong>. It left the sorting centre this morning.</p><ul><li>Origin: Shenzhen</li><li>Destination: London</li></ul><pre><code>track_package(number="LP00123456789CN", carrier="cainiao")</code></pre></div></div>
+<div class="sb-pf"><div class="sb-pf-k">tokens_in <span class="sb-type">integer</span></div><div class="sb-pf-v sb-mono">2,910</div></div>
+<div class="sb-pf"><div class="sb-pf-k">tokens_out <span class="sb-type">integer</span></div><div class="sb-pf-v sb-mono">164</div></div>
+<div class="sb-pf"><div class="sb-pf-k">metadata <span class="sb-type">json</span></div><div class="sb-value-block">{
+  "tool_calls": ["track_package"],
+  "latency_ms": 2140,
+  "model": "claude-opus-5-5"
+}</div></div>
+<div class="sb-pf"><div class="sb-pf-k">error <span class="sb-type">text, nullable</span></div><div class="sb-pf-v"><span class="sb-cell-null">NULL</span></div></div>
+<div style="display: flex; gap: 8px; padding-top: 16px">
+<button class="sb-btn sb-btn-secondary sb-btn-lg" type="button" style="flex: 1"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 6-6 6 6 6"></path></svg>Newer row</button>
+<button class="sb-btn sb-btn-secondary sb-btn-lg" type="button" style="flex: 1">Older row<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg></button>
+</div>
+</div>
+</div>
+</body>
+</html>

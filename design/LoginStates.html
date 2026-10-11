@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Provider login states</title>
+<link rel="stylesheet" href="./sb.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>body{margin:0}</style>
+</head>
+<body>
+<div class="sb sb-dark" style="width: 1440px; min-height: 1400px; padding: 56px 64px; display: flex; flex-direction: column; gap: 32px">
+<div><span class="sb-label">Provider login</span><h1 class="sb-h1" style="margin-top: 4px">The seven states of the card</h1><p class="sb-muted" style="margin: 6px 0 0; font-size: 14px">The card keeps its header; only the body changes. Some flows use states 2 and 4 (shown together on the main board). Other flows use state 3 only. Server messages (state 5) appear as a banner in the card.</p></div>
+
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; align-items: start">
+
+<div style="display: flex; flex-direction: column; gap: 8px"><span class="sb-badge sb-badge-solid" style="align-self: flex-start">1 Connecting</span>
+<div class="sb-card"><div style="padding: 24px 24px 0"><span class="sb-label">Provider login</span><h2 style="margin: 4px 0 0; font-size: 20px; font-weight: 600">Connect to Anthropic</h2></div>
+<div class="sb-state" style="padding: 40px 24px" aria-busy="true"><span class="sb-spinner sb-spinner-lg" style="color: var(--muted)"></span><strong>Connecting...</strong><p>Asking the provider for a login link.</p></div></div></div>
+
+<div style="display: flex; flex-direction: column; gap: 8px"><span class="sb-badge sb-badge-solid" style="align-self: flex-start">2 Open this link</span>
+<div class="sb-card"><div style="padding: 24px 24px 0"><span class="sb-label">Provider login</span><h2 style="margin: 4px 0 0; font-size: 20px; font-weight: 600">Connect to Anthropic</h2></div>
+<div style="padding: 20px 24px 24px"><ol class="sb-steps">
+<li><div style="display: flex; flex-direction: column; gap: 8px"><span>Open this link to log in.</span><a class="sb-btn sb-btn-primary" href="#" target="_blank" rel="noopener" style="align-self: flex-start">Open the login page<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path></svg></a></div></li>
+<li>Log in and select <strong>Authorize</strong>.</li>
+<li>Come back to this page.</li>
+</ol></div></div></div>
+
+<div style="display: flex; flex-direction: column; gap: 8px"><span class="sb-badge sb-badge-solid" style="align-self: flex-start">3 Device code</span>
+<div class="sb-card"><div style="padding: 24px 24px 0"><span class="sb-label">Provider login</span><h2 style="margin: 4px 0 0; font-size: 20px; font-weight: 600">Connect to Anthropic</h2></div>
+<div style="padding: 20px 24px 24px; display: flex; flex-direction: column; gap: 16px"><ol class="sb-steps">
+<li><span>Go to <a href="#" target="_blank" rel="noopener">console.example.com/device</a> <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align: -1px"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path></svg></span></li>
+<li>Type this code:</li>
+</ol>
+<div class="sb-code-display"><code>WDJB-MJHT</code><button class="sb-btn sb-btn-secondary sb-btn-icon" type="button" aria-label="Copy code"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5a1 1 0 0 1 1-1h9"></path></svg></button></div>
+<span class="sb-feedback" role="status"><span class="sb-spinner"></span>Waiting for you to approve. The code expires in 14:32.</span></div></div></div>
+
+<div style="display: flex; flex-direction: column; gap: 8px"><span class="sb-badge sb-badge-solid" style="align-self: flex-start">4 Paste the redirect URL</span>
+<div class="sb-card"><div style="padding: 24px 24px 0"><span class="sb-label">Provider login</span><h2 style="margin: 4px 0 0; font-size: 20px; font-weight: 600">Connect to Anthropic</h2></div>
+<div style="padding: 20px 24px 24px; display: flex; flex-direction: column; gap: 14px">
+<div class="sb-field"><label for="p4">Paste the full redirect URL or code here</label><input id="p4" class="sb-input sb-mono is-invalid" value="abc" aria-invalid="true" aria-describedby="p4e"><span id="p4e" class="sb-field-error"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>This does not look like a URL or a code. Copy the whole address from the browser.</span></div>
+<button class="sb-btn sb-btn-primary sb-btn-block" type="button">Submit</button>
+<span class="sb-hint">Empty or short input shows this field error on Submit.</span></div></div></div>
+
+<div style="display: flex; flex-direction: column; gap: 8px"><span class="sb-badge sb-badge-solid" style="align-self: flex-start">5 Progress from the server</span>
+<div class="sb-card"><div style="padding: 24px 24px 0"><span class="sb-label">Provider login</span><h2 style="margin: 4px 0 0; font-size: 20px; font-weight: 600">Connect to Anthropic</h2></div>
+<div style="padding: 20px 24px 24px; display: flex; flex-direction: column; gap: 10px">
+<div class="sb-banner is-progress" role="status"><span class="sb-spinner"></span>Exchanging the code for a token...</div>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13px">
+<li class="sb-status is-on" style="font-size: 13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>Code received</li>
+<li class="sb-status is-on" style="font-size: 13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>Provider answered</li>
+<li class="sb-status is-off" style="font-size: 13px"><span class="sb-spinner" style="width: 12px; height: 12px"></span>Saving the token</li>
+</ul>
+<span class="sb-hint">Each server message is added to this list. The newest line is the banner text.</span></div></div></div>
+
+<div style="display: flex; flex-direction: column; gap: 8px"><span class="sb-badge sb-badge-solid" style="align-self: flex-start">6 Success</span>
+<div class="sb-card"><div style="padding: 24px 24px 0"><span class="sb-label">Provider login</span><h2 style="margin: 4px 0 0; font-size: 20px; font-weight: 600">Connect to Anthropic</h2></div>
+<div class="sb-state" style="padding: 32px 24px"><div class="sb-state-icon" style="background: var(--success-bg); color: var(--success)"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg></div><strong>Connected</strong><p>Stavrobot can now use your Anthropic account.</p><a class="sb-btn sb-btn-primary" href="Overview.html">Go to Overview</a></div></div></div>
+
+<div style="display: flex; flex-direction: column; gap: 8px"><span class="sb-badge sb-badge-solid" style="align-self: flex-start">7 Failure</span>
+<div class="sb-card"><div style="padding: 24px 24px 0"><span class="sb-label">Provider login</span><h2 style="margin: 4px 0 0; font-size: 20px; font-weight: 600">Connect to Anthropic</h2></div>
+<div class="sb-state is-error" style="padding: 32px 24px"><div class="sb-state-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg></div><strong>Login failed</strong><p class="sb-mono" style="font-size: 12.5px; background: var(--inset); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; max-width: 100%">invalid_grant: the code has expired</p><button class="sb-btn sb-btn-primary" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"></path></svg>Start again</button></div></div></div>
+
+</div>
+</div>
+</body>
+</html>

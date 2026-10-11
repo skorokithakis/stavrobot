@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Add to allowlist (mobile)</title>
+<link rel="stylesheet" href="./sb.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>body{margin:0}</style>
+</head>
+<body>
+<div class="sb sb-dark sb-m" style="width: 390px; height: 844px">
+<header class="sb-m-header"><h1>Allowlist</h1></header>
+<div class="sb-m-content" aria-hidden="true">
+<div class="sb-card" style="overflow: hidden">
+<div class="sb-row" style="min-height: 64px"><span class="sb-badge">signal</span><span class="sb-mono">+44 7700 900000</span></div>
+<div class="sb-row" style="min-height: 64px"><span class="sb-badge">email</span><span class="sb-mono">owner@example.com</span></div>
+<div class="sb-row" style="min-height: 64px"><span class="sb-badge">signal</span><span class="sb-mono">+44 7700 900123</span></div>
+</div>
+</div>
+<div class="sb-scrim"></div>
+<div class="sb-sheet" role="dialog" aria-labelledby="addt" style="gap: 16px">
+<div class="sb-sheet-grip"></div>
+<div style="display: flex; align-items: center; justify-content: space-between"><h2 id="addt" class="sb-h2">Add an entry</h2><button class="sb-btn sb-btn-ghost sb-btn-icon sb-btn-lg" type="button" aria-label="Close" style="margin-right: -8px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg></button></div>
+<div class="sb-field"><span class="sb-field-label" id="svcl">Service</span>
+<div class="sb-seg" role="group" aria-labelledby="svcl" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr))"><button class="is-active" type="button" style="height: 38px; justify-content: center">Signal</button><button type="button" style="height: 38px; justify-content: center">Email</button><button type="button" style="height: 38px; justify-content: center; padding: 0 6px">Telegram</button><button type="button" style="height: 38px; justify-content: center; padding: 0 6px">WhatsApp</button></div></div>
+<div class="sb-field"><label for="id1">Phone number</label><input id="id1" class="sb-input sb-input-lg sb-mono is-invalid is-focus" inputmode="tel" value="07700 900123" aria-invalid="true" aria-describedby="id1e"><span id="id1e" class="sb-field-error"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>Use the international format, like +44 7700 900000.</span></div>
+<div class="sb-field"><label for="nt1">Note <span class="sb-opt">(optional)</span></label><input id="nt1" class="sb-input sb-input-lg" placeholder="For example: work phone"></div>
+<button class="sb-btn sb-btn-primary sb-btn-lg sb-btn-block" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add to allowlist</button>
+<span class="sb-hint" style="text-align: center">The sheet closes after a successful add, and the page shows "Added ...".</span>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Stavrobot components, part 1</title>
+<link rel="stylesheet" href="./sb.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>body{margin:0}</style>
+</head>
+<body>
+<div class="sb sb-light" style="width: 1440px; min-height: 3200px; padding: 72px 80px 96px; display: flex; flex-direction: column; gap: 64px">
+
+<header style="display: flex; align-items: flex-end; justify-content: space-between; gap: 40px; padding-bottom: 40px; border-bottom: 1px solid var(--border)">
+<div style="display: flex; align-items: center; gap: 20px">
+<div class="sb-logo" style="width: 64px; height: 64px; border-radius: 16px"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="12" rx="3"></rect><path d="M12 7V4"></path><circle cx="9" cy="13" r="1.2" fill="currentColor"></circle><circle cx="15" cy="13" r="1.2" fill="currentColor"></circle></svg></div>
+<div>
+<h1 style="margin: 0; font-size: 44px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1">Stavrobot components</h1>
+<p style="margin: 6px 0 0; color: var(--muted); font-size: 17px">Part 1: tokens, type, buttons, form controls, state, navigation</p>
+</div>
+</div>
+<div style="max-width: 520px; font-size: 14px; color: var(--muted); display: flex; flex-direction: column; gap: 8px">
+<p style="margin: 0">All styles are in <span class="sb-mono" style="color: var(--text)">sb.css</span>. Put <span class="sb-mono" style="color: var(--text)">class="sb"</span> on the body. Light is the default; dark applies when the OS asks for it (<span class="sb-mono">prefers-color-scheme: dark</span>). There is no theme switch.</p>
+<p style="margin: 0">Never write a hex value in a page. Use a token. This board shows the light theme; the board on its right shows the same parts in dark.</p>
+</div>
+</header>
+
+<section>
+<p style="margin: 0 0 4px; font-size: 13px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-text)">01 Colour tokens</p>
+<p style="margin: 0 0 20px; color: var(--muted); font-size: 14px; max-width: 760px">Amber stays the identity in both themes. Amber is only a fill (buttons, logo, checked boxes). For amber text, links and icons, use <span class="sb-mono">accent-text</span>: it is darker in light mode, so it meets AA. Ratios are against <span class="sb-mono">surface</span> unless the row says other.</p>
+<div class="sb-card" style="overflow: hidden">
+<table class="sb-table">
+<thead><tr><th class="is-upper" style="width: 200px">Token</th><th class="is-upper" style="width: 210px">Light</th><th class="is-upper" style="width: 210px">Dark</th><th class="is-upper">Use</th><th class="is-upper" style="width: 170px">Contrast L / D</th></tr></thead>
+<tbody>
+<tr><td class="sb-mono">bg</td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #f5f5f4; border: 1px solid #8c878155"></span><span class="sb-mono">#F5F5F4</span></span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #121212; border: 1px solid #8c878155"></span><span class="sb-mono">#121212</span></span></td><td class="sb-muted">Page background</td><td></td></tr>
+<tr><td class="sb-mono">surface</td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #ffffff; border: 1px solid #8c878155"></span><span class="sb-mono">#FFFFFF</span></span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #1b1b1b; border: 1px solid #8c878155"></span><span class="sb-mono">#1B1B1B</span></span></td><td class="sb-muted">Cards, panels, inputs</td><td></td></tr>
+<tr><td class="sb-mono">surface-2</td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #f0efed; border: 1px solid #8c878155"></span><span class="sb-mono">#F0EFED</span></span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #242424; border: 1px solid #8c878155"></span><span class="sb-mono">#242424</span></span></td><td class="sb-muted">Hover, active nav item, segmented track</td><td></td></tr>
+<tr><td class="sb-mono">border</td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #e0ded9; border: 1px solid #8c878155"></span><span class="sb-mono">#E0DED9</span></span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #2e2e2e; border: 1px solid #8c878155"></span><span class="sb-mono">#2E2E2E</span></span></td><td class="sb-muted">Card edges, dividers</td><td></td></tr>
+<tr><td class="sb-mono">border-strong</td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #c4c0b9; border: 1px solid #8c878155"></span><span class="sb-mono">#C4C0B9</span></span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #454545; border: 1px solid #8c878155"></span><span class="sb-mono">#454545</span></span></td><td class="sb-muted">Badges, secondary buttons, sort arrows (decoration)</td><td></td></tr>
+<tr><td class="sb-mono">control-border <span class="sb-badge sb-badge-accent" style="margin-left: 4px">new</span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #8c8781; border: 1px solid #8c878155"></span><span class="sb-mono">#8C8781</span></span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #6e6e6e; border: 1px solid #8c878155"></span><span class="sb-mono">#6E6E6E</span></span></td><td class="sb-muted">Input, checkbox and toggle edges</td><td class="sb-mono">3.6 / 3.4 (non-text)</td></tr>
+<tr><td class="sb-mono">text</td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #1c1917; border: 1px solid #8c878155"></span><span class="sb-mono">#1C1917</span></span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #ededed; border: 1px solid #8c878155"></span><span class="sb-mono">#EDEDED</span></span></td><td class="sb-muted">Body text, values</td><td class="sb-mono">17.5 / 14.7</td></tr>
+<tr><td class="sb-mono">muted</td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #57534e; border: 1px solid #8c878155"></span><span class="sb-mono">#57534E</span></span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #a3a3a3; border: 1px solid #8c878155"></span><span class="sb-mono">#A3A3A3</span></span></td><td class="sb-muted">Labels, secondary text</td><td class="sb-mono">7.6 / 6.8</td></tr>
+<tr><td class="sb-mono">faint</td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #6b6b6b; border: 1px solid #8c878155"></span><span class="sb-mono">#6B6B6B</span></span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #8a8a8a; border: 1px solid #8c878155"></span><span class="sb-mono">#8A8A8A</span></span></td><td class="sb-muted">Placeholders, NULL, inactive tab labels</td><td class="sb-mono">5.3 / 5.0</td></tr>
+<tr><td class="sb-mono">accent</td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #f5a524; border: 1px solid #8c878155"></span><span class="sb-mono">#F5A524</span></span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #f5a524; border: 1px solid #8c878155"></span><span class="sb-mono">#F5A524</span></span></td><td class="sb-muted">Fill only: primary button, logo, checked box, selected edge</td><td></td></tr>
+<tr><td class="sb-mono">accent-hover</td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #e8960c; border: 1px solid #8c878155"></span><span class="sb-mono">#E8960C</span></span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #ffb84d; border: 1px solid #8c878155"></span><span class="sb-mono">#FFB84D</span></span></td><td class="sb-muted">Primary button hover</td><td class="sb-mono">on-accent 7.8 / 10.8</td></tr>
+<tr><td class="sb-mono">on-accent</td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #1a1200; border: 1px solid #8c878155"></span><span class="sb-mono">#1A1200</span></span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #1a1200; border: 1px solid #8c878155"></span><span class="sb-mono">#1A1200</span></span></td><td class="sb-muted">Text and icons on amber</td><td class="sb-mono">9.1 on accent</td></tr>
+<tr><td class="sb-mono">accent-text <span class="sb-badge sb-badge-accent" style="margin-left: 4px">new</span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #9a4a00; border: 1px solid #8c878155"></span><span class="sb-mono">#9A4A00</span></span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #f5a524; border: 1px solid #8c878155"></span><span class="sb-mono">#F5A524</span></span></td><td class="sb-muted">Links, active nav icon, "Selected tools", warning icon</td><td class="sb-mono">6.3 / 8.4</td></tr>
+<tr><td class="sb-mono">success</td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #166534; border: 1px solid #8c878155"></span><span class="sb-mono">#166534</span></span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #4ade80; border: 1px solid #8c878155"></span><span class="sb-mono">#4ADE80</span></span></td><td class="sb-muted">Enabled, saved, all tools</td><td class="sb-mono">7.1 / 9.9</td></tr>
+<tr><td class="sb-mono">danger</td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #b91c1c; border: 1px solid #8c878155"></span><span class="sb-mono">#B91C1C</span></span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #f87171; border: 1px solid #8c878155"></span><span class="sb-mono">#F87171</span></span></td><td class="sb-muted">Errors, delete, no tools</td><td class="sb-mono">6.5 / 6.2</td></tr>
+<tr><td class="sb-mono">info <span class="sb-badge sb-badge-accent" style="margin-left: 4px">new</span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #1d4ed8; border: 1px solid #8c878155"></span><span class="sb-mono">#1D4ED8</span></span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #7cb3ff; border: 1px solid #8c878155"></span><span class="sb-mono">#7CB3FF</span></span></td><td class="sb-muted">Info callout icon</td><td class="sb-mono">6.7 / 8.0</td></tr>
+<tr><td class="sb-mono">focus-ring <span class="sb-badge sb-badge-accent" style="margin-left: 4px">new</span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #9a4a00; border: 1px solid #8c878155"></span><span class="sb-mono">#9A4A00</span></span></td><td><span style="display: inline-flex; align-items: center; gap: 10px"><span style="width: 24px; height: 24px; border-radius: 6px; background: #f5a524; border: 1px solid #8c878155"></span><span class="sb-mono">#F5A524</span></span></td><td class="sb-muted">2 px outline, 2 px offset, on every focusable part</td><td class="sb-mono">5.7 / 9.2 on bg</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section>
+<p style="margin: 0 0 4px; font-size: 13px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-text)">02 Tokens that replace hard-coded colours</p>
+<p style="margin: 0 0 20px; color: var(--muted); font-size: 14px; max-width: 760px">Every colour from round 1 that was written as a hex value is now a token. Text on each tint below passes AA (for example success on success-bg is 6.4:1 in light).</p>
+<div class="sb-card" style="overflow: hidden">
+<table class="sb-table">
+<thead><tr><th class="is-upper" style="width: 240px">Token</th><th class="is-upper" style="width: 260px">Light</th><th class="is-upper" style="width: 260px">Dark</th><th class="is-upper">Was / use</th></tr></thead>
+<tbody>
+<tr><td class="sb-mono">danger-border</td><td class="sb-mono">#E9A8A8</td><td class="sb-mono">#6B3030</td><td class="sb-muted">Was #5C2B2B. Danger button edge</td></tr>
+<tr><td class="sb-mono">danger-hover-bg</td><td class="sb-mono">#FDF0F0</td><td class="sb-mono">rgba(248,113,113,.10)</td><td class="sb-muted">Danger and icon-danger button hover</td></tr>
+<tr><td class="sb-mono">danger-fill / on-danger-fill</td><td class="sb-mono">#B91C1C / #FFFFFF</td><td class="sb-mono">#F87171 / #2A0A0A</td><td class="sb-muted">Filled red Delete in confirm (6.5 / 6.6)</td></tr>
+<tr><td class="sb-mono">badge-accent-bg / -border</td><td class="sb-mono">#FDF1DC / #E9C07A</td><td class="sb-mono">rgba(245,165,36,.08) / .40</td><td class="sb-muted">Accent badge ("editable")</td></tr>
+<tr><td class="sb-mono">focus-halo</td><td class="sb-mono">rgba(154,74,0,.18)</td><td class="sb-mono">rgba(245,165,36,.22)</td><td class="sb-muted">Soft 3 px ring added to focused inputs</td></tr>
+<tr><td class="sb-mono">sidebar</td><td class="sb-mono">#FAFAF9</td><td class="sb-mono">#161616</td><td class="sb-muted">Was #161616. Desktop side menu</td></tr>
+<tr><td class="sb-mono">tabbar</td><td class="sb-mono">#FFFFFF</td><td class="sb-mono">#171717</td><td class="sb-muted">Was #171717. Mobile tab bar</td></tr>
+<tr><td class="sb-mono">row-hover / row-selected</td><td class="sb-mono">#FAFAF9 / #FDF4E3</td><td class="sb-mono">rgba(255,255,255,.03) / rgba(245,165,36,.08)</td><td class="sb-muted">Table rows and list items</td></tr>
+<tr><td class="sb-mono">success-bg</td><td class="sb-mono">#E8F5EC</td><td class="sb-mono">rgba(74,222,128,.10)</td><td class="sb-muted">"Online" pill, success banner</td></tr>
+<tr><td class="sb-mono">danger-bg / warning-bg / info-bg</td><td class="sb-mono">#FDEEEE / #FDF3E1 / #EBF1FE</td><td class="sb-mono">tints at .10</td><td class="sb-muted">Error banner, callouts, danger zone</td></tr>
+<tr><td class="sb-mono">shadow</td><td class="sb-mono">0 12px 32px rgba(28,25,23,.14)</td><td class="sb-mono">0 16px 40px rgba(0,0,0,.55)</td><td class="sb-muted">Confirm popover, bottom sheet</td></tr>
+<tr><td class="sb-mono">scrim</td><td class="sb-mono">rgba(28,25,23,.35)</td><td class="sb-mono">rgba(0,0,0,.6)</td><td class="sb-muted">Behind sheets and dialogs</td></tr>
+<tr><td class="sb-mono">inset</td><td class="sb-mono">#F7F6F4</td><td class="sb-mono">#121212</td><td class="sb-muted">Code areas, value blocks, code display</td></tr>
+<tr><td class="sb-mono">bubble-user / bubble-bot</td><td class="sb-mono">#FDF1DC / #F3F2F0</td><td class="sb-mono">#2B2416 / #242424</td><td class="sb-muted">Chat messages (text 15.6 / 13.1)</td></tr>
+<tr><td class="sb-mono">dot-off</td><td class="sb-mono">#A8A29E</td><td class="sb-mono">#5A5A5A</td><td class="sb-muted">Disabled dot (always with a word)</td></tr>
+<tr><td class="sb-mono">skeleton / skeleton-hi</td><td class="sb-mono">#ECEBE8 / #F7F6F4</td><td class="sb-mono">#242424 / #2E2E2E</td><td class="sb-muted">Loading bars</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 64px">
+<div>
+<p style="margin: 0 0 4px; font-size: 13px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-text)">03 Type</p>
+<p style="margin: 0 0 20px; color: var(--muted); font-size: 14px">IBM Plex Sans for words. IBM Plex Mono for data: IDs, identifiers, model names, tool names, table values, code.</p>
+<div style="display: flex; flex-direction: column">
+<div class="sb-kv"><span class="sb-h1" style="color: var(--text)">Page title</span><span class="sb-mono">sb-h1 · 28/600</span></div>
+<div class="sb-kv"><span class="sb-h2" style="color: var(--text)">Card title</span><span class="sb-mono">sb-h2 · 17/600</span></div>
+<div class="sb-kv"><span class="sb-h3" style="color: var(--text)">Sub-title</span><span class="sb-mono">sb-h3 · 15/600</span></div>
+<div class="sb-kv"><span style="color: var(--text)">Body text for descriptions and messages.</span><span class="sb-mono">body · 15/400</span></div>
+<div class="sb-kv"><span class="sb-small" style="color: var(--text)">Small text for hints and meta.</span><span class="sb-mono">sb-small · 13/400</span></div>
+<div class="sb-kv"><span class="sb-label">Section label</span><span class="sb-mono">sb-label · 12/500 caps</span></div>
+<div class="sb-kv"><span class="sb-mono" style="color: var(--text)">claude-opus-5-5 · track_package</span><span class="sb-mono">sb-mono · 13/400</span></div>
+</div>
+</div>
+<div>
+<p style="margin: 0 0 4px; font-size: 13px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-text)">04 Spacing, shape and size</p>
+<p style="margin: 0 0 20px; color: var(--muted); font-size: 14px">4 px grid: 4, 8, 12, 16, 20, 24, 32, 48. Cards 12 px radius, controls 8 px, badges round.</p>
+<div style="display: flex; flex-direction: column">
+<div class="sb-kv"><span>Desktop control height</span><span class="sb-mono">40 px (sb-btn, sb-input)</span></div>
+<div class="sb-kv"><span>Small control</span><span class="sb-mono">32 px (sb-btn-sm), dense tables only</span></div>
+<div class="sb-kv"><span>Mobile control height</span><span class="sb-mono">44 px (sb-btn-lg, sb-input-lg)</span></div>
+<div class="sb-kv"><span>Table row, list item</span><span class="sb-mono">min 44 px / 52 px</span></div>
+<div class="sb-kv"><span>Page padding</span><span class="sb-mono">40 × 48 desktop, 16 mobile</span></div>
+<div class="sb-kv"><span>Gap between cards</span><span class="sb-mono">24 desktop, 16 mobile</span></div>
+<div class="sb-kv"><span>Breakpoint</span><span class="sb-mono">≤ 720 px: mobile layout</span></div>
+</div>
+</div>
+</section>
+
+<section>
+<p style="margin: 0 0 4px; font-size: 13px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-text)">05 Buttons, all states</p>
+<p style="margin: 0 0 20px; color: var(--muted); font-size: 14px; max-width: 760px">One primary button for each card or form. A loading button keeps its width, shows a spinner and a verb with "...", and cannot be clicked (<span class="sb-mono">.is-loading</span> plus <span class="sb-mono">aria-busy="true"</span>). Focus is a 2 px focus-ring outline.</p>
+<div class="sb-card" style="padding: 8px 24px 24px">
+<div style="display: grid; grid-template-columns: 180px repeat(5, minmax(0, 1fr)); gap: 16px 20px; align-items: center">
+<span></span><span class="sb-label">Default</span><span class="sb-label">Hover</span><span class="sb-label">Keyboard focus</span><span class="sb-label">Loading</span><span class="sb-label">Disabled</span>
+<span class="sb-mono sb-muted">sb-btn-primary</span>
+<div><button class="sb-btn sb-btn-primary" type="button">Install</button></div>
+<div><button class="sb-btn sb-btn-primary is-hover" type="button">Install</button></div>
+<div><button class="sb-btn sb-btn-primary is-focus" type="button">Install</button></div>
+<div><button class="sb-btn sb-btn-primary is-loading" type="button" aria-busy="true"><span class="sb-spinner"></span>Installing...</button></div>
+<div><button class="sb-btn sb-btn-primary" type="button" disabled>Install</button></div>
+<span class="sb-mono sb-muted">sb-btn-secondary</span>
+<div><button class="sb-btn sb-btn-secondary" type="button">Cancel</button></div>
+<div><button class="sb-btn sb-btn-secondary is-hover" type="button">Cancel</button></div>
+<div><button class="sb-btn sb-btn-secondary is-focus" type="button">Cancel</button></div>
+<div><button class="sb-btn sb-btn-secondary is-loading" type="button" aria-busy="true"><span class="sb-spinner"></span>Updating...</button></div>
+<div><button class="sb-btn sb-btn-secondary" type="button" disabled>Cancel</button></div>
+<span class="sb-mono sb-muted">sb-btn-ghost</span>
+<div><button class="sb-btn sb-btn-ghost" type="button">View schema</button></div>
+<div><button class="sb-btn sb-btn-ghost is-hover" type="button">View schema</button></div>
+<div><button class="sb-btn sb-btn-ghost is-focus" type="button">View schema</button></div>
+<div><button class="sb-btn sb-btn-ghost is-loading" type="button" aria-busy="true"><span class="sb-spinner"></span>Loading...</button></div>
+<div><button class="sb-btn sb-btn-ghost" type="button" disabled>View schema</button></div>
+<span class="sb-mono sb-muted">sb-btn-danger</span>
+<div><button class="sb-btn sb-btn-danger" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg>Delete</button></div>
+<div><button class="sb-btn sb-btn-danger is-hover" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg>Delete</button></div>
+<div><button class="sb-btn sb-btn-danger is-focus" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg>Delete</button></div>
+<div><button class="sb-btn sb-btn-danger is-loading" type="button" aria-busy="true"><span class="sb-spinner"></span>Deleting...</button></div>
+<div><button class="sb-btn sb-btn-danger" type="button" disabled>Delete</button></div>
+<span class="sb-mono sb-muted">sb-btn-danger-fill</span>
+<div><button class="sb-btn sb-btn-danger-fill" type="button">Delete</button></div>
+<div><button class="sb-btn sb-btn-danger-fill is-hover" type="button">Delete</button></div>
+<div><button class="sb-btn sb-btn-danger-fill is-focus" type="button">Delete</button></div>
+<div><button class="sb-btn sb-btn-danger-fill is-loading" type="button" aria-busy="true"><span class="sb-spinner"></span>Deleting...</button></div>
+<div><button class="sb-btn sb-btn-danger-fill" type="button" disabled>Delete</button></div>
+<span class="sb-mono sb-muted">sb-btn-icon + sb-btn-icon-danger</span>
+<div style="display: flex; gap: 8px"><button class="sb-btn sb-btn-secondary sb-btn-icon" type="button" aria-label="Refresh"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"></path></svg></button><button class="sb-btn sb-btn-icon sb-btn-sm sb-btn-icon-danger" type="button" aria-label="Remove"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg></button></div>
+<div style="display: flex; gap: 8px"><button class="sb-btn sb-btn-secondary sb-btn-icon is-hover" type="button" aria-label="Refresh"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"></path></svg></button><button class="sb-btn sb-btn-icon sb-btn-sm sb-btn-icon-danger is-hover" type="button" aria-label="Remove"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg></button></div>
+<div style="display: flex; gap: 8px"><button class="sb-btn sb-btn-secondary sb-btn-icon is-focus" type="button" aria-label="Refresh"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"></path></svg></button><button class="sb-btn sb-btn-icon sb-btn-sm sb-btn-icon-danger is-focus" type="button" aria-label="Remove"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg></button></div>
+<div style="display: flex; gap: 8px"><button class="sb-btn sb-btn-secondary sb-btn-icon is-loading" type="button" aria-label="Refreshing" aria-busy="true"><span class="sb-spinner"></span></button><button class="sb-btn sb-btn-icon sb-btn-sm sb-btn-icon-danger is-loading" type="button" aria-label="Removing" aria-busy="true"><span class="sb-spinner"></span></button></div>
+<div style="display: flex; gap: 8px"><button class="sb-btn sb-btn-secondary sb-btn-icon" type="button" aria-label="Refresh" disabled><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"></path></svg></button><button class="sb-btn sb-btn-icon sb-btn-sm sb-btn-icon-danger" type="button" aria-label="Remove" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg></button></div>
+</div>
+<div style="display: flex; gap: 24px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); align-items: center; flex-wrap: wrap">
+<span class="sb-label">Sizes</span>
+<button class="sb-btn sb-btn-primary sb-btn-sm" type="button">Small 32</button>
+<button class="sb-btn sb-btn-primary" type="button">Default 40</button>
+<button class="sb-btn sb-btn-primary sb-btn-lg" type="button">Mobile 44</button>
+<span class="sb-label" style="margin-left: 24px">Link</span>
+<a href="#">Open the captcha site</a>
+<a href="#" class="is-focus">Focused link</a>
+</div>
+</div>
+</section>
+
+<section>
+<p style="margin: 0 0 4px; font-size: 13px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-text)">06 Inputs, all states</p>
+<p style="margin: 0 0 20px; color: var(--muted); font-size: 14px; max-width: 760px">Every input has a visible label. Field errors put a danger border on the input and a message under it, which tells the user how to fix it. Link the message with <span class="sb-mono">aria-describedby</span> and set <span class="sb-mono">aria-invalid="true"</span>.</p>
+<div class="sb-card" style="padding: 24px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px 32px">
+<div class="sb-field"><label for="i1">Default</label><input id="i1" class="sb-input" placeholder="Placeholder text"></div>
+<div class="sb-field"><label for="i2">Focus</label><input id="i2" class="sb-input is-focus" value="+44 7700 900"></div>
+<div class="sb-field"><label for="i3">Filled</label><input id="i3" class="sb-input sb-mono" value="+44 7700 900123"></div>
+<div class="sb-field"><label for="i4">Phone number <span class="sb-req">Required</span></label><input id="i4" class="sb-input sb-mono is-invalid" value="07700900123" aria-invalid="true" aria-describedby="i4e"><span id="i4e" class="sb-field-error"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>Use the international format, like +44 7700 900000.</span></div>
+<div class="sb-field"><label for="i5">Invalid and focused</label><input id="i5" class="sb-input sb-mono is-invalid is-focus" value="+44 77" aria-invalid="true"><span class="sb-field-error"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>The number is too short.</span></div>
+<div class="sb-field"><label for="i6">Disabled</label><input id="i6" class="sb-input" value="Loading..." disabled><span class="sb-hint">Hint text sits here when there is no error.</span></div>
+<div class="sb-field"><label for="i7">Select</label><div class="sb-select-wrap"><select id="i7" class="sb-input"><option>All tools</option><option>Selected tools</option><option>No tools</option></select><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></div></div>
+<div class="sb-field"><label for="i8">Search with icon</label><div class="sb-search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><input id="i8" class="sb-input" type="search" placeholder="Search identifiers and notes"></div></div>
+<div class="sb-field"><label for="i9">Search, focused</label><div class="sb-search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><input id="i9" class="sb-input is-focus" type="search" value="7700"></div></div>
+<div class="sb-field"><label for="i10">Note <span class="sb-opt">(optional)</span></label><textarea id="i10" class="sb-input sb-textarea" placeholder="For example: work phone"></textarea></div>
+<div class="sb-field"><span class="sb-field-label">API key <span class="sb-req">Required</span></span>
+<div class="sb-secret"><span class="sb-status is-on" style="font-size: 13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>Set</span><span class="sb-dots">••••••••••</span><button class="sb-btn sb-btn-ghost sb-btn-sm" type="button">Replace</button></div>
+<span class="sb-hint">Secret, value set. The saved value is never sent back to the page.</span></div>
+<div class="sb-field"><label for="i12">API key <span class="sb-req">Required</span></label><input id="i12" class="sb-input sb-mono" type="password" placeholder="Not set: paste the key from 17track.net"><span class="sb-hint">Secret, not set (or after "Replace"). Cancel goes back to "Set".</span></div>
+</div>
+</section>
+
+<section style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 32px">
+<div>
+<p style="margin: 0 0 4px; font-size: 13px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-text)">07 Checkbox and checkbox list</p>
+<p style="margin: 0 0 20px; color: var(--muted); font-size: 14px">Use a real <span class="sb-mono">input type="checkbox"</span> with <span class="sb-mono">.sb-checkbox</span>. The list has a header with "Select all" (indeterminate when some are on) and a count.</p>
+<div class="sb-card" style="padding: 20px; display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; gap: 24px; flex-wrap: wrap">
+<label class="sb-check"><input class="sb-checkbox" type="checkbox">Off</label>
+<label class="sb-check"><input class="sb-checkbox" type="checkbox" checked>On</label>
+<label class="sb-check"><input class="sb-checkbox is-focus" type="checkbox" checked>Focus</label>
+<label class="sb-check sb-muted"><input class="sb-checkbox" type="checkbox" disabled>Disabled</label>
+<label class="sb-check sb-muted"><input class="sb-checkbox" type="checkbox" checked disabled>Disabled on</label>
+</div>
+<div class="sb-checklist">
+<div class="sb-checklist-h"><label class="sb-check" style="font-weight: 500"><input class="sb-checkbox" type="checkbox" checked>Select all</label><span class="sb-muted">2 of 3 tools</span></div>
+<label class="sb-check"><input class="sb-checkbox" type="checkbox" checked><span><span class="sb-mono" style="display: block; color: var(--text)">search_events</span><span class="sb-muted sb-small">Find calendar events in a date range.</span></span></label>
+<label class="sb-check"><input class="sb-checkbox" type="checkbox" checked><span><span class="sb-mono" style="display: block; color: var(--text)">list_calendars</span><span class="sb-muted sb-small">List the calendars on the server.</span></span></label>
+<label class="sb-check"><input class="sb-checkbox" type="checkbox"><span><span class="sb-mono" style="display: block; color: var(--text)">create_event</span><span class="sb-muted sb-small">Add an event to a calendar.</span></span></label>
+</div>
+</div>
+</div>
+<div>
+<p style="margin: 0 0 4px; font-size: 13px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-text)">08 Toggle and segmented control</p>
+<p style="margin: 0 0 20px; color: var(--muted); font-size: 14px">Toggle: <span class="sb-mono">button role="switch"</span>. Segmented control: a filter group, with an optional count on each button.</p>
+<div class="sb-card" style="padding: 20px; display: flex; flex-direction: column; gap: 24px">
+<div style="display: flex; gap: 32px; align-items: center; flex-wrap: wrap">
+<span style="display: flex; align-items: center; gap: 10px"><button class="sb-toggle" type="button" role="switch" aria-checked="true" aria-label="On"><span></span></button>On</span>
+<span style="display: flex; align-items: center; gap: 10px"><button class="sb-toggle" type="button" role="switch" aria-checked="false" aria-label="Off"><span></span></button>Off</span>
+<span style="display: flex; align-items: center; gap: 10px"><button class="sb-toggle is-focus" type="button" role="switch" aria-checked="true" aria-label="Focus"><span></span></button>Focus</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 12px">
+<div class="sb-seg" role="group" aria-label="Service"><button class="is-active" type="button">All <span class="sb-seg-count">9</span></button><button type="button" class="is-hover">Signal <span class="sb-seg-count">6</span></button><button type="button">Email <span class="sb-seg-count">3</span></button><button type="button">Telegram <span class="sb-seg-count">0</span></button></div>
+<span class="sb-hint">Active · hover (Signal) · default</span>
+<div class="sb-seg" role="group" aria-label="Service"><button type="button">All</button><button type="button" class="is-active is-focus">Signal</button><button type="button">Email</button></div>
+<span class="sb-hint">Keyboard focus on the active button. Arrow keys move between buttons.</span>
+</div>
+</div>
+</div>
+</section>
+
+<section>
+<p style="margin: 0 0 4px; font-size: 13px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-text)">09 Badges and state</p>
+<p style="margin: 0 0 20px; color: var(--muted); font-size: 14px; max-width: 760px">Badges say what a thing is. A dot plus a word says if it works. Never use colour alone.</p>
+<div class="sb-card" style="padding: 24px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px">
+<div style="display: flex; flex-direction: column; gap: 12px"><span class="sb-label">Badges</span>
+<div style="display: flex; gap: 8px; flex-wrap: wrap"><span class="sb-badge">git</span><span class="sb-badge sb-badge-accent">editable</span><span class="sb-badge">signal</span><span class="sb-badge">email</span><span class="sb-badge sb-badge-solid">3 tools</span><span class="sb-badge sb-badge-accent">*</span><span class="sb-badge"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>owner</span></div></div>
+<div style="display: flex; flex-direction: column; gap: 12px"><span class="sb-label">Service state</span>
+<span class="sb-status is-on"><span class="sb-dot sb-dot-on"></span>Enabled</span>
+<span class="sb-status is-off"><span class="sb-dot"></span>Disabled</span>
+<span class="sb-status is-warn"><span class="sb-dot sb-dot-half"></span>Inbound only</span>
+<span class="sb-status is-warn"><span class="sb-dot sb-dot-half" style="transform: scaleX(-1)"></span>Outbound only</span>
+<span class="sb-status is-err"><span class="sb-dot sb-dot-err"></span>Error</span></div>
+<div style="display: flex; flex-direction: column; gap: 12px"><span class="sb-label">Plugin permission</span>
+<span class="sb-status is-on"><span class="sb-dot sb-dot-on"></span>All tools</span>
+<span class="sb-status is-warn"><span class="sb-dot sb-dot-warn"></span>Selected tools (2 of 3)</span>
+<span class="sb-status is-err"><span class="sb-dot sb-dot-err"></span>No tools</span>
+<span class="sb-status is-err"><span class="sb-dot sb-dot-err"></span>Not configured</span>
+<span class="sb-pill" style="align-self: flex-start"><span class="sb-dot sb-dot-on"></span>Online · 2h 42m</span></div>
+</div>
+</section>
+
+<section>
+<p style="margin: 0 0 4px; font-size: 13px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-text)">10 Navigation</p>
+<p style="margin: 0 0 20px; color: var(--muted); font-size: 14px; max-width: 760px">Desktop: side menu. Mobile: five tabs; Settings is the fifth tab and holds Config, provider login, Signal captcha and bot info. Nav items and tabs show focus inside their own box (offset -2 px).</p>
+<div style="display: flex; gap: 40px; align-items: flex-start">
+<nav aria-label="Main (example)" class="sb-sidebar" style="border: 1px solid var(--border); border-radius: 12px; height: 380px">
+<div class="sb-brand"><div class="sb-logo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="12" rx="3"></rect><path d="M12 7V4"></path><circle cx="9" cy="13" r="1" fill="currentColor"></circle><circle cx="15" cy="13" r="1" fill="currentColor"></circle></svg></div>Stavrobot</div>
+<a class="sb-nav-item is-active" href="#" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"></path></svg>Overview</a>
+<a class="sb-nav-item is-hover" href="#"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6z"></path></svg>Allowlist</a>
+<a class="sb-nav-item is-focus" href="#"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5"></path></svg>Plugins</a>
+<a class="sb-nav-item" href="#"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"></ellipse><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"></path></svg>Database</a>
+<a class="sb-nav-item" href="#"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"></path><circle cx="15" cy="6" r="2"></circle><circle cx="9" cy="12" r="2"></circle><circle cx="17" cy="18" r="2"></circle></svg>Config</a>
+<div class="sb-sidebar-foot"><span class="sb-status is-on" style="font-size: 13px"><span class="sb-dot sb-dot-on"></span>Online</span><span class="sb-mono sb-muted" style="font-size: 12px">claude-opus-5-5</span></div>
+</nav>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<span class="sb-hint">Active · hover · keyboard focus · default</span>
+<div style="width: 390px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden">
+<nav aria-label="Main (example)" class="sb-tabbar is-static">
+<a class="sb-tab is-active" href="#" aria-current="page"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"></path></svg>Overview</a>
+<a class="sb-tab is-focus" href="#"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6z"></path></svg>Allowlist</a>
+<a class="sb-tab" href="#"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5"></path></svg>Plugins</a>
+<a class="sb-tab" href="#"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"></ellipse><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"></path></svg>Database</a>
+<a class="sb-tab" href="#"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"></path></svg>Settings</a>
+</nav>
+</div>
+<span class="sb-hint">Tab bar: active (Overview) · keyboard focus (Allowlist) · default</span>
+<div style="width: 390px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden">
+<div class="sb-m-header has-back"><a class="sb-btn sb-btn-ghost sb-btn-icon sb-btn-lg" href="#" aria-label="Back"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg></a><h1>cainiao</h1><span class="sb-badge sb-badge-accent">editable</span></div>
+</div>
+<span class="sb-hint">Mobile header with back action (detail screens)</span>
+</div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 16px">
+<div class="sb-page-h" style="padding-bottom: 20px; border-bottom: 1px solid var(--border)">
+<div><span class="sb-label">Settings</span><h1 class="sb-h1" style="margin-top: 4px">Plugins</h1><p>One short line that says what the page is for.</p></div>
+<button class="sb-btn sb-btn-primary" type="button">Save</button>
+</div>
+<span class="sb-hint">Page header: optional label, title, one line of help, and at most one primary action.</span>
+<div class="sb-card">
+<div class="sb-card-h"><h2 class="sb-h2">Bot info</h2><button class="sb-btn sb-btn-ghost sb-btn-sm" type="button">Details</button></div>
+<div class="sb-card-b" style="padding-top: 4px; padding-bottom: 4px">
+<div class="sb-kv"><span>Provider</span><span class="sb-mono">anthropic</span></div>
+<div class="sb-kv"><span>Model</span><span class="sb-mono">claude-opus-5-5</span></div>
+</div>
+<div class="sb-card-f"><span class="sb-hint">Card footer</span><button class="sb-btn sb-btn-secondary sb-btn-sm" type="button">Action</button></div>
+</div>
+<span class="sb-hint">Card: header (sb-card-h), body (sb-card-b), optional footer (sb-card-f). Key-value rows: sb-kv.</span>
+</div>
+</div>
+</section>
+
+</div>
+</body>
+</html>

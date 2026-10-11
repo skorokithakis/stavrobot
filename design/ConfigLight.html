@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Config (desktop, light)</title>
+<link rel="stylesheet" href="./sb.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>body{margin:0}</style>
+</head>
+<body>
+<div class="sb sb-light sb-app" style="width: 1440px; min-height: 1400px">
+
+<nav aria-label="Main" class="sb-sidebar">
+<div class="sb-brand"><div class="sb-logo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="12" rx="3"></rect><path d="M12 7V4"></path><circle cx="9" cy="13" r="1" fill="currentColor"></circle><circle cx="15" cy="13" r="1" fill="currentColor"></circle></svg></div>Stavrobot</div>
+<a class="sb-nav-item" href="Overview.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"></path></svg>Overview</a>
+<a class="sb-nav-item" href="Allowlist.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6z"></path></svg>Allowlist</a>
+<a class="sb-nav-item" href="Plugins.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5"></path></svg>Plugins</a>
+<a class="sb-nav-item" href="Database.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"></ellipse><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"></path></svg>Database</a>
+<a class="sb-nav-item is-active" href="Config.html" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"></path><circle cx="15" cy="6" r="2"></circle><circle cx="9" cy="12" r="2"></circle><circle cx="17" cy="18" r="2"></circle></svg>Config</a>
+<div class="sb-sidebar-foot"><span class="sb-status is-on" style="font-size: 13px"><span class="sb-dot sb-dot-on"></span>Online</span><span class="sb-mono sb-muted" style="font-size: 12px">claude-opus-5-5</span></div>
+</nav>
+
+<main class="sb-main" style="max-width: 1100px">
+<div class="sb-page-h">
+<div><h1 class="sb-h1">Config</h1><p>The main settings file, <span class="sb-mono">config.toml</span>. Edit it as text, then save.</p></div>
+<button class="sb-btn sb-btn-primary" type="button">Save and restart</button>
+</div>
+
+<div class="sb-callout is-warning"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4 2.5 20h19z"></path><path d="M12 10v4M12 17v.5"></path></svg><div><strong>Saving restarts the bot</strong>The Signal bridge and the coder need a manual restart.</div></div>
+
+<div class="sb-banner is-error" role="alert"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg><span>Invalid TOML at line 12: expected "=" after the key. Nothing was saved.</span><button class="sb-btn sb-btn-secondary sb-btn-sm sb-banner-action" type="button">Go to line 12</button></div>
+
+<div class="sb-field">
+<div style="display: flex; justify-content: space-between; align-items: baseline"><label for="toml">config.toml</label><span class="sb-hint">Unsaved changes</span></div>
+<textarea id="toml" class="sb-input sb-code-editor" spellcheck="false" aria-describedby="toml-h">[bot]
+name = "Stavrobot"
+provider = "anthropic"
+model = "claude-opus-5-5"
+owner_signal = "+44 7700 900000"
+owner_email = "owner@example.com"
+
+[signal]
+enabled = true
+
+[email]
+inbound = true
+outbound false
+imap_host = "imap.example.com"
+smtp_host = "smtp.example.com"
+
+[telegram]
+enabled = false
+
+[coder]
+enabled = true
+workdir = "/data/coder"
+
+[embeddings]
+enabled = true
+model = "text-embedding-small"</textarea>
+<span id="toml-h" class="sb-hint">Plain text. Drag the bottom edge to make it taller.</span>
+</div>
+
+<section style="margin-top: 32px; padding-top: 28px; border-top: 1px dashed var(--border-strong); display: flex; flex-direction: column; gap: 12px">
+<span class="sb-label">Status message states (one at a time, under the callout)</span>
+<div class="sb-banner is-progress" role="status"><span class="sb-spinner"></span>Loading config... (the editor and Save are disabled)</div>
+<div class="sb-banner is-progress" role="status"><span class="sb-spinner"></span>Saving...</div>
+<div class="sb-banner is-success" role="status"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>Saved, restarting... The bot will be back in a few seconds.</div>
+<div class="sb-banner is-error" role="alert"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>Invalid TOML at line 12</div>
+<div class="sb-banner is-error" role="alert"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg><span>Could not load config.toml.</span><button class="sb-btn sb-btn-secondary sb-btn-sm sb-banner-action" type="button">Try again</button></div>
+</section>
+</main>
+</div>
+</body>
+</html>

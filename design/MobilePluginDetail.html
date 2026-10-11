@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Plugin detail (mobile)</title>
+<link rel="stylesheet" href="./sb.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>body{margin:0}</style>
+</head>
+<body>
+<div class="sb sb-dark sb-m" style="width: 390px; height: 1800px">
+<header class="sb-m-header has-back"><a class="sb-btn sb-btn-ghost sb-btn-icon sb-btn-lg" href="MobilePlugins.html" aria-label="Back to plugins"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg></a><h1>caldav</h1><span class="sb-badge" style="margin-right: 8px">git</span></header>
+
+<div class="sb-m-content" style="padding-bottom: 32px; gap: 20px">
+<div style="display: flex; flex-direction: column; gap: 10px">
+<p style="margin: 0">Read and write events on a CalDAV server, for example Nextcloud or Fastmail.</p>
+<span class="sb-small sb-muted sb-mono">github.com/example/stavrobot-caldav · 3f9a2c1</span>
+<button class="sb-btn sb-btn-secondary sb-btn-lg sb-btn-block" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"></path></svg>Update</button>
+<span class="sb-feedback is-success" role="status"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>Updated to commit 3f9a2c1</span>
+</div>
+
+<section class="sb-card" aria-labelledby="st">
+<div class="sb-card-h" style="padding: 12px 16px"><h2 class="sb-h2" id="st">Settings</h2><span class="sb-status is-err" style="font-size: 12px"><span class="sb-dot sb-dot-err"></span>Not configured</span></div>
+<div style="padding: 16px; display: flex; flex-direction: column; gap: 16px">
+<div class="sb-field"><span class="sb-field-label">Server URL <span class="sb-req">Required</span></span><div class="sb-secret" style="height: 44px"><span class="sb-status is-on" style="font-size: 13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>Set</span><span class="sb-dots">••••••</span><button class="sb-btn sb-btn-ghost" type="button" style="height: 36px; padding: 0 12px">Replace</button></div></div>
+<div class="sb-field"><span class="sb-field-label">Username <span class="sb-req">Required</span></span><div class="sb-secret" style="height: 44px"><span class="sb-status is-on" style="font-size: 13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>Set</span><span class="sb-dots">••••••</span><button class="sb-btn sb-btn-ghost" type="button" style="height: 36px; padding: 0 12px">Replace</button></div></div>
+<div class="sb-field"><label for="pw">App password <span class="sb-req">Required</span></label><input id="pw" class="sb-input sb-input-lg sb-mono is-invalid" type="password" placeholder="Not set" aria-invalid="true" aria-describedby="pwe"><span id="pwe" class="sb-field-error"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>Required. The plugin does not work until this is set.</span></div>
+<div class="sb-field"><span class="sb-field-label">Default calendar <span class="sb-opt">(optional)</span></span><div class="sb-secret" style="height: 44px"><span class="sb-status is-off" style="font-size: 13px">Not set</span><span class="sb-dots"></span><button class="sb-btn sb-btn-ghost" type="button" style="height: 36px; padding: 0 12px">Set value</button></div></div>
+<button class="sb-btn sb-btn-primary sb-btn-lg sb-btn-block" type="button">Save settings</button>
+</div>
+</section>
+
+<section class="sb-card" aria-labelledby="pm">
+<div class="sb-card-h" style="padding: 12px 16px"><h2 class="sb-h2" id="pm">Permissions</h2><span class="sb-status is-warn" style="font-size: 12px"><span class="sb-dot sb-dot-warn"></span>3 of 5</span></div>
+<div style="padding: 16px; display: flex; flex-direction: column; gap: 14px">
+<div class="sb-field"><label for="perm">Agents can use</label><div class="sb-select-wrap"><select id="perm" class="sb-input sb-input-lg"><option>All tools</option><option selected>Selected tools</option><option>No tools</option></select><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></div></div>
+<div class="sb-checklist">
+<div class="sb-checklist-h" style="min-height: 48px"><label class="sb-check" style="font-weight: 500"><input class="sb-checkbox" type="checkbox" checked>Select all</label><span class="sb-muted">3 of 5</span></div>
+<label class="sb-check" style="min-height: 56px"><input class="sb-checkbox" type="checkbox" checked><span><span class="sb-mono" style="display: block">list_calendars</span><span class="sb-muted sb-small">List the calendars on the server.</span></span></label>
+<label class="sb-check" style="min-height: 56px"><input class="sb-checkbox" type="checkbox" checked><span><span class="sb-mono" style="display: block">search_events</span><span class="sb-muted sb-small">Find events in a date range.</span></span></label>
+<label class="sb-check" style="min-height: 56px"><input class="sb-checkbox" type="checkbox" checked><span><span class="sb-mono" style="display: block">get_free_busy</span><span class="sb-muted sb-small">Check if a time slot is free.</span></span></label>
+<label class="sb-check" style="min-height: 56px"><input class="sb-checkbox" type="checkbox"><span><span class="sb-mono" style="display: block">create_event</span><span class="sb-muted sb-small">Add an event to a calendar.</span></span></label>
+<label class="sb-check" style="min-height: 56px"><input class="sb-checkbox" type="checkbox"><span><span class="sb-mono" style="display: block">delete_event</span><span class="sb-muted sb-small">Remove an event from a calendar.</span></span></label>
+</div>
+<button class="sb-btn sb-btn-primary sb-btn-lg sb-btn-block" type="button">Save permissions</button>
+<span class="sb-feedback is-error" role="alert"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>Could not save. Try again.</span>
+</div>
+</section>
+
+<div class="sb-danger-zone" style="flex-direction: column; align-items: stretch"><div><strong>Delete this plugin</strong><span>Stavrobot loses its tools and saved settings. You cannot undo this.</span></div><button class="sb-btn sb-btn-danger sb-btn-lg" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg>Delete plugin</button></div>
+<span class="sb-hint">Detail screens hide the tab bar. Delete opens the bottom-sheet confirm (Components, part 2).</span>
+</div>
+</div>
+</body>
+</html>

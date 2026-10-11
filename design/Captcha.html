@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Signal captcha (desktop)</title>
+<link rel="stylesheet" href="./sb.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>body{margin:0}</style>
+</head>
+<body>
+<div class="sb sb-dark" style="width: 1440px; min-height: 1300px; display: flex; flex-direction: column; align-items: center; gap: 24px; padding: 64px 16px">
+<div class="sb-brand" style="padding: 0; font-size: 17px"><div class="sb-logo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="12" rx="3"></rect><path d="M12 7V4"></path><circle cx="9" cy="13" r="1" fill="currentColor"></circle><circle cx="15" cy="13" r="1" fill="currentColor"></circle></svg></div>Stavrobot</div>
+<main class="sb-card sb-auth-card" style="max-width: 560px" aria-labelledby="ct">
+<div style="padding: 28px 28px 8px">
+<span class="sb-label">Signal</span>
+<h1 id="ct" style="margin: 4px 0 6px; font-size: 22px; font-weight: 600">Solve the Signal captcha</h1>
+<p class="sb-muted" style="margin: 0; font-size: 14px">Signal asks for a captcha before it links the bot's number.</p>
+</div>
+<form style="padding: 20px 28px 28px; display: flex; flex-direction: column; gap: 20px" aria-labelledby="ct">
+<ol class="sb-steps">
+<li><div style="display: flex; flex-direction: column; gap: 8px"><span>Open the captcha page. It opens in a new tab.</span><a class="sb-btn sb-btn-secondary" href="#" target="_blank" rel="noopener" style="align-self: flex-start">signalcaptchas.org<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path></svg></a></div></li>
+<li>Solve the captcha.</li>
+<li>When you see "Open Signal", right-click that link and copy its address.</li>
+<li><div style="display: flex; flex-direction: column; gap: 8px; flex: 1"><label for="cap" style="font-size: 14px">Paste the value here</label><textarea id="cap" class="sb-input sb-textarea sb-mono" spellcheck="false" placeholder="signalcaptcha://signal-hcaptcha.5fad97ac-7d06-4e44-b18a-b950b20148ff.registration.P1_eyJ0eXAiOiJKV1Qi..." style="min-height: 120px; font-size: 12.5px"></textarea><span class="sb-hint">It starts with signalcaptcha://</span></div></li>
+</ol>
+<button class="sb-btn sb-btn-primary sb-btn-lg sb-btn-block" type="button">Submit</button>
+</form>
+</main>
+
+<section style="width: 100%; max-width: 1180px; margin-top: 40px; padding-top: 28px; border-top: 1px dashed var(--border-strong); display: flex; flex-direction: column; gap: 16px">
+<span class="sb-label">Status states (shown above the Submit button)</span>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; align-items: start">
+<div class="sb-card sb-card-b" style="display: flex; flex-direction: column; gap: 10px"><strong class="sb-small">Empty input</strong><textarea class="sb-input sb-textarea sb-mono is-invalid" aria-label="Captcha value" aria-invalid="true" style="min-height: 64px"></textarea><span class="sb-field-error"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>Paste the signalcaptcha:// value first.</span></div>
+<div class="sb-card sb-card-b" style="display: flex; flex-direction: column; gap: 10px"><strong class="sb-small">Submitting</strong><button class="sb-btn sb-btn-primary sb-btn-block is-loading" type="button" aria-busy="true"><span class="sb-spinner"></span>Submitting...</button><span class="sb-feedback" role="status">Sending the captcha to Signal</span></div>
+<div class="sb-card sb-card-b" style="display: flex; flex-direction: column; gap: 10px"><strong class="sb-small">Success</strong><div class="sb-banner is-success" role="status"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>Accepted. Signal is linking the number. You can close this page.</div></div>
+<div class="sb-card sb-card-b" style="display: flex; flex-direction: column; gap: 10px"><strong class="sb-small">Failure</strong><div class="sb-banner is-error" role="alert"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>Signal rejected the captcha: it has expired. Solve a new one.</div></div>
+</div>
+</section>
+</div>
+</body>
+</html>

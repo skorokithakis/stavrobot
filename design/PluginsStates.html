@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Plugins states (desktop)</title>
+<link rel="stylesheet" href="./sb.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>body{margin:0}</style>
+</head>
+<body>
+<div class="sb sb-dark" style="width: 1440px; min-height: 1500px; padding: 56px 64px; display: flex; flex-direction: column; gap: 40px">
+<div><span class="sb-label">Plugins</span><h1 class="sb-h1" style="margin-top: 4px">States</h1><p class="sb-muted" style="margin: 6px 0 0; font-size: 14px">Install and update feedback, empty list, a plugin with no tools, a plugin with many tools, and settings when every field is set.</p></div>
+
+<section style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px">
+<div class="sb-card sb-card-b" style="display: flex; flex-direction: column; gap: 22px">
+<h2 class="sb-h2">Install feedback</h2>
+<div style="display: flex; flex-direction: column; gap: 8px"><div class="sb-input-row"><input class="sb-input sb-mono" aria-label="Git repository URL" value="https://github.com/example/stavrobot-weather.git" disabled><button class="sb-btn sb-btn-primary is-loading" type="button" aria-busy="true"><span class="sb-spinner"></span>Installing...</button></div><span class="sb-feedback" role="status"><span class="sb-spinner"></span>Cloning the repository and reading its tools...</span></div>
+<div style="display: flex; flex-direction: column; gap: 8px"><div class="sb-input-row"><input class="sb-input sb-mono is-invalid" aria-label="Git repository URL" aria-invalid="true" value="https://github.com/example/stavrobot-wether.git"><button class="sb-btn sb-btn-primary" type="button">Install</button></div><span class="sb-feedback is-error" role="alert"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>Install failed: repository not found</span></div>
+<div style="display: flex; flex-direction: column; gap: 8px"><div class="sb-input-row"><input class="sb-input sb-mono" aria-label="Git repository URL" placeholder="https://github.com/example/stavrobot-plugin.git"><button class="sb-btn sb-btn-primary" type="button">Install</button></div><span class="sb-feedback is-success" role="status"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>Installed "weather". It has 2 tools. Set its API key to finish.</span></div>
+<span class="sb-hint">After a successful install, the input clears and the new plugin is selected in the list.</span>
+</div>
+<div class="sb-card sb-card-b" style="display: flex; flex-direction: column; gap: 22px">
+<h2 class="sb-h2">Update feedback (git plugins only)</h2>
+<div style="display: flex; align-items: center; gap: 12px"><button class="sb-btn sb-btn-secondary is-loading" type="button" aria-busy="true"><span class="sb-spinner"></span>Updating...</button><span class="sb-feedback" role="status">Pulling the latest commit</span></div>
+<div style="display: flex; align-items: center; gap: 12px"><button class="sb-btn sb-btn-secondary" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"></path></svg>Update</button><span class="sb-feedback is-success" role="status"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>Updated to commit 9b1e4d0</span></div>
+<div style="display: flex; align-items: center; gap: 12px"><button class="sb-btn sb-btn-secondary" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"></path></svg>Update</button><span class="sb-feedback" role="status">Already up to date</span></div>
+<div style="display: flex; align-items: center; gap: 12px"><button class="sb-btn sb-btn-secondary" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"></path></svg>Update</button><span class="sb-feedback is-error" role="alert"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>Update failed: could not reach github.com</span></div>
+<span class="sb-hint">Editable plugins have no Update button.</span>
+</div>
+</section>
+
+<section style="display: grid; grid-template-columns: 320px minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start">
+<div style="display: flex; flex-direction: column; gap: 10px">
+<h2 class="sb-h2">Empty list</h2>
+<div class="sb-card"><div class="sb-card-h"><h2 class="sb-h2">Installed</h2><span class="sb-badge sb-badge-solid">0</span></div><div class="sb-state"><div class="sb-state-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5"></path></svg></div><strong>No plugins installed</strong><p>Paste a git repository URL above to install one.</p></div></div>
+<span class="sb-hint">The detail area shows nothing until a plugin exists.</span>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 10px">
+<h2 class="sb-h2">Plugin with no tools</h2>
+<section class="sb-card">
+<div class="sb-card-h" style="padding: 18px 24px"><div style="display: flex; align-items: center; gap: 10px"><h2 class="sb-h2" style="font-size: 20px">daily-digest</h2><span class="sb-badge sb-badge-accent">editable</span></div></div>
+<div style="padding: 24px; display: flex; flex-direction: column; gap: 24px">
+<p style="margin: 0">Sends a morning summary by email. Runs on a schedule.</p>
+<div style="display: flex; flex-direction: column; gap: 10px"><h3 class="sb-h3">Tools (0)</h3><div class="sb-state" style="padding: 20px; border: 1px dashed var(--border-strong); border-radius: 10px"><strong style="font-size: 14px">This plugin has no tools</strong><p style="font-size: 13px">Agents cannot call it, so it has no permissions.</p></div></div>
+<div style="display: flex; flex-direction: column; gap: 12px"><div style="display: flex; align-items: center; justify-content: space-between"><h3 class="sb-h3">Settings</h3><span class="sb-status is-on sb-small"><span class="sb-dot sb-dot-on"></span>Configured</span></div>
+<div class="sb-field"><span class="sb-field-label">Send to <span class="sb-req">Required</span></span><div class="sb-secret"><span class="sb-status is-on" style="font-size: 13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>Set</span><span class="sb-dots">••••••••</span><button class="sb-btn sb-btn-ghost sb-btn-sm" type="button">Replace</button></div></div>
+<div class="sb-field"><span class="sb-field-label">Time of day <span class="sb-req">Required</span></span><div class="sb-secret"><span class="sb-status is-on" style="font-size: 13px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>Set</span><span class="sb-dots">••••••••</span><button class="sb-btn sb-btn-ghost sb-btn-sm" type="button">Replace</button></div></div>
+<div style="display: flex; align-items: center; gap: 12px"><button class="sb-btn sb-btn-primary" type="button" disabled>Save settings</button><span class="sb-hint">All fields set. Save turns on after a change.</span></div>
+</div>
+</div>
+</section>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 10px">
+<h2 class="sb-h2">Plugin with many tools (18)</h2>
+<section class="sb-card">
+<div class="sb-card-h" style="padding: 18px 24px"><div style="display: flex; align-items: center; gap: 10px"><h2 class="sb-h2" style="font-size: 20px">github</h2><span class="sb-badge">git</span></div><button class="sb-btn sb-btn-secondary sb-btn-sm" type="button">Update</button></div>
+<div style="padding: 24px; display: flex; flex-direction: column; gap: 14px">
+<h3 class="sb-h3">Permissions</h3>
+<div class="sb-select-wrap" style="width: 240px"><select class="sb-input" aria-label="Agents can use"><option selected>Selected tools</option></select><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></div>
+<div class="sb-checklist">
+<div class="sb-checklist-h"><label class="sb-check" style="font-weight: 500"><input class="sb-checkbox" type="checkbox" checked>Select all</label><span class="sb-muted">6 of 18 tools</span></div>
+<div style="padding: 8px; border-bottom: 1px solid var(--border)"><div class="sb-search"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><input class="sb-input sb-btn-sm" type="search" aria-label="Filter tools" placeholder="Filter 18 tools" style="height: 32px"></div></div>
+<div class="sb-checklist-body" style="max-height: 300px">
+<label class="sb-check"><input class="sb-checkbox" type="checkbox" checked><span class="sb-mono">list_repositories</span></label>
+<label class="sb-check"><input class="sb-checkbox" type="checkbox" checked><span class="sb-mono">get_repository</span></label>
+<label class="sb-check"><input class="sb-checkbox" type="checkbox" checked><span class="sb-mono">list_issues</span></label>
+<label class="sb-check"><input class="sb-checkbox" type="checkbox" checked><span class="sb-mono">get_issue</span></label>
+<label class="sb-check"><input class="sb-checkbox" type="checkbox"><span class="sb-mono">create_issue</span></label>
+<label class="sb-check"><input class="sb-checkbox" type="checkbox"><span class="sb-mono">comment_on_issue</span></label>
+<label class="sb-check"><input class="sb-checkbox" type="checkbox" checked><span class="sb-mono">list_pull_requests</span></label>
+<label class="sb-check"><input class="sb-checkbox" type="checkbox" checked><span class="sb-mono">get_pull_request</span></label>
+<label class="sb-check"><input class="sb-checkbox" type="checkbox"><span class="sb-mono">merge_pull_request</span></label>
+</div>
+</div>
+<span class="sb-hint">More than 8 tools: add a filter field; the list scrolls after 300 px. The header count updates as you tick.</span>
+<div style="display: flex; align-items: center; gap: 12px"><button class="sb-btn sb-btn-primary is-loading" type="button" aria-busy="true"><span class="sb-spinner"></span>Saving...</button></div>
+</div>
+</section>
+</div>
+</section>
+</div>
+</body>
+</html>

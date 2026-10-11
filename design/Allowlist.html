@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Allowlist (desktop)</title>
+<link rel="stylesheet" href="./sb.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>body{margin:0}</style>
+</head>
+<body>
+<div class="sb sb-dark sb-app" style="width: 1440px; min-height: 1300px">
+
+<nav aria-label="Main" class="sb-sidebar">
+<div class="sb-brand"><div class="sb-logo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="7" width="16" height="12" rx="3"></rect><path d="M12 7V4"></path><circle cx="9" cy="13" r="1" fill="currentColor"></circle><circle cx="15" cy="13" r="1" fill="currentColor"></circle></svg></div>Stavrobot</div>
+<a class="sb-nav-item" href="Overview.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"></path></svg>Overview</a>
+<a class="sb-nav-item is-active" href="Allowlist.html" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6z"></path></svg>Allowlist</a>
+<a class="sb-nav-item" href="Plugins.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5"></path></svg>Plugins</a>
+<a class="sb-nav-item" href="Database.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="3"></ellipse><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"></path></svg>Database</a>
+<a class="sb-nav-item" href="Config.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"></path><circle cx="15" cy="6" r="2"></circle><circle cx="9" cy="12" r="2"></circle><circle cx="17" cy="18" r="2"></circle></svg>Config</a>
+<div class="sb-sidebar-foot"><span class="sb-status is-on" style="font-size: 13px"><span class="sb-dot sb-dot-on"></span>Online</span><span class="sb-mono sb-muted" style="font-size: 12px">claude-opus-5-5</span></div>
+</nav>
+
+<main class="sb-main">
+<div class="sb-page-h">
+<div><h1 class="sb-h1">Allowlist</h1><p>Only these identities can message Stavrobot. Each change saves at once.</p></div>
+<span class="sb-feedback is-success" role="status"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>Added +44 7700 900789 to Signal</span>
+</div>
+
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; align-items: start">
+<div style="display: flex; flex-direction: column; gap: 24px; min-width: 0">
+
+<section class="sb-card" style="overflow: hidden">
+<div class="sb-card-h" style="flex-wrap: wrap">
+<div class="sb-seg" role="group" aria-label="Filter by service"><button class="is-active" type="button">All <span class="sb-seg-count">9</span></button><button type="button">Signal <span class="sb-seg-count">5</span></button><button type="button">Email <span class="sb-seg-count">3</span></button><button type="button">Telegram <span class="sb-seg-count">1</span></button><button type="button">WhatsApp <span class="sb-seg-count">0</span></button></div>
+<div class="sb-search" style="width: 260px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg><input class="sb-input" type="search" aria-label="Search identifiers and notes" placeholder="Search identifiers and notes"></div>
+</div>
+<div class="sb-table-wrap">
+<table class="sb-table">
+<thead><tr><th class="is-upper" style="width: 120px">Service</th><th class="is-upper" style="width: 320px">Identifier</th><th class="is-upper">Note</th><th style="width: 60px"><span class="sb-sr">Actions</span></th></tr></thead>
+<tbody>
+<tr><td><span class="sb-badge">signal</span></td><td><span style="display: inline-flex; align-items: center; gap: 8px"><span class="sb-mono">+44 7700 900000</span><span class="sb-badge"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>owner</span></span></td><td class="sb-muted">Always allowed. Set in Config.</td><td class="is-action"><span class="sb-faint" title="The owner cannot be removed" style="display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Locked: the owner cannot be removed"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg></span></td></tr>
+<tr><td><span class="sb-badge">email</span></td><td><span style="display: inline-flex; align-items: center; gap: 8px"><span class="sb-mono">owner@example.com</span><span class="sb-badge"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>owner</span></span></td><td class="sb-muted">Always allowed. Set in Config.</td><td class="is-action"><span class="sb-faint" title="The owner cannot be removed" style="display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Locked: the owner cannot be removed"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg></span></td></tr>
+<tr><td><span class="sb-badge">email</span></td><td><span style="display: inline-flex; align-items: center; gap: 8px"><span class="sb-badge sb-badge-accent" style="font-size: 14px">*</span><strong style="font-weight: 500">Anyone on email</strong></span></td><td class="sb-muted">Wildcard: any sender can message the bot</td><td class="is-action"><button class="sb-btn sb-btn-icon sb-btn-sm sb-btn-icon-danger" type="button" aria-label="Remove the email wildcard"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg></button></td></tr>
+<tr class="is-selected"><td><span class="sb-badge">signal</span></td><td><span class="sb-mono">+44 7700 900789</span></td><td class="sb-faint">No note</td><td class="is-action"><button class="sb-btn sb-btn-icon sb-btn-sm sb-btn-icon-danger" type="button" aria-label="Remove +44 7700 900789"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg></button></td></tr>
+<tr><td><span class="sb-badge">signal</span></td><td><span class="sb-mono">+44 7700 900123</span></td><td>Sam, tennis</td><td class="is-action"><button class="sb-btn sb-btn-icon sb-btn-sm sb-btn-icon-danger" type="button" aria-label="Remove +44 7700 900123"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg></button></td></tr>
+<tr><td><span class="sb-badge">signal</span></td><td><span class="sb-mono">+44 7700 900456</span></td><td>Alex, dinner plans</td><td class="is-action"><button class="sb-btn sb-btn-icon sb-btn-sm sb-btn-icon-danger" type="button" aria-label="Remove +44 7700 900456"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg></button></td></tr>
+<tr><td><span class="sb-badge">signal</span></td><td><span class="sb-mono">+30 690 000 0001</span></td><td>Jordan</td><td class="is-action"><button class="sb-btn sb-btn-icon sb-btn-sm sb-btn-icon-danger" type="button" aria-label="Remove +30 690 000 0001"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg></button></td></tr>
+<tr><td><span class="sb-badge">email</span></td><td><span class="sb-mono">reports@example.com</span></td><td>Weekly report sender</td><td class="is-action"><button class="sb-btn sb-btn-icon sb-btn-sm sb-btn-icon-danger" type="button" aria-label="Remove reports@example.com"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg></button></td></tr>
+<tr><td><span class="sb-badge">telegram</span></td><td><span class="sb-mono">@casey_example</span></td><td>Casey</td><td class="is-action"><button class="sb-btn sb-btn-icon sb-btn-sm sb-btn-icon-danger" type="button" aria-label="Remove @casey_example"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg></button></td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section class="sb-card" style="overflow: hidden" aria-labelledby="rej">
+<div class="sb-card-h"><div><h2 class="sb-h2" id="rej">Recently rejected</h2><div class="sb-small sb-muted">People who messaged the bot but are not on the allowlist. Hidden when empty.</div></div><span class="sb-badge sb-badge-solid">3</span></div>
+<div class="sb-table-wrap">
+<table class="sb-table">
+<thead><tr><th class="is-upper" style="width: 120px">Service</th><th class="is-upper" style="width: 260px">Identifier</th><th class="is-upper">Display name</th><th class="is-upper" style="width: 100px; text-align: right">Messages</th><th class="is-upper" style="width: 170px">Last seen</th><th style="width: 140px"><span class="sb-sr">Actions</span></th></tr></thead>
+<tbody>
+<tr><td><span class="sb-badge">signal</span></td><td><span style="display: inline-flex; align-items: center; gap: 2px"><span class="sb-mono">+44 7700 900321</span><button class="sb-copy" type="button" aria-label="Copy +44 7700 900321"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5a1 1 0 0 1 1-1h9"></path></svg></button></span></td><td>Riley Example</td><td class="sb-cell-num">4</td><td class="sb-cell-date">2026-10-11 <span>13:40</span></td><td class="is-action" style="width: 140px"><button class="sb-btn sb-btn-secondary sb-btn-sm" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add</button></td></tr>
+<tr><td><span class="sb-badge">email</span></td><td><span style="display: inline-flex; align-items: center; gap: 2px"><span class="sb-mono">newsletter@example.com</span><button class="sb-copy is-copied" type="button" aria-label="Copied"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>Copied</button></span></td><td class="sb-faint">Not given</td><td class="sb-cell-num">17</td><td class="sb-cell-date">2026-10-10 <span>08:02</span></td><td class="is-action" style="width: 140px"><button class="sb-btn sb-btn-secondary sb-btn-sm is-loading" type="button" aria-busy="true"><span class="sb-spinner"></span>Adding...</button></td></tr>
+<tr><td><span class="sb-badge">telegram</span></td><td><span style="display: inline-flex; align-items: center; gap: 2px"><span class="sb-mono">123456789</span><button class="sb-copy" type="button" aria-label="Copy 123456789"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5a1 1 0 0 1 1-1h9"></path></svg></button></span></td><td>Morgan</td><td class="sb-cell-num">1</td><td class="sb-cell-date">2026-10-08 <span>22:15</span></td><td class="is-action" style="width: 140px"><button class="sb-btn sb-btn-secondary sb-btn-sm" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add</button></td></tr>
+</tbody>
+</table>
+</div>
+</section>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 16px">
+<section class="sb-card">
+<div class="sb-card-h"><h2 class="sb-h2">Add an entry</h2></div>
+<form class="sb-card-b" style="display: flex; flex-direction: column; gap: 16px" aria-label="Add an entry">
+<div class="sb-field"><label for="svc">Service</label>
+<div class="sb-select-wrap"><select id="svc" class="sb-input"><option>Signal</option><option>Email</option><option>Telegram</option><option>WhatsApp</option></select><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></div></div>
+<div class="sb-field"><label for="ident">Phone number</label><input id="ident" class="sb-input sb-mono" placeholder="+44 7700 900000"><span class="sb-hint">International format, or * to allow anyone on Signal.</span></div>
+<div class="sb-field"><label for="note">Note <span class="sb-opt">(optional)</span></label><input id="note" class="sb-input" placeholder="For example: work phone"></div>
+<button class="sb-btn sb-btn-primary" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add to allowlist</button>
+</form>
+</section>
+<div class="sb-callout is-info"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5M12 8v.5"></path></svg><div><strong>Owner identities</strong>They come from Config and are always allowed, so they have no remove button.</div></div>
+</div>
+</div>
+</main>
+</div>
+</body>
+</html>
