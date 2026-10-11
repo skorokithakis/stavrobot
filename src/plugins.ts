@@ -1,7 +1,9 @@
 import http from "http";
+import type { Config } from "./config.js";
 import { log } from "./log.js";
-import { getBaseStyles } from "./theme.js";
 import { internalFetch } from "./internal-fetch.js";
+import { renderPageShell } from "./shell.js";
+import { getUptime } from "./uptime.js";
 
 const PLUGIN_RUNNER_BASE_URL = "http://plugin-runner:3003";
 
@@ -11,6 +13,20 @@ async function readRequestBody(request: http.IncomingMessage): Promise<string> {
     chunks.push(chunk);
   }
   return Buffer.concat(chunks).toString("utf-8");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export interface PluginConfigFieldSchema {
+  description: string;
+  required: boolean;
+}
+
+export interface PluginConfigProxyResponse {
+  schema: Record<string, PluginConfigFieldSchema>;
+  set: Record<string, boolean>;
 }
 
 export async function handlePluginsListRequest(
@@ -36,8 +52,10 @@ export async function handlePluginDetailRequest(
   response.end(body);
 }
 
-// This returns actual config values which may contain secrets. It is only exposed on the
-// authenticated main server (port 3000). It must never be exposed to the LLM agent.
+// The plugin-runner returns config values that may contain secrets. The browser
+// must never receive them: this proxy rewrites the response to report, per key,
+// only whether a value is set, plus the (non-secret) manifest schema. The
+// configure endpoint still accepts values and merges them server-side.
 export async function handlePluginConfigRequest(
   response: http.ServerResponse,
   pluginName: string,
@@ -54,8 +72,46 @@ export async function handlePluginConfigRequest(
   );
   const body = await pluginResponse.text();
   log.debug("[stavrobot] handlePluginConfigRequest: response status", pluginResponse.status);
-  response.writeHead(pluginResponse.status, { "Content-Type": "application/json" });
-  response.end(body);
+
+  if (!pluginResponse.ok) {
+    response.writeHead(pluginResponse.status, { "Content-Type": "application/json" });
+    response.end(body);
+    return;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    response.writeHead(502, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: "Invalid response from plugin-runner." }));
+    return;
+  }
+
+  const schemaSource = isRecord(parsed) && isRecord(parsed["schema"]) ? parsed["schema"] : {};
+  const values = isRecord(parsed) && isRecord(parsed["values"]) ? parsed["values"] : {};
+
+  // Rebuild the schema from known, non-secret fields only. In particular, drop
+  // the manifest's `default`, which may in principle hold a sensitive value.
+  const schema: Record<string, PluginConfigFieldSchema> = {};
+  for (const [key, entry] of Object.entries(schemaSource)) {
+    if (!isRecord(entry)) {
+      continue;
+    }
+    schema[key] = {
+      description: typeof entry["description"] === "string" ? entry["description"] : "",
+      required: entry["required"] === true,
+    };
+  }
+
+  const set: Record<string, boolean> = {};
+  for (const key of Object.keys(schema)) {
+    set[key] = Object.prototype.hasOwnProperty.call(values, key);
+  }
+
+  const result: PluginConfigProxyResponse = { schema, set };
+  response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+  response.end(JSON.stringify(result));
 }
 
 export async function handlePluginInstallRequest(
@@ -126,584 +182,1088 @@ export async function handlePluginConfigureRequest(
   response.end(responseBody);
 }
 
-const PLUGINS_PAGE_HTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Plugins</title>
-  <style>
-    ${getBaseStyles()}
-    body { padding: 24px; }
-    h1 { margin-bottom: 20px; }
-    .install-form {
-      background: var(--color-surface);
-      box-shadow: 0 1px 3px var(--color-shadow), 0 1px 2px var(--color-shadow-secondary);
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 24px;
-      display: flex;
-      gap: 8px;
-      align-items: flex-start;
-      flex-wrap: wrap;
-    }
-    .install-form input[type="text"] {
-      flex: 1;
-      min-width: 0;
-      width: 100%;
-      padding: 8px 10px;
-      border: 1px solid var(--color-border);
-      border-radius: 6px;
-      font-size: 14px;
-      transition: all 0.15s ease;
-      background: var(--color-surface);
-      color: var(--color-text);
-    }
-    .install-form button {
-      padding: 8px 16px;
-      background: var(--color-accent);
-      color: #fff;
-      border: none;
-      border-radius: 6px;
-      font-size: 14px;
-      cursor: pointer;
-      white-space: nowrap;
-      box-shadow: 0 1px 2px var(--color-shadow);
-      transition: all 0.15s ease;
-      width: 100%;
-    }
-    @media (min-width: 481px) {
-      .install-form button { width: auto; }
-    }
-    .install-form button:hover:not(:disabled) { background: var(--color-accent-hover); box-shadow: 0 2px 4px var(--color-shadow); transform: translateY(-1px); }
-    .install-form button:disabled { opacity: 0.5; cursor: default; }
-    #install-message {
-      width: 100%;
-      font-size: 13px;
-      margin-top: 4px;
-    }
-    #install-message.success { color: var(--color-success); }
-    #install-message.error { color: var(--color-error); }
-    #plugin-list {
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-    .plugin-card {
-      background: var(--color-surface);
-      box-shadow: 0 1px 3px var(--color-shadow), 0 1px 2px var(--color-shadow-secondary);
-      border-radius: 8px;
-      padding: 16px;
-      border-left: 4px solid var(--color-success);
-      transition: border-color 0.15s ease;
-    }
-    .plugin-card.perm-all { border-left-color: var(--color-success); }
-    .plugin-card.perm-selected { border-left-color: var(--color-accent); }
-    .plugin-card.perm-disabled { border-left-color: var(--color-error); }
-    .plugin-card.collapsed {
-      cursor: pointer;
-    }
-    .plugin-header {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      cursor: pointer;
-      user-select: none;
-    }
-    .plugin-header .chevron {
-      margin-left: auto;
-      font-size: 10px;
-      color: var(--color-text-muted);
-      transition: transform 0.2s ease;
-      /* Rotated 90deg when expanded so it points down; default points right. */
-      transform: rotate(0deg);
-    }
-    .plugin-card:not(.collapsed) .plugin-header .chevron {
-      transform: rotate(90deg);
-    }
-    .plugin-body {
-      margin-top: 8px;
-    }
-    .plugin-card.collapsed .plugin-body {
-      display: none;
-    }
-    .plugin-name {
-      font-size: 16px;
-      font-weight: 600;
-    }
-    .plugin-badge {
-      font-size: 11px;
-      padding: 2px 7px;
-      border-radius: 10px;
-      background: var(--color-border-light);
-      color: var(--color-text-secondary);
-      border: 1px solid var(--color-border);
-    }
-    .plugin-description {
-      font-size: 14px;
-      color: var(--color-text-secondary);
-      margin-bottom: 12px;
-    }
-    .tools-section {
-      margin-bottom: 12px;
-    }
-    .tools-section h3 {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--color-text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 6px;
-    }
-    .tool-item {
-      font-size: 13px;
-      padding: 4px 0;
-      border-bottom: 1px solid var(--color-border-light);
-    }
-    .tool-item:last-child { border-bottom: none; }
-    .tool-name { font-weight: 500; }
-    .tool-description { color: var(--color-text-secondary); margin-left: 6px; }
-    @media (max-width: 480px) {
-      .tool-description { display: block; margin-left: 0; margin-top: 2px; }
-    }
-    .permissions-section {
-      margin-bottom: 12px;
-    }
-    .permissions-section h3 {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--color-text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 8px;
-    }
-    .permissions-mode {
-      margin-bottom: 8px;
-    }
-    .permissions-mode select {
-      padding: 6px 8px;
-      border: 1px solid var(--color-border);
-      border-radius: 6px;
-      font-size: 13px;
-      background: var(--color-surface);
-      color: var(--color-text);
-      transition: all 0.15s ease;
-    }
-    .permissions-tools {
-      margin-bottom: 8px;
-    }
-    .permissions-tool-item {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 3px 0;
-      font-size: 13px;
-    }
-    .permissions-tool-item input[type="checkbox"] {
-      cursor: pointer;
-    }
-    .config-section {
-      margin-bottom: 12px;
-    }
-    .config-section h3 {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--color-text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 8px;
-    }
-    .config-field {
-      margin-bottom: 8px;
-    }
-    .config-field label {
-      display: block;
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--color-text-secondary);
-      margin-bottom: 3px;
-    }
-    .config-field label .required-mark {
-      color: var(--color-error);
-      margin-left: 2px;
-    }
-    .config-field input[type="text"] {
-      width: 100%;
-      padding: 6px 8px;
-      border: 1px solid var(--color-border);
-      border-radius: 6px;
-      font-size: 13px;
-      transition: all 0.15s ease;
-      background: var(--color-surface);
-      color: var(--color-text);
-    }
-    .actions {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-    @media (max-width: 480px) {
-      .actions { flex-direction: column; }
-      .actions .btn { width: 100%; text-align: center; }
-    }
-    .btn {
-      padding: 6px 14px;
-      border: 1px solid var(--color-border);
-      border-radius: 6px;
-      font-size: 13px;
-      cursor: pointer;
-      background: var(--color-surface);
-      color: var(--color-text);
-      transition: all 0.15s ease;
-    }
-    .btn:hover:not(:disabled) { background: var(--color-bg); }
-    .btn:disabled { opacity: 0.5; cursor: default; }
-    .btn-primary {
-      background: var(--color-accent);
-      color: #fff;
-      border-color: var(--color-accent);
-      box-shadow: 0 1px 2px var(--color-shadow);
-    }
-    .btn-primary:hover:not(:disabled) { background: var(--color-accent-hover); border-color: var(--color-accent-hover); box-shadow: 0 2px 4px var(--color-shadow); transform: translateY(-1px); }
-    .btn-danger {
-      color: var(--color-error);
-      border-color: var(--color-error-border);
-    }
-    .btn-danger:hover:not(:disabled) { background: var(--color-error-bg); }
-    .card-message {
-      font-size: 13px;
-      margin-top: 8px;
-    }
-    .card-message.success { color: var(--color-success); }
-    .card-message.error { color: var(--color-error); }
-    #loading {
-      color: var(--color-text-muted);
-      font-size: 14px;
-      padding: 24px 0;
-    }
-  </style>
-</head>
-<body>
-  <h1>Plugins</h1>
-
-  <div class="install-form">
-    <input type="text" id="install-url" placeholder="Git repository URL..." />
-    <button id="install-btn" onclick="installPlugin()">Install</button>
-    <div id="install-message"></div>
+function buildPluginsContent(): string {
+  return `<div class="sb-page-h" style="align-items: flex-start">
+  <div>
+    <h1 class="sb-h1">Plugins</h1>
+    <p>Plugins give Stavrobot tools. Install one from a git repository.</p>
   </div>
+  <form style="display: flex; flex-direction: column; gap: 8px; width: 560px" data-install-form>
+    <div class="sb-input-row">
+      <label for="install-url" class="sb-sr">Git repository URL</label>
+      <input id="install-url" class="sb-input sb-mono" data-install-url placeholder="https://github.com/example/stavrobot-plugin.git">
+      <button class="sb-btn sb-btn-primary" type="button" data-install-btn>Install</button>
+    </div>
+    <span class="sb-feedback" data-install-feedback role="status"></span>
+  </form>
+</div>
 
-  <div id="plugin-list">
-    <div id="loading">Loading plugins...</div>
+<div class="sb-mobile-only" data-mobile-install>
+  <form style="display: flex; flex-direction: column; gap: 8px" data-install-form>
+    <div class="sb-input-row">
+      <label for="install-url-mobile" class="sb-sr">Git repository URL</label>
+      <input id="install-url-mobile" class="sb-input sb-input-lg sb-mono" data-install-url placeholder="Git repository URL">
+      <button class="sb-btn sb-btn-primary sb-btn-lg" type="button" data-install-btn>Install</button>
+    </div>
+    <span class="sb-feedback" data-install-feedback role="status"></span>
+  </form>
+</div>
+
+<div class="sb-plugins-layout">
+  <section class="sb-card" id="installed-card" style="overflow: hidden" aria-labelledby="installed-heading">
+    <div class="sb-card-h"><h2 class="sb-h2" id="installed-heading">Installed</h2><span class="sb-badge sb-badge-solid" data-count-badge>0</span></div>
+    <div data-list-body><div class="sb-state"><span class="sb-spinner sb-spinner-lg" style="color: var(--muted)"></span><strong>Loading plugins...</strong></div></div>
+  </section>
+  <section class="sb-card sb-detail-card" id="plugin-detail" hidden></section>
+</div>
+
+<div class="sb-confirm-mobile" data-confirm-mobile hidden>
+  <div class="sb-confirm-scrim" data-confirm-cancel></div>
+  <div class="sb-sheet" role="dialog" aria-modal="true" aria-labelledby="confirm-title-mobile">
+    <div class="sb-sheet-grip"></div>
+    <strong id="confirm-title-mobile" style="font-size: 17px" data-confirm-title></strong>
+    <p class="sb-muted" style="margin: 0; font-size: 15px">Stavrobot loses its tools and its saved settings. You cannot undo this.</p>
+    <span class="sb-feedback" data-confirm-feedback role="alert"></span>
+    <button class="sb-btn sb-btn-danger-fill sb-btn-lg sb-btn-block" type="button" data-confirm-delete>Delete plugin</button>
+    <button class="sb-btn sb-btn-secondary sb-btn-lg sb-btn-block" type="button" data-confirm-cancel>Cancel</button>
   </div>
+</div>
 
-  <script>
-    function escapeHtml(text) {
-      const div = document.createElement("div");
-      div.textContent = String(text);
-      return div.innerHTML;
+<script>
+(function () {
+  var LIST_URL = "/api/settings/plugins/list";
+  var CONFIGURE_URL = "/api/settings/plugins/configure";
+  var UPDATE_URL = "/api/settings/plugins/update";
+  var REMOVE_URL = "/api/settings/plugins/remove";
+  var INSTALL_URL = "/api/settings/plugins/install";
+
+  var state = { plugins: [], selectedName: null, mobileShowDetail: false, confirmName: null };
+  var mobileQuery = window.matchMedia("(max-width: 768px)");
+
+  var listBody = document.querySelector("[data-list-body]");
+  var countBadge = document.querySelector("[data-count-badge]");
+  var listCard = document.getElementById("installed-card");
+  var detailCard = document.getElementById("plugin-detail");
+  var confirmMobile = document.querySelector("[data-confirm-mobile]");
+  var shellHeader = document.querySelector(".sb-page > .sb-m-header");
+  var mobileHeading = shellHeader ? shellHeader.querySelector("h1") : null;
+  var originalHeading = mobileHeading ? mobileHeading.textContent : "Plugins";
+
+  var CHECK = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>';
+  var CHECK_SM = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>';
+  var ERROR = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>';
+  var ERROR_SM = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>';
+  var CHEV = '<svg class="sb-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"></path></svg>';
+  var SELECT_CHEV = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>';
+  var SEARCH = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>';
+  var UPDATE = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"></path></svg>';
+  var TRASH = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"></path></svg>';
+  var BACK = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6"></path></svg>';
+  var SPINNER = '<span class="sb-spinner"></span>';
+
+  function esc(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function findPlugin(name) {
+    for (var i = 0; i < state.plugins.length; i++) {
+      if (state.plugins[i].name === name) {
+        return state.plugins[i];
+      }
     }
+    return null;
+  }
 
-    async function loadPlugins() {
-      const listEl = document.getElementById("plugin-list");
-      listEl.innerHTML = '<div id="loading">Loading plugins...</div>';
+  function fetchJson(url, options) {
+    return fetch(url, options).then(function (response) {
+      return response.json().then(function (data) {
+        return { ok: response.ok, status: response.status, data: data };
+      });
+    });
+  }
 
-      const listResponse = await fetch("/api/settings/plugins/list");
-      const listData = await listResponse.json();
-      const plugins = listData.plugins || [];
+  function fetchDetail(name) {
+    return fetchJson("/api/settings/plugins/" + encodeURIComponent(name) + "/detail");
+  }
 
-      if (plugins.length === 0) {
-        listEl.innerHTML = '<div id="loading">No plugins installed.</div>';
+  function fetchConfig(name) {
+    return fetchJson("/api/settings/plugins/" + encodeURIComponent(name) + "/config");
+  }
+
+  function permissionMode(plugin) {
+    var permissions = plugin.permissions || [];
+    if (permissions.length === 1 && permissions[0] === "*") {
+      return "all";
+    }
+    if (permissions.length === 0) {
+      return "none";
+    }
+    return "selected";
+  }
+
+  function selectedToolCount(plugin) {
+    var permissions = plugin.permissions || [];
+    var tools = plugin.tools || [];
+    var count = 0;
+    for (var i = 0; i < tools.length; i++) {
+      if (permissions.indexOf(tools[i].name) !== -1) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  function missingRequired(plugin) {
+    var schema = plugin.schema || {};
+    var set = plugin.set || {};
+    var missing = 0;
+    for (var key in schema) {
+      if (Object.prototype.hasOwnProperty.call(schema, key) && schema[key].required && !set[key]) {
+        missing++;
+      }
+    }
+    return missing;
+  }
+
+  function permissionStatusHtml(plugin) {
+    var mode = permissionMode(plugin);
+    if (mode === "all") {
+      return '<span class="sb-status is-on" style="font-size: 12px"><span class="sb-dot sb-dot-on"></span>All tools</span>';
+    }
+    if (mode === "none") {
+      return '<span class="sb-status is-err" style="font-size: 12px"><span class="sb-dot sb-dot-err"></span>No tools</span>';
+    }
+    return '<span class="sb-status is-warn" style="font-size: 12px"><span class="sb-dot sb-dot-warn"></span>Selected tools (' + selectedToolCount(plugin) + " of " + (plugin.tools || []).length + ")</span>";
+  }
+
+  function renderList() {
+    if (countBadge) {
+      countBadge.textContent = String(state.plugins.length);
+    }
+    if (!listBody) {
+      return;
+    }
+    if (state.plugins.length === 0) {
+      listBody.innerHTML = '<div class="sb-state"><div class="sb-state-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5"></path></svg></div><strong>No plugins installed</strong><p>Paste a git repository URL above to install one.</p></div>';
+      return;
+    }
+    var html = "";
+    for (var i = 0; i < state.plugins.length; i++) {
+      html += listItemHtml(state.plugins[i]);
+    }
+    listBody.innerHTML = html;
+  }
+
+  function listItemHtml(plugin) {
+    var isActive = plugin.name === state.selectedName && (!mobileQuery.matches || state.mobileShowDetail);
+    var badge = plugin.editable
+      ? '<span class="sb-badge sb-badge-accent" style="margin-left: 6px">editable</span>'
+      : '<span class="sb-badge" style="margin-left: 6px">git</span>';
+    var notConfigured = missingRequired(plugin) > 0
+      ? '<span class="sb-status is-err" style="font-size: 12px">Not configured</span>'
+      : "";
+    var subStyle = notConfigured ? ' style="display: flex; gap: 10px"' : "";
+    return '<button class="sb-list-item' + (isActive ? " is-active" : "") + '" type="button" data-name="' + esc(plugin.name) + '"' + (isActive ? ' aria-current="true"' : "") + ">"
+      + '<span class="sb-list-item-main"><span>' + esc(plugin.name) + " " + badge + "</span>"
+      + '<span class="sb-list-item-sub"' + subStyle + ">" + permissionStatusHtml(plugin) + notConfigured + "</span></span>"
+      + CHEV + "</button>";
+  }
+
+  function settingsStatusHtml(plugin) {
+    var missing = missingRequired(plugin);
+    if (missing > 0) {
+      var noun = missing === 1 ? "field is" : "fields are";
+      return '<span class="sb-status is-err sb-small"><span class="sb-dot sb-dot-err"></span>Not configured: ' + missing + " required " + noun + " missing</span>";
+    }
+    return '<span class="sb-status is-on sb-small"><span class="sb-dot sb-dot-on"></span>Configured</span>';
+  }
+
+  function configFieldHtml(key, field, isSet) {
+    var requiredBadge = field.required ? '<span class="sb-req">Required</span>' : '<span class="sb-opt">(optional)</span>';
+    var hint = field.description ? '<span class="sb-hint">' + esc(field.description) + "</span>" : "";
+    var label = esc(key) + " " + requiredBadge;
+    if (isSet) {
+      return '<div class="sb-field" data-field="' + esc(key) + '">'
+        + '<span class="sb-field-label">' + label + "</span>"
+        + '<div class="sb-secret" data-secret><span class="sb-status is-on" style="font-size: 13px">' + CHECK_SM + "Set</span>"
+        + '<span class="sb-dots">\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022</span>'
+        + '<button class="sb-btn sb-btn-ghost sb-btn-sm" type="button" data-replace="' + esc(key) + '">Replace</button></div>'
+        + hint + "</div>";
+    }
+    if (field.required) {
+      var errorId = "cfge-" + esc(key);
+      return '<div class="sb-field" data-field="' + esc(key) + '">'
+        + '<label for="cfg-' + esc(key) + '">' + label + "</label>"
+        + '<input id="cfg-' + esc(key) + '" class="sb-input sb-mono is-invalid" type="text" data-config-input="' + esc(key) + '" placeholder="Not set: ' + esc(field.description) + '" aria-invalid="true" aria-describedby="' + errorId + '">'
+        + '<span id="' + errorId + '" class="sb-field-error">' + ERROR_SM + "Required. The plugin does not work until this is set.</span>"
+        + "</div>";
+    }
+    return '<div class="sb-field" data-field="' + esc(key) + '">'
+      + '<span class="sb-field-label">' + label + "</span>"
+      + '<div class="sb-secret" data-secret><span class="sb-status is-off" style="font-size: 13px">Not set</span>'
+      + '<span class="sb-dots"></span>'
+      + '<button class="sb-btn sb-btn-ghost sb-btn-sm" type="button" data-replace="' + esc(key) + '">Set value</button></div>'
+      + hint + "</div>";
+  }
+
+  function settingsSectionHtml(plugin) {
+    var schema = plugin.schema || {};
+    var set = plugin.set || {};
+    var fields = "";
+    for (var key in schema) {
+      if (Object.prototype.hasOwnProperty.call(schema, key)) {
+        fields += configFieldHtml(key, schema[key], Boolean(set[key]));
+      }
+    }
+    return '<div class="sb-detail-sec" data-settings-section>'
+      + '<div class="sb-sec-h"><h3 class="sb-h3">Settings</h3>' + settingsStatusHtml(plugin) + "</div>"
+      + fields
+      + '<div class="sb-controls-row"><button class="sb-btn sb-btn-primary" type="button" data-save-settings disabled>Save settings</button><span class="sb-hint">Saved values are never shown again. Use Replace to change one.</span></div>'
+      + "</div>";
+  }
+
+  function toolRowsHtml(plugin) {
+    var tools = plugin.tools || [];
+    var permissions = plugin.permissions || [];
+    var mode = permissionMode(plugin);
+    var html = "";
+    for (var i = 0; i < tools.length; i++) {
+      var tool = tools[i];
+      var checked = mode === "all" || (mode === "selected" && permissions.indexOf(tool.name) !== -1);
+      html += '<label class="sb-check" data-tool-row="' + esc(tool.name) + '">'
+        + '<input class="sb-checkbox" type="checkbox" data-tool="' + esc(tool.name) + '"' + (checked ? " checked" : "") + ">"
+        + '<span><span class="sb-mono" style="display: block">' + esc(tool.name) + "</span>";
+      if (tool.description) {
+        html += '<span class="sb-muted sb-small">' + esc(tool.description) + "</span>";
+      }
+      html += "</span></label>";
+    }
+    return html;
+  }
+
+  function permissionsSectionHtml(plugin) {
+    var mode = permissionMode(plugin);
+    var tools = plugin.tools || [];
+    var many = tools.length > 8;
+    var html = '<div class="sb-detail-sec" data-perm-section>'
+      + '<h3 class="sb-h3">Permissions</h3>'
+      + '<div class="sb-field" style="width: 300px"><label for="perm-select">Agents can use</label>'
+      + '<div class="sb-select-wrap"><select class="sb-input" id="perm-select" data-perm-select>'
+      + '<option value="all"' + (mode === "all" ? " selected" : "") + ">All tools</option>"
+      + '<option value="selected"' + (mode === "selected" ? " selected" : "") + ">Selected tools</option>"
+      + '<option value="none"' + (mode === "none" ? " selected" : "") + ">No tools</option>"
+      + "</select>" + SELECT_CHEV + "</div></div>"
+      + '<div class="sb-checklist' + (mode === "selected" ? "" : " is-readonly") + '" data-checklist>'
+      + '<div class="sb-checklist-h" data-checklist-h><label class="sb-check" style="font-weight: 500"><input class="sb-checkbox" type="checkbox" data-select-all>Select all</label><span class="sb-muted" data-count></span></div>';
+    if (many) {
+      html += '<div data-filter-wrap' + (mode === "selected" ? "" : " hidden") + '><div style="padding: 8px; border-bottom: 1px solid var(--border)"><div class="sb-search">' + SEARCH + '<input class="sb-input" type="search" data-filter placeholder="Filter ' + tools.length + ' tools" style="height: 32px" aria-label="Filter tools"></div></div></div>';
+    }
+    html += '<div class="sb-checklist-body" data-checklist-body>' + toolRowsHtml(plugin) + "</div></div>"
+      + '<div class="sb-controls-row"><button class="sb-btn sb-btn-primary" type="button" data-save-permissions>Save permissions</button><span class="sb-feedback" data-perm-feedback role="status"></span></div>'
+      + '<span class="sb-hint">With "All tools" or "No tools", the list shows the tools without checkboxes.</span>'
+      + "</div>";
+    return html;
+  }
+
+  function dangerZoneHtml(plugin) {
+    return '<div class="sb-danger-zone" style="max-width: 720px"><div><strong>Delete this plugin</strong><span>Stavrobot loses its tools and its saved settings. You cannot undo this.</span></div>'
+      + '<div class="sb-confirm"><button class="sb-btn sb-btn-danger" type="button" data-delete>' + TRASH + "Delete</button>"
+      + '<div class="sb-popover sb-confirm-pop" data-confirm-pop role="dialog" aria-modal="true" aria-labelledby="confirm-title-desktop" hidden>'
+      + '<strong id="confirm-title-desktop" data-confirm-title></strong>'
+      + "<p>Stavrobot loses its tools and its saved settings. You cannot undo this.</p>"
+      + '<span class="sb-feedback" data-confirm-feedback role="alert"></span>'
+      + '<div class="sb-actions"><button class="sb-btn sb-btn-secondary sb-btn-sm" type="button" data-confirm-cancel>Cancel</button><button class="sb-btn sb-btn-danger-fill sb-btn-sm" type="button" data-confirm-delete>Delete</button></div>'
+      + "</div></div></div>";
+  }
+
+  function detailHtml(plugin) {
+    var tools = plugin.tools || [];
+    var schema = plugin.schema || {};
+    var badge = plugin.editable
+      ? '<span class="sb-badge sb-badge-accent">editable</span>'
+      : '<span class="sb-badge">git</span>';
+    var updateButton = plugin.editable
+      ? ""
+      : '<button class="sb-btn sb-btn-secondary" type="button" data-update>' + UPDATE + "Update</button>";
+    var html = '<div class="sb-card-h sb-detail-h">'
+      + '<div class="sb-detail-title"><h2 class="sb-h2" style="font-size: 22px">' + esc(plugin.name) + "</h2>" + badge + "</div>"
+      + '<div style="display: flex; align-items: center; gap: 12px"><span class="sb-feedback" data-detail-feedback role="status"></span>' + updateButton + "</div>"
+      + "</div>"
+      + '<div class="sb-detail-b">';
+    if (plugin.description) {
+      html += '<p style="margin: 0; max-width: 720px">' + esc(plugin.description) + "</p>";
+    }
+    if (tools.length === 0) {
+      html += '<div class="sb-detail-sec"><h3 class="sb-h3">Tools (0)</h3><div class="sb-state" style="padding: 20px; border: 1px dashed var(--border-strong); border-radius: 10px"><strong style="font-size: 14px">This plugin has no tools</strong><p style="font-size: 13px">Agents cannot call it, so it has no permissions.</p></div></div>';
+    }
+    if (Object.keys(schema).length > 0) {
+      html += settingsSectionHtml(plugin);
+    }
+    if (tools.length > 0) {
+      html += permissionsSectionHtml(plugin);
+    }
+    html += dangerZoneHtml(plugin) + "</div>";
+    return html;
+  }
+
+  function renderDetail() {
+    var plugin = findPlugin(state.selectedName);
+    if (!plugin) {
+      detailCard.innerHTML = "";
+      return;
+    }
+    detailCard.innerHTML = detailHtml(plugin);
+    updateSettingsDirty();
+    applyPermissionMode();
+  }
+
+  function updateView() {
+    var plugin = findPlugin(state.selectedName);
+    // The tab bar is rendered after this script, so look it up lazily.
+    var tabbar = document.querySelector(".sb-tabbar");
+    var mobileInstall = document.querySelector("[data-mobile-install]");
+    if (mobileQuery.matches) {
+      var showDetail = state.mobileShowDetail && plugin !== null;
+      listCard.hidden = showDetail;
+      detailCard.hidden = !showDetail;
+      if (mobileInstall) {
+        mobileInstall.hidden = showDetail;
+      }
+      if (showDetail) {
+        setMobileHeaderDetail(plugin.name);
+      } else {
+        resetMobileHeader();
+      }
+      if (tabbar) {
+        tabbar.hidden = showDetail;
+      }
+    } else {
+      listCard.hidden = false;
+      detailCard.hidden = plugin === null;
+      if (mobileInstall) {
+        mobileInstall.hidden = false;
+      }
+      resetMobileHeader();
+      if (tabbar) {
+        tabbar.hidden = false;
+      }
+    }
+  }
+
+  function setMobileHeaderDetail(name) {
+    if (!shellHeader) {
+      return;
+    }
+    if (mobileHeading) {
+      mobileHeading.textContent = name;
+    }
+    var logo = shellHeader.querySelector(".sb-logo");
+    if (logo) {
+      logo.hidden = true;
+    }
+    var pill = shellHeader.querySelector(".sb-pill");
+    if (pill) {
+      pill.hidden = true;
+    }
+    var back = shellHeader.querySelector("[data-back]");
+    if (!back) {
+      back = document.createElement("button");
+      back.type = "button";
+      back.className = "sb-btn sb-btn-ghost sb-btn-icon sb-btn-lg";
+      back.setAttribute("data-back", "");
+      back.setAttribute("aria-label", "Back to plugins");
+      back.innerHTML = BACK;
+      shellHeader.insertBefore(back, shellHeader.firstChild);
+    }
+  }
+
+  function resetMobileHeader() {
+    if (!shellHeader) {
+      return;
+    }
+    if (mobileHeading) {
+      mobileHeading.textContent = originalHeading;
+    }
+    var logo = shellHeader.querySelector(".sb-logo");
+    if (logo) {
+      logo.hidden = false;
+    }
+    var pill = shellHeader.querySelector(".sb-pill");
+    if (pill) {
+      pill.hidden = false;
+    }
+    var back = shellHeader.querySelector("[data-back]");
+    if (back) {
+      back.remove();
+    }
+  }
+
+  function selectPlugin(name, focusItem) {
+    state.selectedName = name;
+    if (mobileQuery.matches) {
+      state.mobileShowDetail = true;
+    }
+    renderList();
+    renderDetail();
+    updateView();
+    if (focusItem) {
+      var item = listBody.querySelector('[data-name="' + name + '"]');
+      if (item) {
+        item.focus();
+      }
+    }
+  }
+
+  function backToDetailList() {
+    state.mobileShowDetail = false;
+    renderList();
+    updateView();
+  }
+
+  async function reloadPlugin(name) {
+    var plugin = findPlugin(name);
+    if (!plugin) {
+      return null;
+    }
+    var results = await Promise.all([fetchDetail(name), fetchConfig(name)]);
+    var detail = results[0];
+    var config = results[1];
+    if (detail.ok && detail.data && typeof detail.data === "object") {
+      plugin.description = detail.data.description || plugin.description;
+      plugin.editable = detail.data.editable !== undefined ? detail.data.editable : plugin.editable;
+      plugin.permissions = detail.data.permissions || plugin.permissions;
+      plugin.tools = detail.data.tools || [];
+    }
+    if (config.ok && config.data && typeof config.data === "object") {
+      plugin.schema = config.data.schema || {};
+      plugin.set = config.data.set || {};
+    }
+    return plugin;
+  }
+
+  async function loadAll() {
+    if (listBody) {
+      listBody.innerHTML = '<div class="sb-state"><span class="sb-spinner sb-spinner-lg" style="color: var(--muted)"></span><strong>Loading plugins...</strong></div>';
+    }
+    var listResult = await fetchJson(LIST_URL);
+    if (!listResult.ok) {
+      throw new Error(listResult.data && listResult.data.error ? listResult.data.error : "Could not load the plugin list.");
+    }
+    var list = listResult.data && Array.isArray(listResult.data.plugins) ? listResult.data.plugins : [];
+    var loaded = [];
+    for (var i = 0; i < list.length; i++) {
+      var item = list[i];
+      var results = await Promise.all([fetchDetail(item.name), fetchConfig(item.name)]);
+      var detail = results[0].ok && results[0].data ? results[0].data : {};
+      var config = results[1].ok && results[1].data ? results[1].data : {};
+      loaded.push({
+        name: item.name,
+        description: detail.description || item.description || "",
+        editable: detail.editable !== undefined ? detail.editable : item.editable,
+        permissions: detail.permissions || item.permissions || ["*"],
+        tools: detail.tools || [],
+        schema: config.schema || {},
+        set: config.set || {},
+      });
+    }
+    state.plugins = loaded;
+    if (findPlugin(state.selectedName) === null) {
+      state.selectedName = loaded.length > 0 ? loaded[0].name : null;
+      state.mobileShowDetail = false;
+    }
+  }
+
+  function setInstallFeedback(text, kind) {
+    var elements = document.querySelectorAll("[data-install-feedback]");
+    for (var i = 0; i < elements.length; i++) {
+      elements[i].className = "sb-feedback" + (kind === true ? " is-success" : kind === false ? " is-error" : "");
+      if (kind === true) {
+        elements[i].innerHTML = CHECK + esc(text);
+      } else if (kind === false) {
+        elements[i].innerHTML = ERROR + esc(text);
+      } else {
+        elements[i].innerHTML = text ? SPINNER + esc(text) : "";
+      }
+    }
+  }
+
+  function setInstallBusy(busy) {
+    var buttons = document.querySelectorAll("[data-install-btn]");
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].disabled = busy;
+      if (busy) {
+        buttons[i].classList.add("is-loading");
+        buttons[i].setAttribute("aria-busy", "true");
+        buttons[i].innerHTML = SPINNER + "Installing...";
+      } else {
+        buttons[i].classList.remove("is-loading");
+        buttons[i].setAttribute("aria-busy", "false");
+        buttons[i].innerHTML = "Install";
+      }
+    }
+  }
+
+  function setDetailFeedback(text, kind) {
+    var element = detailCard.querySelector("[data-detail-feedback]");
+    if (!element) {
+      return;
+    }
+    element.className = "sb-feedback" + (kind === true ? " is-success" : kind === false ? " is-error" : "");
+    if (kind === true) {
+      element.innerHTML = CHECK + esc(text);
+    } else if (kind === false) {
+      element.innerHTML = ERROR + esc(text);
+    } else {
+      element.innerHTML = text ? SPINNER + esc(text) : "";
+    }
+  }
+
+  function setPermFeedback(text, kind) {
+    var element = detailCard.querySelector("[data-perm-feedback]");
+    if (!element) {
+      return;
+    }
+    element.className = "sb-feedback" + (kind === true ? " is-success" : kind === false ? " is-error" : "");
+    if (kind === true) {
+      element.innerHTML = CHECK + esc(text);
+    } else if (kind === false) {
+      element.innerHTML = ERROR + esc(text);
+    } else {
+      element.innerHTML = text ? SPINNER + esc(text) : "";
+    }
+  }
+
+  function setButtonBusy(buttons, label) {
+    for (var i = 0; i < buttons.length; i++) {
+      if (buttons[i]._originalHtml === undefined) {
+        buttons[i]._originalHtml = buttons[i].innerHTML;
+      }
+      buttons[i].disabled = true;
+      buttons[i].classList.add("is-loading");
+      buttons[i].innerHTML = SPINNER + label;
+    }
+  }
+
+  function restoreButtons(buttons) {
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].disabled = false;
+      buttons[i].classList.remove("is-loading");
+      if (buttons[i]._originalHtml !== undefined) {
+        buttons[i].innerHTML = buttons[i]._originalHtml;
+      }
+    }
+  }
+
+  async function installPlugin(form) {
+    var urlInput = form.querySelector("[data-install-url]");
+    var url = urlInput ? urlInput.value.trim() : "";
+    if (!url) {
+      if (urlInput) {
+        urlInput.focus();
+      }
+      return;
+    }
+    setInstallBusy(true);
+    setInstallFeedback("", null);
+    try {
+      var result = await fetchJson(INSTALL_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: url }),
+      });
+      if (!result.ok) {
+        setInstallBusy(false);
+        setInstallFeedback(result.data && result.data.error ? result.data.error : "Installation failed.", false);
         return;
       }
-
-      // Fetch detail and config for all plugins in parallel.
-      const pluginData = await Promise.all(plugins.map(async (plugin) => {
-        const [detailResponse, configResponse] = await Promise.all([
-          fetch(\`/api/settings/plugins/\${encodeURIComponent(plugin.name)}/detail\`),
-          fetch(\`/api/settings/plugins/\${encodeURIComponent(plugin.name)}/config\`),
-        ]);
-        const detail = await detailResponse.json();
-        const config = await configResponse.json();
-        return { plugin, detail, config };
-      }));
-
-      listEl.innerHTML = "";
-      for (const { plugin, detail, config } of pluginData) {
-        listEl.appendChild(renderPluginCard(plugin, detail, config));
+      var inputs = document.querySelectorAll("[data-install-url]");
+      for (var i = 0; i < inputs.length; i++) {
+        inputs[i].value = "";
       }
-    }
-
-    function renderPluginCard(plugin, detail, config) {
-      const card = document.createElement("div");
-      card.className = "plugin-card";
-      card.id = "card-" + plugin.name;
-
-      const tools = detail.tools || [];
-      const schema = (config && config.schema) ? config.schema : {};
-      const values = (config && config.values) ? config.values : {};
-      const hasConfig = Object.keys(schema).length > 0;
-
-      const toolsHtml = tools.length > 0
-        ? \`<div class="tools-section">
-            <h3>Tools (\${tools.length})</h3>
-            \${tools.map(tool => \`
-              <div class="tool-item">
-                <span class="tool-name">\${escapeHtml(tool.name)}</span>
-                \${tool.description ? \`<span class="tool-description">— \${escapeHtml(tool.description)}</span>\` : ""}
-              </div>
-            \`).join("")}
-          </div>\`
-        : "";
-
-      const permissions = detail.permissions || [];
-      let permissionsMode;
-      if (permissions.length === 1 && permissions[0] === "*") {
-        permissionsMode = "all";
-      } else if (permissions.length === 0) {
-        permissionsMode = "disabled";
+      await loadAll();
+      var name = result.data && result.data.name ? result.data.name : null;
+      if (name) {
+        selectPlugin(name);
       } else {
-        permissionsMode = "selected";
+        renderList();
+        renderDetail();
+        updateView();
       }
-
-      const permissionsToolsHtml = tools.length > 0
-        ? \`<div class="permissions-tools" id="perm-tools-\${escapeHtml(plugin.name)}" style="\${permissionsMode !== "selected" ? "display:none;" : ""}">
-            \${tools.map(tool => \`
-              <div class="permissions-tool-item">
-                <input type="checkbox"
-                  id="perm-\${escapeHtml(plugin.name)}-\${escapeHtml(tool.name)}"
-                  data-tool="\${escapeHtml(tool.name)}"
-                  \${permissions.includes(tool.name) ? "checked" : ""}
-                />
-                <label for="perm-\${escapeHtml(plugin.name)}-\${escapeHtml(tool.name)}">\${escapeHtml(tool.name)}</label>
-              </div>
-            \`).join("")}
-          </div>\`
-        : "";
-
-      const permissionsHtml = \`<div class="permissions-section">
-          <h3>Permissions</h3>
-          <div class="permissions-mode">
-            <select id="perm-mode-\${escapeHtml(plugin.name)}" onchange="onPermissionsModeChange('\${escapeHtml(plugin.name)}')">
-              <option value="all" \${permissionsMode === "all" ? "selected" : ""}>All tools</option>
-              <option value="disabled" \${permissionsMode === "disabled" ? "selected" : ""}>Disabled</option>
-              <option value="selected" \${permissionsMode === "selected" ? "selected" : ""}>Selected tools</option>
-            </select>
-          </div>
-          \${permissionsToolsHtml}
-          <div class="actions" style="margin-top:8px;">
-            <button class="btn btn-primary" onclick="savePermissions('\${escapeHtml(plugin.name)}')">Save permissions</button>
-          </div>
-        </div>\`;
-
-      const configHtml = hasConfig
-        ? \`<div class="config-section">
-            <h3>Configuration</h3>
-            \${Object.entries(schema).map(([key, fieldSchema]) => {
-              const field = fieldSchema;
-              const currentValue = values[key] !== undefined ? values[key] : "";
-              const isRequired = field.required === true;
-              return \`<div class="config-field">
-                <label>
-                  \${escapeHtml(key)}\${isRequired ? '<span class="required-mark">*</span>' : ""}
-                </label>
-                <input type="text"
-                  id="config-\${escapeHtml(plugin.name)}-\${escapeHtml(key)}"
-                  data-key="\${escapeHtml(key)}"
-                  placeholder="\${field.description ? escapeHtml(field.description) : ""}"
-                  value="\${escapeHtml(String(currentValue))}"
-                />
-              </div>\`;
-            }).join("")}
-            <div class="actions" style="margin-top:8px;">
-              <button class="btn btn-primary" onclick="saveConfig('\${escapeHtml(plugin.name)}')">Save config</button>
-            </div>
-          </div>\`
-        : "";
-
-      const updateBtn = plugin.editable === false
-        ? \`<button class="btn" onclick="updatePlugin('\${escapeHtml(plugin.name)}')">Update</button>\`
-        : "";
-
-      card.className = "plugin-card collapsed perm-" + permissionsMode;
-      card.innerHTML = \`
-        <div class="plugin-header">
-          <span class="plugin-name">\${escapeHtml(plugin.name)}</span>
-          <span class="plugin-badge">\${plugin.editable ? "editable" : "git"}</span>
-          <span class="chevron">&#9658;</span>
-        </div>
-        <div class="plugin-body">
-          \${plugin.description ? \`<div class="plugin-description">\${escapeHtml(plugin.description)}</div>\` : ""}
-          \${toolsHtml}
-          \${permissionsHtml}
-          \${configHtml}
-          <div class="actions">
-            \${updateBtn}
-            <button class="btn btn-danger" onclick="deletePlugin('\${escapeHtml(plugin.name)}')">Delete</button>
-          </div>
-          <div class="card-message" id="msg-\${escapeHtml(plugin.name)}"></div>
-        </div>
-      \`;
-
-      card.querySelector(".plugin-header").addEventListener("click", (e) => {
-        e.stopPropagation();
-        card.classList.toggle("collapsed");
-      });
-      card.addEventListener("click", () => {
-        if (!card.classList.contains("collapsed")) return;
-        card.classList.remove("collapsed");
-      });
-
-      for (const input of card.querySelectorAll(".config-field input[data-key]")) {
-        input.addEventListener("keydown", (event) => {
-          if (event.key === "Enter") saveConfig(plugin.name);
-        });
+      var message = name ? 'Installed "' + name + '".' : "Installed.";
+      var plugin = name ? findPlugin(name) : null;
+      if (plugin) {
+        var count = (plugin.tools || []).length;
+        message += count === 0 ? " It has no tools." : " It has " + count + " tool" + (count === 1 ? "." : "s.");
       }
-
-      return card;
+      setInstallFeedback(message, true);
+    } catch (error) {
+      setInstallFeedback("Could not reach the server.", false);
+    } finally {
+      setInstallBusy(false);
     }
+  }
 
-    function showCardMessage(pluginName, text, isError) {
-      const el = document.getElementById("msg-" + pluginName);
-      if (!el) return;
-      el.textContent = text;
-      el.className = "card-message " + (isError ? "error" : "success");
+  async function updatePlugin() {
+    var plugin = findPlugin(state.selectedName);
+    if (!plugin || plugin.editable) {
+      return;
     }
-
-    async function installPlugin() {
-      const urlInput = document.getElementById("install-url");
-      const btn = document.getElementById("install-btn");
-      const msgEl = document.getElementById("install-message");
-      const url = urlInput.value.trim();
-      if (!url) return;
-
-      btn.disabled = true;
-      btn.textContent = "Installing...";
-      msgEl.textContent = "";
-      msgEl.className = "";
-
-      const response = await fetch("/api/settings/plugins/install", {
+    setDetailFeedback("Updating...", null);
+    var buttons = detailCard.querySelectorAll("[data-update]");
+    setButtonBusy(buttons, "Updating...");
+    try {
+      var result = await fetchJson(UPDATE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ name: plugin.name }),
       });
-      const data = await response.json();
-
-      btn.disabled = false;
-      btn.textContent = "Install";
-
-      if (response.ok) {
-        msgEl.textContent = data.message || "Installed successfully.";
-        msgEl.className = "success";
-        urlInput.value = "";
-        await loadPlugins();
+      if (result.ok) {
+        await reloadPlugin(plugin.name);
+        renderList();
+        renderDetail();
+        updateView();
+        setDetailFeedback("Updated", true);
       } else {
-        msgEl.textContent = data.error || data.message || "Installation failed.";
-        msgEl.className = "error";
+        setDetailFeedback(result.data && result.data.error ? result.data.error : "Update failed.", false);
+      }
+    } catch (error) {
+      setDetailFeedback("Could not reach the server.", false);
+    } finally {
+      restoreButtons(buttons);
+    }
+  }
+
+  function updateSettingsDirty() {
+    var inputs = detailCard.querySelectorAll("[data-config-input]");
+    var dirty = false;
+    for (var i = 0; i < inputs.length; i++) {
+      if (inputs[i]._edited === true) {
+        dirty = true;
+        break;
       }
     }
+    var button = detailCard.querySelector("[data-save-settings]");
+    if (button) {
+      button.disabled = !dirty;
+    }
+  }
 
-    async function updatePlugin(name) {
-      showCardMessage(name, "Updating...", false);
-      const response = await fetch("/api/settings/plugins/update", {
+  function revealConfigInput(key) {
+    var field = detailCard.querySelector('[data-field="' + key + '"]');
+    if (!field) {
+      return;
+    }
+    var secret = field.querySelector("[data-secret]");
+    if (!secret) {
+      return;
+    }
+    var input = document.createElement("input");
+    input.type = "text";
+    input.className = "sb-input sb-mono";
+    input.setAttribute("data-config-input", key);
+    input.placeholder = "New value";
+    secret.parentNode.replaceChild(input, secret);
+    input.focus();
+    updateSettingsDirty();
+  }
+
+  async function saveSettings() {
+    var plugin = findPlugin(state.selectedName);
+    if (!plugin) {
+      return;
+    }
+    var inputs = detailCard.querySelectorAll("[data-config-input]");
+    var config = {};
+    var hasEdited = false;
+    for (var i = 0; i < inputs.length; i++) {
+      if (inputs[i]._edited === true) {
+        config[inputs[i].getAttribute("data-config-input")] = inputs[i].value;
+        hasEdited = true;
+      }
+    }
+    if (!hasEdited) {
+      return;
+    }
+    setDetailFeedback("Saving...", null);
+    try {
+      var result = await fetchJson(CONFIGURE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name: plugin.name, config: config }),
       });
-      const data = await response.json();
-      if (response.ok) {
-        showCardMessage(name, data.message || "Updated successfully.", false);
-        await loadPlugins();
+      if (result.ok) {
+        for (var key in config) {
+          if (Object.prototype.hasOwnProperty.call(config, key)) {
+            plugin.set[key] = true;
+          }
+        }
+        renderList();
+        renderDetail();
+        updateView();
+        setDetailFeedback("Saved", true);
       } else {
-        showCardMessage(name, data.error || data.message || "Update failed.", true);
+        setDetailFeedback(result.data && result.data.error ? result.data.error : "Failed to save settings.", false);
+      }
+    } catch (error) {
+      setDetailFeedback("Could not reach the server.", false);
+    }
+  }
+
+  function applyPermissionMode() {
+    var select = detailCard.querySelector("[data-perm-select]");
+    if (!select) {
+      return;
+    }
+    var mode = select.value;
+    var checklist = detailCard.querySelector("[data-checklist]");
+    var filterWrap = detailCard.querySelector("[data-filter-wrap]");
+    var checkboxes = detailCard.querySelectorAll("[data-tool]");
+    if (mode === "selected") {
+      if (checklist) {
+        checklist.classList.remove("is-readonly");
+      }
+      if (filterWrap) {
+        filterWrap.hidden = false;
+      }
+    } else {
+      if (checklist) {
+        checklist.classList.add("is-readonly");
+      }
+      var checked = mode === "all";
+      for (var i = 0; i < checkboxes.length; i++) {
+        checkboxes[i].checked = checked;
+      }
+      if (filterWrap) {
+        filterWrap.hidden = true;
+      }
+      var filter = detailCard.querySelector("[data-filter]");
+      if (filter) {
+        filter.value = "";
+      }
+      applyToolFilter();
+    }
+    updatePermCount();
+  }
+
+  function updatePermCount() {
+    var checkboxes = detailCard.querySelectorAll("[data-tool]");
+    var total = checkboxes.length;
+    var count = 0;
+    for (var i = 0; i < total; i++) {
+      if (checkboxes[i].checked) {
+        count++;
       }
     }
+    var countElement = detailCard.querySelector("[data-count]");
+    if (countElement) {
+      countElement.textContent = count + " of " + total + " tools";
+    }
+    var selectAll = detailCard.querySelector("[data-select-all]");
+    if (selectAll) {
+      selectAll.checked = total > 0 && count === total;
+      selectAll.indeterminate = count > 0 && count < total;
+    }
+  }
 
-    async function deletePlugin(name) {
-      if (!window.confirm("Delete plugin \\"" + name + "\\"? This cannot be undone.")) return;
-      showCardMessage(name, "Deleting...", false);
-      const response = await fetch("/api/settings/plugins/remove", {
+  function toggleSelectAll(checked) {
+    var checkboxes = detailCard.querySelectorAll("[data-tool]");
+    for (var i = 0; i < checkboxes.length; i++) {
+      checkboxes[i].checked = checked;
+    }
+  }
+
+  function applyToolFilter() {
+    var filter = detailCard.querySelector("[data-filter]");
+    var query = filter ? filter.value.trim().toLowerCase() : "";
+    var rows = detailCard.querySelectorAll("[data-tool-row]");
+    for (var i = 0; i < rows.length; i++) {
+      var name = (rows[i].getAttribute("data-tool-row") || "").toLowerCase();
+      rows[i].hidden = query !== "" && name.indexOf(query) === -1;
+    }
+    updatePermCount();
+  }
+
+  async function savePermissions() {
+    var plugin = findPlugin(state.selectedName);
+    if (!plugin) {
+      return;
+    }
+    var select = detailCard.querySelector("[data-perm-select]");
+    var mode = select ? select.value : "all";
+    var permissions;
+    if (mode === "all") {
+      permissions = ["*"];
+    } else if (mode === "none") {
+      permissions = [];
+    } else {
+      permissions = [];
+      var checkboxes = detailCard.querySelectorAll("[data-tool]");
+      for (var i = 0; i < checkboxes.length; i++) {
+        if (checkboxes[i].checked) {
+          permissions.push(checkboxes[i].getAttribute("data-tool"));
+        }
+      }
+    }
+    setPermFeedback("Saving...", null);
+    try {
+      var result = await fetchJson(CONFIGURE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
+        body: JSON.stringify({ name: plugin.name, config: { permissions: permissions } }),
       });
-      const data = await response.json();
-      if (response.ok) {
-        await loadPlugins();
+      if (result.ok) {
+        plugin.permissions = permissions;
+        renderList();
+        setPermFeedback("Saved", true);
       } else {
-        showCardMessage(name, data.error || data.message || "Delete failed.", true);
+        setPermFeedback(result.data && result.data.error ? result.data.error : "Failed to save permissions.", false);
+      }
+    } catch (error) {
+      setPermFeedback("Could not reach the server.", false);
+    }
+  }
+
+  function openConfirm(name) {
+    if (!name) {
+      return;
+    }
+    state.confirmName = name;
+    var titles = document.querySelectorAll("[data-confirm-title]");
+    for (var i = 0; i < titles.length; i++) {
+      titles[i].textContent = 'Delete plugin "' + name + '"?';
+    }
+    var popover = detailCard.querySelector("[data-confirm-pop]");
+    if (popover) {
+      popover.hidden = false;
+    }
+    confirmMobile.hidden = false;
+    var feedbacks = document.querySelectorAll("[data-confirm-feedback]");
+    for (var f = 0; f < feedbacks.length; f++) {
+      feedbacks[f].className = "sb-feedback";
+      feedbacks[f].textContent = "";
+    }
+    var cancel = mobileQuery.matches
+      ? confirmMobile.querySelector("[data-confirm-cancel]")
+      : popover
+        ? popover.querySelector("[data-confirm-cancel]")
+        : null;
+    if (cancel) {
+      cancel.focus();
+    }
+  }
+
+  function closeConfirm() {
+    state.confirmName = null;
+    var popover = detailCard.querySelector("[data-confirm-pop]");
+    if (popover) {
+      popover.hidden = true;
+    }
+    if (confirmMobile) {
+      confirmMobile.hidden = true;
+    }
+  }
+
+  async function confirmDelete() {
+    var name = state.confirmName;
+    if (!name) {
+      return;
+    }
+    var deleteButtons = document.querySelectorAll("[data-confirm-delete]");
+    setButtonBusy(deleteButtons, "Removing...");
+    var feedbacks = document.querySelectorAll("[data-confirm-feedback]");
+    function setConfirmError(message) {
+      for (var f = 0; f < feedbacks.length; f++) {
+        feedbacks[f].className = "sb-feedback is-error";
+        feedbacks[f].innerHTML = ERROR + esc(message);
       }
     }
-
-    async function saveConfig(name) {
-      const card = document.getElementById("card-" + name);
-      const inputs = card.querySelectorAll(".config-field input[data-key]");
-      const config = {};
-      for (const input of inputs) {
-        config[input.dataset.key] = input.value;
-      }
-      showCardMessage(name, "Saving...", false);
-      const response = await fetch("/api/settings/plugins/configure", {
+    try {
+      var result = await fetchJson(REMOVE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, config }),
+        body: JSON.stringify({ name: name }),
       });
-      const data = await response.json();
-      if (response.ok) {
-        showCardMessage(name, data.message || "Config saved.", false);
+      if (result.ok) {
+        closeConfirm();
+        state.selectedName = null;
+        await loadAll();
+        renderList();
+        renderDetail();
+        updateView();
       } else {
-        showCardMessage(name, data.error || data.message || "Failed to save config.", true);
+        setConfirmError(result.data && result.data.error ? result.data.error : "Delete failed.");
+      }
+    } catch (error) {
+      setConfirmError("Could not reach the server.");
+    } finally {
+      restoreButtons(deleteButtons);
+    }
+  }
+
+  document.addEventListener("click", function (event) {
+    var target = event.target;
+    if (!target || !target.closest) {
+      return;
+    }
+    if (target.closest("[data-confirm-delete]")) {
+      confirmDelete();
+      return;
+    }
+    if (target.closest("[data-confirm-cancel]")) {
+      closeConfirm();
+      return;
+    }
+    if (target.closest("[data-install-btn]")) {
+      var form = target.closest("[data-install-form]");
+      if (form) {
+        installPlugin(form);
+      }
+      return;
+    }
+    if (target.closest("[data-retry]")) {
+      init();
+      return;
+    }
+    if (target.closest("[data-back]")) {
+      backToDetailList();
+      return;
+    }
+    if (target.closest("[data-replace]")) {
+      revealConfigInput(target.closest("[data-replace]").getAttribute("data-replace"));
+      return;
+    }
+    if (target.closest("[data-save-settings]")) {
+      saveSettings();
+      return;
+    }
+    if (target.closest("[data-save-permissions]")) {
+      savePermissions();
+      return;
+    }
+    if (target.closest("[data-update]")) {
+      updatePlugin();
+      return;
+    }
+    if (target.closest("[data-delete]")) {
+      openConfirm(state.selectedName);
+      return;
+    }
+    var listItem = target.closest("[data-name]");
+    if (listItem) {
+      selectPlugin(listItem.getAttribute("data-name"));
+    }
+  });
+
+  document.addEventListener("change", function (event) {
+    var target = event.target;
+    if (!target || !target.matches) {
+      return;
+    }
+    if (target.matches("[data-perm-select]")) {
+      applyPermissionMode();
+      return;
+    }
+    if (target.matches("[data-select-all]")) {
+      toggleSelectAll(target.checked);
+      updatePermCount();
+      return;
+    }
+    if (target.matches("[data-tool]")) {
+      updatePermCount();
+    }
+  });
+
+  document.addEventListener("input", function (event) {
+    var target = event.target;
+    if (!target || !target.matches) {
+      return;
+    }
+    if (target.matches("[data-filter]")) {
+      applyToolFilter();
+      return;
+    }
+    if (target.matches("[data-config-input]")) {
+      target._edited = true;
+      updateSettingsDirty();
+    }
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && state.confirmName !== null) {
+      closeConfirm();
+      return;
+    }
+    if (event.key === "Enter" && event.target && event.target.matches && event.target.matches("[data-install-url]")) {
+      event.preventDefault();
+      var form = event.target.closest("[data-install-form]");
+      if (form) {
+        installPlugin(form);
       }
     }
+  });
 
-    function onPermissionsModeChange(name) {
-      const select = document.getElementById("perm-mode-" + name);
-      const toolsEl = document.getElementById("perm-tools-" + name);
-      if (!toolsEl) return;
-      toolsEl.style.display = select.value === "selected" ? "" : "none";
+  listCard.addEventListener("keydown", function (event) {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
+      return;
     }
-
-    async function savePermissions(name) {
-      const select = document.getElementById("perm-mode-" + name);
-      let permissions;
-      if (select.value === "all") {
-        permissions = ["*"];
-      } else if (select.value === "disabled") {
-        permissions = [];
-      } else {
-        const toolsEl = document.getElementById("perm-tools-" + name);
-        const checkboxes = toolsEl ? toolsEl.querySelectorAll("input[type='checkbox'][data-tool]") : [];
-        permissions = Array.from(checkboxes)
-          .filter(cb => cb.checked)
-          .map(cb => cb.dataset.tool);
-      }
-      showCardMessage(name, "Saving...", false);
-      const response = await fetch("/api/settings/plugins/configure", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, config: { permissions } }),
-      });
-      const data = await response.json();
-      if (response.ok) {
-        showCardMessage(name, data.message || "Permissions saved.", false);
-        const card = document.getElementById("card-" + name);
-        card.classList.remove("perm-all", "perm-selected", "perm-disabled");
-        card.classList.add("perm-" + select.value);
-      } else {
-        showCardMessage(name, data.error || data.message || "Failed to save permissions.", true);
+    if (state.plugins.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    var index = -1;
+    for (var i = 0; i < state.plugins.length; i++) {
+      if (state.plugins[i].name === state.selectedName) {
+        index = i;
       }
     }
+    var next = event.key === "ArrowDown" ? index + 1 : index - 1;
+    if (next < 0) {
+      next = 0;
+    }
+    if (next >= state.plugins.length) {
+      next = state.plugins.length - 1;
+    }
+    selectPlugin(state.plugins[next].name, true);
+  });
 
-    loadPlugins();
-
-    document.getElementById("install-url").addEventListener("keydown", (event) => {
-      if (event.key === "Enter") installPlugin();
+  if (mobileQuery.addEventListener) {
+    mobileQuery.addEventListener("change", function () {
+      state.mobileShowDetail = false;
+      renderList();
+      updateView();
     });
-  </script>
-</body>
-</html>`;
+  }
 
-export function servePluginsPage(response: http.ServerResponse): void {
+  async function init() {
+    try {
+      await loadAll();
+      renderList();
+      renderDetail();
+      updateView();
+    } catch (error) {
+      if (listBody) {
+        listBody.innerHTML = '<div class="sb-state is-error"><div class="sb-state-icon">' + ERROR + '</div><strong>Could not load plugins</strong><p>' + esc(error && error.message ? error.message : String(error)) + '</p><button class="sb-btn sb-btn-secondary sb-btn-sm" type="button" data-retry>' + UPDATE + "Try again</button></div>";
+      }
+      detailCard.hidden = true;
+    }
+  }
+
+  init();
+})();
+</script>`;
+}
+
+export function servePluginsPage(response: http.ServerResponse, config: Config): void {
+  const html = renderPageShell({
+    title: "Plugins",
+    content: buildPluginsContent(),
+    nav: { active: "plugins", model: config.model, uptime: getUptime() },
+  });
   response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  response.end(PLUGINS_PAGE_HTML);
+  response.end(html);
 }

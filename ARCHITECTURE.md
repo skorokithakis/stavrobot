@@ -261,6 +261,11 @@ Plugins live in `/plugins/<name>/` (shared volume between `plugin-runner` and `c
 - Scripts are spawned with `spawn(entrypoint, [], { uid, gid })` — never as root.
 - `config.json` is never returned to the LLM agent; only key presence/absence is
   reported. The `permissions` key in `config.json` is set via the web UI only.
+- The app's plugin config proxy (`GET /api/settings/plugins/<name>/config`) likewise
+  never returns config values to the browser: it rewrites the plugin-runner response to
+  `{ schema, set }`, where `schema` holds only each key's description/required flag
+  (manifest defaults are stripped) and `set` is a boolean per key. Saving still goes
+  through `POST /configure`, which accepts values and merges them server-side.
 - The Docker socket is never mounted into any container.
 
 ### Tool execution (sync)
@@ -344,6 +349,35 @@ Migrations are additive `ALTER TABLE … ADD COLUMN IF NOT EXISTS` statements.
 
 The configuration editor endpoints use the default Basic Auth policy and are never
 public.
+
+### Pages
+
+- `GET /` is the Overview (chat) page. `GET /settings` is the Settings screen, which
+  links to Config, provider login, and the Signal captcha; the desktop sidebar reaches
+  the same destinations directly.
+- `GET /settings/allowlist`, `GET /settings/plugins`, `GET /settings/config`,
+  `GET /login`, `GET /explorer`, and `GET /signal/captcha` serve the remaining pages.
+  `GET /plugins` redirects to `/settings/plugins`.
+- Every page renders its content into the shared shell, except `/login` and
+  `/signal/captcha`, which use the centered no-nav variant.
+- The database explorer reads the schema from `GET /api/explorer/tables/<table>`, where
+  each column carries `name`, `type`, `nullable`, and `primaryKey`.
+
+### Shared UI assets and shell
+
+- `GET /assets/sb.css` serves the shared admin stylesheet (kept as the TypeScript string
+  module `src/sb-css.ts`, adapted from `design/sb.css`). Light is the default; dark is
+  applied via `prefers-color-scheme`.
+- `GET /assets/fonts/<file>.woff2` serves the self-hosted IBM Plex Sans (400/500/600) and
+  IBM Plex Mono (400/500) latin subsets. The files are read from the `@fontsource`
+  packages at startup; only a fixed allow-list of filenames is served.
+- Both asset routes require Basic Auth (they are not in `isPublicRoute`), and the CSP
+  includes `font-src 'self'`.
+- `src/shell.ts` renders the shared page chrome: desktop sidebar with nav and an
+  online/model/uptime footer, a mobile header and a five-tab bottom bar, or a centered
+  card for no-nav pages (login, captcha). Pages render their own content into it.
+- `src/uptime.ts` owns the process start time and uptime formatting so every page shell
+  can display it.
 
 ---
 
@@ -527,6 +561,10 @@ Signal rate-limits the account.
 | `src/scheduler.ts` | Cron scheduler |
 | `src/embeddings.ts` | OpenAI embeddings worker (background polling loop) |
 | `src/log.ts` | Levelled logger (`log.info`, `log.debug`, etc.) controlled by `STAVROBOT_LOG_LEVEL` |
+| `src/assets.ts` | Shared stylesheet and self-hosted font HTTP handlers |
+| `src/sb-css.ts` | Shared admin stylesheet as a TypeScript string, adapted from `design/sb.css` |
+| `src/shell.ts` | Shared page shell (sidebar, mobile header and tab bar, centered no-nav layout) |
+| `src/uptime.ts` | Process start time and uptime formatting |
 | `prompts/system-prompt.txt` | Base system prompt for the main agent |
 | `prompts/agent-prompt.txt` | Base system prompt for subagents |
 | `prompts/compaction-prompt.txt` | Prompt used by the background compaction summariser |

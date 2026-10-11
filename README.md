@@ -290,7 +290,8 @@ public or private.
 ### Database explorer
 
 - `GET /api/explorer/tables`: JSON list of tables.
-- `GET /api/explorer/tables/<table>`: JSON schema of one table. `404` if it does not exist.
+- `GET /api/explorer/tables/<table>`: JSON schema of one table, one entry per column with
+  `name`, `type`, `nullable`, and `primaryKey`. `404` if it does not exist.
 - `GET /api/explorer/tables/<table>/rows`: JSON rows. Query parameters: `limit` (1 to
   100, default 50), `offset` (default 0), `orderBy` (column name), `orderDirection`
   (`asc` or `desc`, default `asc`).
@@ -301,8 +302,10 @@ These proxy to the plugin runner. Bodies are JSON.
 
 - `GET /api/settings/plugins/list`: all installed plugins.
 - `GET /api/settings/plugins/<name>/detail`: one plugin's manifest.
-- `GET /api/settings/plugins/<name>/config`: the plugin's configuration, including
-  secret values. Never exposed to the agent.
+- `GET /api/settings/plugins/<name>/config`: the plugin's configuration **without its
+  values**. Returns `{ "schema", "set" }`, where `schema` maps each key to its description
+  and whether it is required, and `set` maps each key to whether a value is stored. The
+  values themselves are never sent to the browser.
 - `POST /api/settings/plugins/install`: body `{ "url": "<git url>" }`.
 - `POST /api/settings/plugins/update`: body `{ "name": "<plugin>" }`.
 - `POST /api/settings/plugins/remove`: body `{ "name": "<plugin>" }`.
@@ -331,9 +334,13 @@ These proxy to the plugin runner. Bodies are JSON.
 
 ### Web UI pages
 
-`GET /` (chat), `/login`, `/explorer`, `/settings`, `/settings/plugins`,
-`/settings/allowlist`, and `/signal/captcha` serve the HTML pages that use the endpoints
-above. `/plugins` redirects to `/settings/plugins`.
+`GET /` (chat), `/login`, `/explorer`, `/settings` (the Settings screen), `/settings/config`,
+`/settings/plugins`, `/settings/allowlist`, and `/signal/captcha` serve the HTML pages that
+use the endpoints above. `/plugins` redirects to `/settings/plugins`.
+
+All pages share a shell (`src/shell.ts`) and a single stylesheet, served at
+`GET /assets/sb.css`, with self-hosted IBM Plex fonts under `GET /assets/fonts/`. Both
+asset routes require authentication. The UI follows the OS light/dark preference.
 
 ## Knowledge system
 

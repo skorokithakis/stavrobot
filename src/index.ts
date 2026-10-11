@@ -48,6 +48,7 @@ import {
 import { serveSignalCaptchaPage, handleSignalCaptchaSubmit } from "./signal-captcha.js";
 import { initializeWhatsApp } from "./whatsapp.js";
 import { serveHomePage } from "./home.js";
+import { serveSharedStylesheet, serveFontFile } from "./assets.js";
 import { handleEmailWebhookRequest } from "./email.js";
 import { handlePebbleIndexWebhookRequest } from "./pebble-index.js";
 import { initializeEmailTransport } from "./email-api.js";
@@ -57,6 +58,7 @@ const CSP_HEADER_VALUE =
   "default-src 'self'; " +
   "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; " +
   "style-src 'self' 'unsafe-inline'; " +
+  "font-src 'self'; " +
   "img-src 'self' data:; " +
   "connect-src 'self'";
 
@@ -575,6 +577,10 @@ async function main(): Promise<void> {
 
     if (request.method === "GET" && pathname === "/") {
       void serveHomePage(response, config, pool);
+    } else if (request.method === "GET" && pathname === "/assets/sb.css") {
+      serveSharedStylesheet(response);
+    } else if (request.method === "GET" && pathname.startsWith("/assets/fonts/")) {
+      serveFontFile(response, pathname.slice("/assets/fonts/".length));
     } else if (request.method === "POST" && pathname === "/api/upload") {
       void handleUploadRequest(request, response);
     } else if (request.method === "POST" && pathname === "/chat") {
@@ -595,7 +601,7 @@ async function main(): Promise<void> {
     } else if (request.method === "POST" && pathname === "/login/respond") {
       void handleLoginRespond(request, response);
     } else if (request.method === "GET" && pathname === "/explorer") {
-      serveExplorerPage(response);
+      serveExplorerPage(response, config);
     } else if (request.method === "GET" && pathname === "/api/explorer/tables") {
       void handleTablesRequest(response, pool);
     } else if (request.method === "GET" && pathname.startsWith("/api/explorer/tables/")) {
@@ -613,7 +619,7 @@ async function main(): Promise<void> {
       response.writeHead(302, { "Location": "/settings/plugins" });
       response.end();
     } else if (request.method === "GET" && pathname === "/settings/plugins") {
-      servePluginsPage(response);
+      servePluginsPage(response, config);
     } else if (request.method === "GET" && pathname === "/api/settings/plugins/list") {
       void handlePluginsListRequest(response);
     } else if (request.method === "GET" && pathname.startsWith("/api/settings/plugins/") && pathname.endsWith("/detail")) {
@@ -631,11 +637,11 @@ async function main(): Promise<void> {
     } else if (request.method === "POST" && pathname === "/api/settings/plugins/configure") {
       void handlePluginConfigureRequest(request, response);
     } else if (request.method === "GET" && pathname === "/settings/config") {
-      serveConfigSettingsPage(response);
+      serveConfigSettingsPage(response, config);
     } else if (request.method === "GET" && pathname === "/settings/allowlist") {
-      serveAllowlistPage(response);
+      serveAllowlistPage(response, config);
     } else if (request.method === "GET" && pathname === "/settings") {
-      serveSettingsHubPage(response);
+      serveSettingsHubPage(response, config);
     } else if (request.method === "GET" && pathname === "/api/settings/allowlist") {
       handleGetAllowlistRequest(response, config);
     } else if (request.method === "PUT" && pathname === "/api/settings/allowlist") {

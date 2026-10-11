@@ -10,7 +10,7 @@ vi.mock("./allowlist.js", () => ({
 }));
 
 import { getAllowlist, saveAllowlist, getOwnerIdentities, getRejectedSenders } from "./allowlist.js";
-import { handleGetAllowlistRequest, handlePutAllowlistRequest, serveAllowlistPage } from "./settings.js";
+import { handleGetAllowlistRequest, handlePutAllowlistRequest, serveAllowlistPage, serveSettingsHubPage } from "./settings.js";
 
 const mockGetAllowlist = vi.mocked(getAllowlist);
 const mockSaveAllowlist = vi.mocked(saveAllowlist);
@@ -780,48 +780,161 @@ describe("handlePutAllowlistRequest", () => {
 });
 
 describe("serveAllowlistPage", () => {
-  it("returns 200 with HTML content type", () => {
+  it("returns 200 with HTML content type and the shared shell", () => {
     const response = makeMockResponse();
 
-    serveAllowlistPage(response as unknown as http.ServerResponse);
+    serveAllowlistPage(response as unknown as http.ServerResponse, makeConfig());
 
     expect(response.statusCode).toBe(200);
     expect(response.headers["Content-Type"]).toBe("text/html; charset=utf-8");
+    expect(response.body).toContain('href="/assets/sb.css"');
+    expect(response.body).toContain('href="/settings/allowlist" aria-current="page"');
+    expect(response.body).toContain('<h1 class="sb-h1">Allowlist</h1>');
   });
 
-  it("returns HTML containing the settings heading", () => {
+  it("shows the page description and the add entry form", () => {
     const response = makeMockResponse();
 
-    serveAllowlistPage(response as unknown as http.ServerResponse);
+    serveAllowlistPage(response as unknown as http.ServerResponse, makeConfig());
 
-    expect(response.body).toContain("<h1>Settings</h1>");
+    expect(response.body).toContain("Only these identities can message Stavrobot. Each change saves at once.");
+    expect(response.body).toContain("Add an entry");
+    expect(response.body).toContain("Add to allowlist");
+    expect(response.body).toContain('id="allowlist-tbody"');
   });
 
-  it("returns HTML containing the Signal, Telegram, WhatsApp, and Email sections", () => {
+  it("renders the segmented filter and the search box", () => {
     const response = makeMockResponse();
 
-    serveAllowlistPage(response as unknown as http.ServerResponse);
+    serveAllowlistPage(response as unknown as http.ServerResponse, makeConfig());
 
-    expect(response.body).toContain("Signal allowlist");
-    expect(response.body).toContain("Telegram allowlist");
-    expect(response.body).toContain("WhatsApp allowlist");
-    expect(response.body).toContain("Email allowlist");
+    expect(response.body).toContain('class="sb-seg allowlist-seg"');
+    expect(response.body).toContain('aria-label="Search identifiers and notes"');
   });
 
-  it("returns HTML containing the recently rejected section", () => {
+  it("renders the recently rejected section and the owner callout", () => {
     const response = makeMockResponse();
 
-    serveAllowlistPage(response as unknown as http.ServerResponse);
+    serveAllowlistPage(response as unknown as http.ServerResponse, makeConfig());
 
     expect(response.body).toContain("Recently rejected");
-    expect(response.body).toContain("rejected-list");
+    expect(response.body).toContain('id="rejected-tbody"');
+    expect(response.body).toContain("Owner identities");
   });
 
-  it("describes the Signal input as accepting a phone number, UUID, or group ID", () => {
+  it("describes the Telegram identifier as a numeric user ID, not a username", () => {
     const response = makeMockResponse();
 
-    serveAllowlistPage(response as unknown as http.ServerResponse);
+    serveAllowlistPage(response as unknown as http.ServerResponse, makeConfig());
+
+    expect(response.body).toContain("Numeric user ID");
+    expect(response.body).not.toContain("@username");
+    expect(response.body).not.toContain("Username or user ID");
+  });
+
+  it("describes the Signal identifier as accepting a phone number, UUID, or group ID", () => {
+    const response = makeMockResponse();
+
+    serveAllowlistPage(response as unknown as http.ServerResponse, makeConfig());
 
     expect(response.body).toContain("Phone number, UUID, or group ID");
+    expect(response.body).toContain("+1234567890");
+  });
+
+  it("loads and saves the allowlist through the API", () => {
+    const response = makeMockResponse();
+
+    serveAllowlistPage(response as unknown as http.ServerResponse, makeConfig());
+
+    expect(response.body).toContain("/api/settings/allowlist");
+    expect(response.body).toContain('method: "PUT"');
+  });
+
+  it("disables mutations until the allowlist loads and offers a retry on failure", () => {
+    const response = makeMockResponse();
+
+    serveAllowlistPage(response as unknown as http.ServerResponse, makeConfig());
+
+    expect(response.body).toContain('id="add-submit" data-requires-load disabled');
+    expect(response.body).toContain('id="add-ident" class="sb-input sb-mono" data-requires-load disabled');
+    expect(response.body).toContain('data-action="retry-load"');
+    expect(response.body).toContain("data-requires-load");
+  });
+
+  it("shows the configured model in the shell navigation", () => {
+    const response = makeMockResponse();
+
+    serveAllowlistPage(
+      response as unknown as http.ServerResponse,
+      makeConfig({ model: "claude-opus-4-20250514" }),
+    );
+
+    expect(response.body).toContain("claude-opus-4-20250514");
+  });
+});
+
+describe("serveSettingsHubPage", () => {
+  it("returns 200 with HTML content type and the shared shell", () => {
+    const response = makeMockResponse();
+
+    serveSettingsHubPage(response as unknown as http.ServerResponse, makeConfig());
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["Content-Type"]).toBe("text/html; charset=utf-8");
+    expect(response.body).toContain('href="/assets/sb.css"');
+    expect(response.body).toContain('href="/settings" aria-current="page"');
+    expect(response.body).toContain('<h1 class="sb-h1">Settings</h1>');
+  });
+
+  it("renders the Bot, Connections, and About sections", () => {
+    const response = makeMockResponse();
+
+    serveSettingsHubPage(response as unknown as http.ServerResponse, makeConfig());
+
+    expect(response.body).toContain(">Bot<");
+    expect(response.body).toContain(">Connections<");
+    expect(response.body).toContain(">About<");
+  });
+
+  it("links to the config, provider login, and Signal captcha pages with hints", () => {
+    const response = makeMockResponse();
+
+    serveSettingsHubPage(response as unknown as http.ServerResponse, makeConfig());
+
+    expect(response.body).toContain('href="/settings/config"');
+    expect(response.body).toContain("Edit config.toml. Saving restarts the bot.");
+    expect(response.body).toContain('href="/login"');
+    expect(response.body).toContain("Provider login");
+    expect(response.body).toContain('href="/signal/captcha"');
+    expect(response.body).toContain("Signal captcha");
+    expect(response.body).toContain("Use when Signal asks for a captcha");
+  });
+
+  it("shows the provider, model, and uptime from the config", () => {
+    const response = makeMockResponse();
+
+    serveSettingsHubPage(
+      response as unknown as http.ServerResponse,
+      makeConfig({ provider: "openai", model: "gpt-5" }),
+    );
+
+    expect(response.body).toContain("<span>Provider</span>");
+    expect(response.body).toContain('<span class="sb-mono">openai</span>');
+    expect(response.body).toContain("<span>Model</span>");
+    expect(response.body).toContain('<span class="sb-mono">gpt-5</span>');
+    expect(response.body).toContain("<span>Uptime</span>");
+  });
+
+  it("escapes the provider and model instead of injecting markup", () => {
+    const response = makeMockResponse();
+
+    serveSettingsHubPage(
+      response as unknown as http.ServerResponse,
+      makeConfig({ provider: '<img src=x onerror="alert(1)">', model: "<b>m</b>" }),
+    );
+
+    expect(response.body).not.toContain("<img src=x");
+    expect(response.body).toContain("&lt;img src=x");
+    expect(response.body).toContain("&lt;b&gt;m&lt;/b&gt;");
   });
 });

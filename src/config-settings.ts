@@ -1,9 +1,10 @@
 import fs from "fs";
 import http from "http";
+import type { Config } from "./config.js";
 import { getConfigPath, parseConfig } from "./config.js";
 import { log } from "./log.js";
-import { getBaseStyles } from "./theme.js";
-
+import { renderPageShell } from "./shell.js";
+import { getUptime } from "./uptime.js";
 
 async function readRequestBody(request: http.IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
@@ -85,126 +86,195 @@ export async function handlePutConfigRequest(
   }, 500);
 }
 
-const CONFIG_SETTINGS_PAGE_HTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Config editor</title>
-  <style>
-    ${getBaseStyles()}
-    body { padding: 24px; }
-    .notice {
-      margin-bottom: 12px;
-      padding: 12px;
-      border: 1px solid var(--color-error-border);
-      border-radius: 6px;
-      background: var(--color-error-bg);
-      font-size: 14px;
-      line-height: 1.45;
-    }
-    .notice p + p { margin-top: 8px; }
-    label {
-      display: block;
-      margin-bottom: 8px;
-      font-size: 14px;
-      font-weight: 600;
-    }
-    textarea {
-      display: block;
-      width: 100%;
-      min-height: 460px;
-      padding: 12px;
-      border: 1px solid var(--color-border);
-      border-radius: 6px;
-      background: var(--color-surface);
-      color: var(--color-text);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      font-size: 13px;
-      line-height: 1.45;
-      resize: vertical;
-    }
-    textarea:disabled { background: var(--color-input-disabled-bg); }
-    #status {
-      display: block;
-      min-height: 20px;
-      margin-top: 12px;
-      font-size: 14px;
-    }
-    #status.status-success { color: var(--color-success); }
-    #status.status-error { color: var(--color-error); }
-  </style>
-</head>
-<body>
-  <h1>Config editor</h1>
-  <div class="section">
-    <div class="notice">
-      <p>Saving restarts the bot and interrupts any in-progress agent turn.</p>
-      <p>plugin-runner, coder, signal-bridge, and python-runner read config.toml only at their own startup. Changes affecting them, such as the password, require manually restarting those containers.</p>
-    </div>
-    <label for="config-content">config.toml</label>
-    <textarea id="config-content" rows="24" spellcheck="false" disabled></textarea>
-    <button class="btn btn-primary" id="save-button" type="button" disabled>Save</button>
-    <p id="status" role="status" aria-live="polite"></p>
+const CONFIG_EDITOR_CONTENT = `<div class="sb-page-h">
+  <div>
+    <h1 class="sb-h1">Config</h1>
+    <p>The main settings file, <span class="sb-mono">config.toml</span>. Edit it as text, then save.</p>
   </div>
+  <button class="sb-btn sb-btn-primary" data-save-button type="button" disabled>Save and restart</button>
+</div>
 
-  <script>
-    const configContent = document.getElementById("config-content");
-    const saveButton = document.getElementById("save-button");
-    const status = document.getElementById("status");
+<div class="sb-callout is-warning">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4 2.5 20h19z"></path><path d="M12 10v4M12 17v.5"></path></svg>
+  <div><strong>Saving restarts the bot</strong>It also interrupts any in-progress agent turn. plugin-runner, coder, signal-bridge, and python-runner read config.toml only at their own startup, so changes that affect them need a manual restart of those containers.</div>
+</div>
 
-    function setStatus(message, isError) {
-      status.textContent = message;
-      status.className = isError ? "status-error" : "status-success";
+<div class="sb-banner is-progress" id="config-banner" role="status">
+  <span id="config-banner-icon"><span class="sb-spinner"></span></span>
+  <span id="config-banner-text">Loading config...</span>
+  <button class="sb-btn sb-btn-secondary sb-btn-sm sb-banner-action sb-hidden" id="config-banner-action" type="button"></button>
+</div>
+
+<div class="sb-field">
+  <div class="sb-field-head">
+    <label class="sb-field-label" for="config-content">config.toml</label>
+    <span class="sb-hint sb-hidden" id="config-unsaved">Unsaved changes</span>
+  </div>
+  <textarea id="config-content" class="sb-input sb-code-editor" spellcheck="false" placeholder="Loading config..." aria-describedby="config-hint" disabled></textarea>
+  <span class="sb-hint" id="config-hint">Plain text. Drag the bottom edge to make it taller.</span>
+</div>
+
+<button class="sb-btn sb-btn-primary sb-btn-lg sb-btn-block sb-config-save-mobile" data-save-button type="button" disabled>Save and restart</button>
+
+<script>
+(function () {
+  const editor = document.getElementById("config-content");
+  const saveButtons = document.querySelectorAll("[data-save-button]");
+  const banner = document.getElementById("config-banner");
+  const bannerIcon = document.getElementById("config-banner-icon");
+  const bannerText = document.getElementById("config-banner-text");
+  const bannerAction = document.getElementById("config-banner-action");
+  const unsavedIndicator = document.getElementById("config-unsaved");
+
+  const SPINNER_ICON = '<span class="sb-spinner"></span>';
+  const CHECK_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>';
+  const ERROR_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>';
+
+  let savedContent = "";
+  let isLoading = true;
+
+  function showBanner(state, text, actionLabel, actionHandler) {
+    banner.className = "sb-banner is-" + state;
+    banner.setAttribute("role", state === "error" ? "alert" : "status");
+    if (state === "progress") {
+      bannerIcon.innerHTML = SPINNER_ICON;
+    } else if (state === "success") {
+      bannerIcon.innerHTML = CHECK_ICON;
+    } else {
+      bannerIcon.innerHTML = ERROR_ICON;
     }
+    bannerText.textContent = text;
+    if (actionLabel) {
+      bannerAction.textContent = actionLabel;
+      bannerAction.onclick = actionHandler;
+      bannerAction.classList.remove("sb-hidden");
+    } else {
+      bannerAction.onclick = null;
+      bannerAction.classList.add("sb-hidden");
+    }
+  }
 
-    async function loadConfig() {
-      try {
-        const response = await fetch("/api/settings/config", { cache: "no-store" });
-        const data = await response.json();
-        if (!response.ok || typeof data.content !== "string") {
-          throw new Error(data.error || "Unable to load config.");
-        }
-        configContent.value = data.content;
-        configContent.disabled = false;
-        saveButton.disabled = false;
-      } catch (error) {
-        setStatus(error instanceof Error ? error.message : String(error), true);
+  function hideBanner() {
+    banner.classList.add("sb-hidden");
+  }
+
+  function setEnabled(enabled) {
+    editor.disabled = !enabled;
+    for (const button of saveButtons) {
+      button.disabled = !enabled;
+    }
+  }
+
+  function updateUnsaved() {
+    if (isLoading || editor.value === savedContent) {
+      unsavedIndicator.classList.add("sb-hidden");
+    } else {
+      unsavedIndicator.classList.remove("sb-hidden");
+    }
+  }
+
+  function parseLineNumber(message) {
+    const match = message.match(/\\b(?:row|line)\\s+(\\d+)/i);
+    return match ? parseInt(match[1], 10) : null;
+  }
+
+  function goToLine(lineNumber) {
+    const lines = editor.value.split("\\n");
+    if (lineNumber < 1 || lineNumber > lines.length) {
+      return;
+    }
+    let offset = 0;
+    for (let index = 0; index < lineNumber - 1; index++) {
+      offset += lines[index].length + 1;
+    }
+    editor.focus();
+    editor.setSelectionRange(offset, offset);
+    const lineHeight = parseFloat(getComputedStyle(editor).lineHeight);
+    const step = isNaN(lineHeight) ? 21 : lineHeight;
+    editor.scrollTop = Math.max(0, (lineNumber - 1) * step - editor.clientHeight / 3);
+  }
+
+  function showSaveError(message) {
+    const firstLine = message.split("\\n")[0].trim();
+    const text = firstLine.length > 0 ? firstLine : "Could not save config.";
+    const lineNumber = parseLineNumber(message);
+    if (lineNumber === null) {
+      showBanner("error", text);
+    } else {
+      showBanner("error", text, "Go to line " + lineNumber, function () {
+        goToLine(lineNumber);
+      });
+    }
+  }
+
+  async function loadConfig() {
+    isLoading = true;
+    setEnabled(false);
+    unsavedIndicator.classList.add("sb-hidden");
+    showBanner("progress", "Loading config...");
+    try {
+      const response = await fetch("/api/settings/config", { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok || typeof data.content !== "string") {
+        throw new Error(typeof data.error === "string" ? data.error : "Could not load config.toml.");
       }
+      editor.value = data.content;
+      savedContent = data.content;
+      isLoading = false;
+      setEnabled(true);
+      hideBanner();
+      updateUnsaved();
+    } catch (error) {
+      isLoading = false;
+      setEnabled(false);
+      editor.placeholder = "";
+      showBanner("error", "Could not load config.toml.", "Try again", function () {
+        void loadConfig();
+      });
     }
+  }
 
-    async function saveConfig() {
-      saveButton.disabled = true;
-      setStatus("Saving...", false);
-
-      try {
-        const response = await fetch("/api/settings/config", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: configContent.value }),
-        });
-        if (response.ok) {
-          setStatus("Saved, restarting…", false);
-          return;
-        }
-
-        const data = await response.json();
-        throw new Error(data.error || "Unable to save config.");
-      } catch (error) {
-        setStatus(error instanceof Error ? error.message : String(error), true);
-        saveButton.disabled = false;
+  async function saveConfig() {
+    setEnabled(false);
+    unsavedIndicator.classList.add("sb-hidden");
+    showBanner("progress", "Saving...");
+    try {
+      const response = await fetch("/api/settings/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: editor.value }),
+      });
+      if (response.ok) {
+        showBanner("success", "Saved, restarting... The bot will be back in a few seconds.");
+        return;
       }
+      const data = await response.json().catch(function () {
+        return {};
+      });
+      showSaveError(typeof data.error === "string" ? data.error : "Could not save config.");
+    } catch (error) {
+      showSaveError("Could not reach the server.");
     }
+    setEnabled(true);
+    updateUnsaved();
+  }
 
-    saveButton.addEventListener("click", () => {
+  for (const button of saveButtons) {
+    button.addEventListener("click", function () {
       void saveConfig();
     });
-    void loadConfig();
-  </script>
-</body>
-</html>`;
+  }
+  editor.addEventListener("input", updateUnsaved);
+  void loadConfig();
+})();
+</script>`;
 
-export function serveConfigSettingsPage(response: http.ServerResponse): void {
+export function serveConfigSettingsPage(response: http.ServerResponse, config: Config): void {
+  const html = renderPageShell({
+    title: "Config",
+    content: CONFIG_EDITOR_CONTENT,
+    nav: { active: "config", model: config.model, uptime: getUptime() },
+  });
   response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-  response.end(CONFIG_SETTINGS_PAGE_HTML);
+  response.end(html);
 }

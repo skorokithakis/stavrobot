@@ -2,563 +2,369 @@ import http from "http";
 import type pg from "pg";
 import type { Config } from "./config.js";
 import { log } from "./log.js";
-import { getBaseStyles } from "./theme.js";
-
-const startTime = Date.now();
-
-function formatUptime(milliseconds: number): string {
-  const totalSeconds = Math.floor(milliseconds / 1000);
-  const days = Math.floor(totalSeconds / 86400);
-  const hours = Math.floor((totalSeconds % 86400) / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-
-  const parts: string[] = [];
-  if (days > 0) {
-    parts.push(`${days} ${days === 1 ? "day" : "days"}`);
-  }
-  if (hours > 0) {
-    parts.push(`${hours} ${hours === 1 ? "hour" : "hours"}`);
-  }
-  if (minutes > 0 || parts.length === 0) {
-    parts.push(`${minutes} ${minutes === 1 ? "minute" : "minutes"}`);
-  }
-  return parts.join(", ");
-}
+import { escapeHtml, renderPageShell } from "./shell.js";
+import { getUptime } from "./uptime.js";
 
 interface MessageStats {
   total: string;
-  signal: string;
-  telegram: string;
-  whatsapp: string;
-  email: string;
   web: string;
-  agent: string;
+  owner: string;
+  others: string;
+  agents: string;
 }
 
-function buildHtml(config: Config, uptime: string, stats: MessageStats): string {
-  const emailStatus = (() => {
-    if (config.email === undefined) return "Disabled";
-    const hasInbound = config.email.webhookSecret !== undefined;
-    const hasOutbound = config.email.smtpHost !== undefined;
-    if (hasInbound && hasOutbound) return "Enabled";
-    if (hasInbound) return "Inbound only";
-    if (hasOutbound) return "Outbound only";
-    return "Disabled";
-  })();
+type ServiceStatus = "enabled" | "disabled" | "inbound" | "outbound";
 
-  const services = [
-    { name: "Signal", status: config.signal !== undefined ? "Enabled" : "Disabled" },
-    { name: "Telegram", status: config.telegram !== undefined ? "Enabled" : "Disabled" },
-    { name: "WhatsApp", status: config.whatsapp !== undefined ? "Enabled" : "Disabled" },
-    { name: "Email", status: emailStatus },
-    { name: "Coder", status: config.coder !== undefined ? "Enabled" : "Disabled" },
-    { name: "Embeddings", status: config.embeddings !== undefined ? "Enabled" : "Disabled" },
+function getEmailStatus(config: Config): ServiceStatus {
+  if (config.email === undefined) return "disabled";
+  const hasInbound = config.email.webhookSecret !== undefined;
+  const hasOutbound = config.email.smtpHost !== undefined;
+  if (hasInbound && hasOutbound) return "enabled";
+  if (hasInbound) return "inbound";
+  if (hasOutbound) return "outbound";
+  return "disabled";
+}
+
+function renderServiceStatus(status: ServiceStatus): string {
+  switch (status) {
+    case "enabled":
+      return '<span class="sb-status is-on"><span class="sb-dot sb-dot-on"></span>Enabled</span>';
+    case "disabled":
+      return '<span class="sb-status is-off"><span class="sb-dot"></span>Disabled</span>';
+    case "inbound":
+      return '<span class="sb-status is-warn"><span class="sb-dot sb-dot-half"></span>Inbound only</span>';
+    case "outbound":
+      return '<span class="sb-status is-warn"><span class="sb-dot sb-dot-half" style="transform: scaleX(-1)"></span>Outbound only</span>';
+  }
+}
+
+function formatCount(value: string): string {
+  return value.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function renderBotInfoCard(config: Config, uptime: string): string {
+  return `<section class="sb-card">
+    <div class="sb-card-h"><h2 class="sb-h2">Bot info</h2></div>
+    <div class="sb-card-b" style="padding-top: 4px; padding-bottom: 4px">
+      <div class="sb-kv"><span>Provider</span><span class="sb-mono">${escapeHtml(config.provider)}</span></div>
+      <div class="sb-kv"><span>Model</span><span class="sb-mono">${escapeHtml(config.model)}</span></div>
+      <div class="sb-kv"><span>Uptime</span><span>${escapeHtml(uptime)}</span></div>
+    </div>
+  </section>`;
+}
+
+function renderServicesCard(config: Config): string {
+  const services: Array<{ name: string; status: ServiceStatus }> = [
+    { name: "Signal", status: config.signal !== undefined ? "enabled" : "disabled" },
+    { name: "Telegram", status: config.telegram !== undefined ? "enabled" : "disabled" },
+    { name: "WhatsApp", status: config.whatsapp !== undefined ? "enabled" : "disabled" },
+    { name: "Email", status: getEmailStatus(config) },
+    { name: "Coder", status: config.coder !== undefined ? "enabled" : "disabled" },
+    { name: "Embeddings", status: config.embeddings !== undefined ? "enabled" : "disabled" },
   ];
 
-  const serviceRows = services
+  const rows = services
     .map(
       (service) =>
-        `<div class="stat-row">
-      <span class="stat-label">${service.name}</span>
-      <span class="stat-value ${service.status === "Disabled" ? "disabled" : "enabled"}">${service.status}</span>
-    </div>`,
+        `\n    <div class="sb-row"><span style="flex: 1">${service.name}</span>${renderServiceStatus(service.status)}</div>`,
     )
-    .join("\n    ");
+    .join("");
 
-  const navLinkHtml = `<a href="/explorer">Database explorer</a>
-    <a href="/settings">Settings</a>
-    <a href="/settings/allowlist" style="margin-left: 24px">Allowlist</a>
-    <a href="/settings/plugins" style="margin-left: 24px">Plugins</a>
-    <a href="/settings/config" style="margin-left: 24px">Config</a>`;
+  return `<section class="sb-card">
+    <div class="sb-card-h"><h2 class="sb-h2">Services</h2><a href="/settings/config" class="sb-small">Change in Config</a></div>${rows}
+  </section>`;
+}
 
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Stavrobot</title>
-  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.3.2/dist/purify.min.js" integrity="sha384-8hAfZQ5Oqos5HLTHfR0sLvvwpcVI4fGhV+0Dj/HCcpkKaacivQs82XHmvLOnAhXn" crossorigin="anonymous"></script>
-  <style>
-    ${getBaseStyles()}
-    html, body { height: 100%; overflow: hidden; }
-    body {
-      padding: 24px;
-      display: flex;
-      flex-direction: column;
-    }
-    h1 { flex-shrink: 0; }
-    .section a {
-      display: block;
-      font-size: 15px;
-      color: var(--color-accent);
-      text-decoration: none;
-      padding: 4px 0;
-    }
-    .section a:hover {
-      text-decoration: underline;
-    }
-    .stat-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 6px 0;
-      border-bottom: 1px solid var(--color-border-light);
-      font-size: 14px;
-    }
-    .stat-row:last-child { border-bottom: none; }
-    .stat-label { color: var(--color-text-secondary); }
-    .stat-value { font-weight: 500; }
-    .enabled { color: var(--color-success); }
-    .disabled { color: var(--color-text-disabled); }
+function renderStatisticsCard(stats: MessageStats): string {
+  const rows: Array<{ label: string; value: string; total?: boolean }> = [
+    { label: "From the web chat and internal", value: stats.web },
+    { label: "From the owner", value: stats.owner },
+    { label: "From other people", value: stats.others },
+    { label: "From agents", value: stats.agents },
+    { label: "Total", value: stats.total, total: true },
+  ];
 
-    /* Page layout */
-    .page-layout {
-      display: flex;
-      gap: 24px;
-      align-items: flex-start;
-      flex: 1;
-      min-height: 0;
-      overflow: hidden;
-    }
-    .chat-column {
-      flex: 6;
-      min-width: 0;
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-    }
-    .dashboard-column {
-      flex: 4;
-      min-width: 0;
-      height: 100%;
-      overflow-y: auto;
-    }
-    @media (max-width: 768px) {
-      html, body { height: auto; overflow: visible; }
-      .page-layout {
-        flex-direction: column;
-        overflow: visible;
-      }
-      .chat-column {
-        height: 60vh;
-        width: 100%;
-      }
-      .dashboard-column {
-        height: auto;
-        overflow-y: visible;
-        width: 100%;
-      }
-    }
+  const rowsHtml = rows
+    .map((row) => {
+      const label = row.total
+        ? `<span style="color: var(--text)">${row.label}</span>`
+        : `<span>${row.label}</span>`;
+      const attributes = row.total ? ' style="font-weight: 600"' : "";
+      return `\n      <div class="sb-kv"${attributes}>${label}<span class="sb-mono sb-num">${formatCount(row.value)}</span></div>`;
+    })
+    .join("");
 
-    /* Chat panel */
-    .chat-panel {
-      background: var(--color-surface);
-      box-shadow: 0 1px 3px var(--color-shadow), 0 1px 2px var(--color-shadow-secondary);
-      border-radius: 8px;
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-      overflow: hidden;
-    }
-    .chat-panel-header {
-      padding: 16px;
-      border-bottom: 1px solid var(--color-border-light);
-      flex-shrink: 0;
-    }
-    .chat-messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-    .chat-message {
-      display: flex;
-      flex-direction: column;
-      max-width: 85%;
-    }
-    .chat-message.user {
-      align-self: flex-end;
-      align-items: flex-end;
-    }
-    .chat-message.agent {
-      align-self: flex-start;
-      align-items: flex-start;
-    }
-    .chat-message-sender {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--color-text-muted);
-      margin-bottom: 4px;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-    .chat-message-bubble {
-      padding: 10px 14px;
-      border-radius: 12px;
-      font-size: 14px;
-      line-height: 1.5;
-      word-break: break-word;
-    }
-    .chat-message.user .chat-message-bubble {
-      background: var(--color-user-bubble);
-      color: var(--color-text);
-      border-bottom-right-radius: 4px;
-    }
-    .chat-message.agent .chat-message-bubble {
-      background: var(--color-agent-bubble);
-      color: var(--color-text);
-      border-bottom-left-radius: 4px;
-    }
-    .chat-message.error .chat-message-bubble {
-      background: var(--color-error-bg);
-      color: var(--color-error);
-    }
-    /* Markdown content inside agent bubbles */
-    .chat-message-bubble p { margin-bottom: 8px; }
-    .chat-message-bubble p:last-child { margin-bottom: 0; }
-    .chat-message-bubble ul,
-    .chat-message-bubble ol { margin: 8px 0 8px 20px; }
-    .chat-message-bubble li { margin-bottom: 4px; }
-    .chat-message-bubble pre {
-      background: var(--color-code-bg);
-      border-radius: 6px;
-      padding: 10px 12px;
-      overflow-x: auto;
-      margin: 8px 0;
-      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      font-size: 13px;
-    }
-    .chat-message-bubble code {
-      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-      font-size: 13px;
-      background: var(--color-code-bg);
-      padding: 1px 4px;
-      border-radius: 3px;
-    }
-    .chat-message-bubble pre code {
-      background: none;
-      padding: 0;
-    }
-    .chat-message-bubble blockquote {
-      border-left: 3px solid var(--color-accent);
-      margin: 8px 0;
-      padding-left: 12px;
-      color: var(--color-text-secondary);
-    }
-    .chat-message-bubble h1,
-    .chat-message-bubble h2,
-    .chat-message-bubble h3 {
-      font-size: 15px;
-      font-weight: 600;
-      margin: 10px 0 6px;
-    }
-    .chat-message-bubble a {
-      color: var(--color-accent);
-      text-decoration: underline;
-    }
+  return `<section class="sb-card">
+    <div class="sb-card-h"><h2 class="sb-h2">Message statistics</h2><span class="sb-small sb-muted">All time</span></div>
+    <div class="sb-card-b" style="padding-top: 4px; padding-bottom: 4px">${rowsHtml}
+    </div>
+  </section>`;
+}
 
-    /* Thinking indicator */
-    .thinking-indicator {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 10px 14px;
-      background: var(--color-agent-bubble);
-      border-radius: 12px;
-      border-bottom-left-radius: 4px;
-      font-size: 13px;
-      color: var(--color-text-muted);
-      align-self: flex-start;
-    }
-    .thinking-dot {
-      width: 6px;
-      height: 6px;
-      background: var(--color-accent);
-      border-radius: 50%;
-      animation: thinking-pulse 1.2s ease-in-out infinite;
-    }
-    .thinking-dot:nth-child(2) { animation-delay: 0.2s; }
-    .thinking-dot:nth-child(3) { animation-delay: 0.4s; }
-    @keyframes thinking-pulse {
-      0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
-      40% { opacity: 1; transform: scale(1); }
-    }
-
-    /* Chat input area */
-    .chat-input-area {
-      padding: 12px 16px;
-      border-top: 1px solid var(--color-border-light);
-      display: flex;
-      gap: 8px;
-      align-items: flex-end;
-      flex-shrink: 0;
-    }
-    .chat-textarea {
-      flex: 1;
-      border: 1px solid var(--color-border);
-      border-radius: 8px;
-      padding: 8px 12px;
-      font-family: inherit;
-      font-size: 14px;
-      line-height: 1.5;
-      resize: none;
-      min-height: 38px;
-      max-height: 160px;
-      overflow-y: auto;
-      outline: none;
-      transition: border-color 0.15s;
-      background: var(--color-surface);
-      color: var(--color-text);
-    }
-    .chat-textarea:focus {
-      border-color: var(--color-accent);
-    }
-    .chat-textarea:disabled {
-      background: var(--color-input-disabled-bg);
-      color: var(--color-text-disabled);
-    }
-    .chat-send-btn {
-      background: var(--color-accent);
-      color: #fff;
-      border: none;
-      border-radius: 8px;
-      padding: 8px 16px;
-      font-family: inherit;
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: background 0.15s;
-      height: 38px;
-      flex-shrink: 0;
-    }
-    .chat-send-btn:hover:not(:disabled) {
-      background: var(--color-accent-hover);
-    }
-    .chat-send-btn:disabled {
-      background: var(--color-btn-disabled-bg);
-      color: var(--color-text-disabled);
-      cursor: not-allowed;
-    }
-  </style>
-</head>
-<body>
-  <h1>Stavrobot</h1>
-
-  <div class="page-layout">
-    <div class="chat-column">
-      <div class="chat-panel">
-        <div class="chat-panel-header">
-          <h2>Chat</h2>
-        </div>
-        <div class="chat-messages" id="chat-messages"></div>
-        <div class="chat-input-area">
-          <textarea
-            id="chat-input"
-            class="chat-textarea"
-            placeholder="Type a message..."
-            rows="1"
-          ></textarea>
-          <button id="chat-send-btn" class="chat-send-btn">Send</button>
-        </div>
+function renderChatCard(): string {
+  return `<section class="sb-card sb-chat" aria-label="Chat with Stavrobot">
+    <div class="sb-card-h"><h2 class="sb-h2">Chat</h2><span class="sb-small sb-muted">Talks to the main agent</span></div>
+    <div class="sb-chat-log" id="chat-log" role="log" aria-live="polite">
+      <div class="sb-state" id="chat-empty" style="margin: auto">
+        <div class="sb-state-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.8A8.5 8.5 0 1 1 21 11.5z"></path></svg></div>
+        <strong>No messages yet</strong>
+        <p>Send a message to talk to the main agent.</p>
       </div>
     </div>
-
-    <div class="dashboard-column">
-      <div class="section">
-        <h2>Bot info</h2>
-        <div class="stat-row">
-          <span class="stat-label">Provider</span>
-          <span class="stat-value">${config.provider}</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">Model</span>
-          <span class="stat-value">${config.model}</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">Uptime</span>
-          <span class="stat-value">${uptime}</span>
-        </div>
-      </div>
-
-      <div class="section">
-        <h2>Services</h2>
-        ${serviceRows}
-      </div>
-
-      <div class="section">
-        <h2>Navigation</h2>
-        ${navLinkHtml}
-      </div>
-
-      <div class="section">
-        <h2>Message statistics</h2>
-        <div class="stat-row">
-          <span class="stat-label">Total inbound messages</span>
-          <span class="stat-value">${stats.total}</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">Signal</span>
-          <span class="stat-value">${stats.signal}</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">Telegram</span>
-          <span class="stat-value">${stats.telegram}</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">WhatsApp</span>
-          <span class="stat-value">${stats.whatsapp}</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">Email</span>
-          <span class="stat-value">${stats.email}</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">Web API</span>
-          <span class="stat-value">${stats.web}</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">Agents</span>
-          <span class="stat-value">${stats.agent}</span>
-        </div>
-      </div>
+    <div class="sb-composer">
+      <label for="chat-input" class="sb-sr">Message</label>
+      <textarea id="chat-input" class="sb-input" placeholder="Message Stavrobot" rows="1"></textarea>
+      <button id="chat-send" class="sb-btn sb-btn-primary sb-btn-icon sb-btn-lg" type="button" aria-label="Send"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12 20 4l-6 16-3-7z"></path></svg></button>
     </div>
-  </div>
+    <div class="sb-composer-hint">Enter to send, Shift+Enter for a new line</div>
+  </section>`;
+}
 
-  <script>
+function renderChatScript(): string {
+  return `<script>
     (function () {
-      const messagesEl = document.getElementById("chat-messages");
-      const inputEl = document.getElementById("chat-input");
-      const sendBtn = document.getElementById("chat-send-btn");
+      var log = document.getElementById("chat-log");
+      var empty = document.getElementById("chat-empty");
+      var input = document.getElementById("chat-input");
+      var send = document.getElementById("chat-send");
+      var pending = false;
+
+      var SEND_ICON = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12 20 4l-6 16-3-7z"></path></svg>';
+      var ERROR_ICON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16v.5"></path></svg>';
 
       function scrollToBottom() {
-        messagesEl.scrollTop = messagesEl.scrollHeight;
+        log.scrollTop = log.scrollHeight;
       }
 
-      function setInputEnabled(enabled) {
-        inputEl.disabled = !enabled;
-        sendBtn.disabled = !enabled;
+      function hideEmpty() {
+        empty.style.display = "none";
       }
 
-      function appendMessage(sender, contentHtml, isHtml, extraClass) {
-        const wrapper = document.createElement("div");
-        wrapper.className = "chat-message " + sender + (extraClass ? " " + extraClass : "");
+      function pad(value) {
+        return value < 10 ? "0" + value : String(value);
+      }
 
-        const senderEl = document.createElement("div");
-        senderEl.className = "chat-message-sender";
-        senderEl.textContent = sender === "user" ? "You" : "Stavrobot";
-
-        const bubble = document.createElement("div");
-        bubble.className = "chat-message-bubble";
-        if (isHtml) {
-          bubble.innerHTML = contentHtml;
-        } else {
-          bubble.textContent = contentHtml;
+      function formatTime(date) {
+        var hours = pad(date.getHours());
+        var minutes = pad(date.getMinutes());
+        var now = new Date();
+        var startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        if (date.getTime() >= startOfToday.getTime()) {
+          return hours + ":" + minutes;
         }
+        var startOfYesterday = new Date(startOfToday.getTime() - 86400000);
+        if (date.getTime() >= startOfYesterday.getTime()) {
+          return "Yesterday " + hours + ":" + minutes;
+        }
+        var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        return months[date.getMonth()] + " " + date.getDate() + " " + hours + ":" + minutes;
+      }
 
-        wrapper.appendChild(senderEl);
+      function makeMeta(name, time) {
+        var meta = document.createElement("div");
+        meta.className = "sb-msg-meta";
+        var label = document.createElement("b");
+        label.textContent = name;
+        meta.appendChild(label);
+        if (time) {
+          meta.appendChild(document.createTextNode(time));
+        }
+        return meta;
+      }
+
+      function appendUserMessage(text) {
+        hideEmpty();
+        var wrapper = document.createElement("div");
+        wrapper.className = "sb-msg sb-msg-user";
+        wrapper.appendChild(makeMeta("You", formatTime(new Date())));
+        var bubble = document.createElement("div");
+        bubble.className = "sb-bubble";
+        bubble.textContent = text;
         wrapper.appendChild(bubble);
-        messagesEl.appendChild(wrapper);
-        scrollToBottom();
-        return wrapper;
-      }
-
-      function showThinking() {
-        const wrapper = document.createElement("div");
-        wrapper.className = "thinking-indicator";
-        wrapper.id = "thinking-indicator";
-        wrapper.innerHTML =
-          '<div class="thinking-dot"></div>' +
-          '<div class="thinking-dot"></div>' +
-          '<div class="thinking-dot"></div>';
-        messagesEl.appendChild(wrapper);
+        log.appendChild(wrapper);
         scrollToBottom();
       }
 
-      function hideThinking() {
-        const el = document.getElementById("thinking-indicator");
-        if (el) {
-          el.remove();
+      function appendBotMessage(text) {
+        hideEmpty();
+        var wrapper = document.createElement("div");
+        wrapper.className = "sb-msg sb-msg-bot";
+        wrapper.appendChild(makeMeta("Stavrobot", formatTime(new Date())));
+        var bubble = document.createElement("div");
+        bubble.className = "sb-bubble sb-md";
+        if (typeof marked !== "undefined" && typeof DOMPurify !== "undefined") {
+          bubble.innerHTML = DOMPurify.sanitize(marked.parse(text));
+        } else {
+          bubble.textContent = text;
+        }
+        wrapper.appendChild(bubble);
+        log.appendChild(wrapper);
+        scrollToBottom();
+      }
+
+      function appendErrorMessage(message, failedText) {
+        hideEmpty();
+        var wrapper = document.createElement("div");
+        wrapper.className = "sb-msg sb-msg-bot sb-msg-error";
+        wrapper.appendChild(makeMeta("Stavrobot", formatTime(new Date())));
+        var bubble = document.createElement("div");
+        bubble.className = "sb-bubble";
+        bubble.innerHTML = ERROR_ICON;
+        var body = document.createElement("div");
+        var title = document.createElement("strong");
+        title.style.display = "block";
+        title.textContent = "The bot did not reply";
+        var detail = document.createElement("span");
+        detail.className = "sb-muted";
+        detail.textContent = message;
+        var again = document.createElement("button");
+        again.type = "button";
+        again.className = "sb-btn sb-btn-ghost sb-btn-sm";
+        again.style.margin = "4px 0 0 -12px";
+        again.textContent = "Send again";
+        again.addEventListener("click", function () {
+          if (failedText) {
+            void sendMessage(failedText, false);
+          }
+        });
+        body.appendChild(title);
+        body.appendChild(detail);
+        body.appendChild(document.createElement("br"));
+        body.appendChild(again);
+        bubble.appendChild(body);
+        wrapper.appendChild(bubble);
+        log.appendChild(wrapper);
+        scrollToBottom();
+      }
+
+      function showTyping() {
+        var wrapper = document.createElement("div");
+        wrapper.className = "sb-msg sb-msg-bot";
+        wrapper.id = "chat-typing";
+        wrapper.setAttribute("aria-live", "polite");
+        var meta = document.createElement("div");
+        meta.className = "sb-msg-meta";
+        var label = document.createElement("b");
+        label.textContent = "Stavrobot";
+        meta.appendChild(label);
+        meta.appendChild(document.createTextNode("is thinking"));
+        wrapper.appendChild(meta);
+        var bubble = document.createElement("div");
+        bubble.className = "sb-bubble sb-typing";
+        bubble.setAttribute("aria-label", "Stavrobot is thinking");
+        bubble.innerHTML = "<i></i><i></i><i></i>";
+        wrapper.appendChild(bubble);
+        log.appendChild(wrapper);
+        scrollToBottom();
+      }
+
+      function hideTyping() {
+        var element = document.getElementById("chat-typing");
+        if (element) {
+          element.remove();
         }
       }
 
-      // Auto-grow the textarea as the user types.
-      inputEl.addEventListener("input", function () {
-        this.style.height = "auto";
-        this.style.height = Math.min(this.scrollHeight, 160) + "px";
-      });
+      function setPending(value) {
+        pending = value;
+        input.disabled = value;
+        if (value) {
+          input.placeholder = "Waiting for the reply...";
+          send.classList.add("is-loading");
+          send.setAttribute("aria-busy", "true");
+          send.setAttribute("aria-label", "Sending");
+          send.innerHTML = '<span class="sb-spinner"></span>';
+        } else {
+          input.placeholder = "Message Stavrobot";
+          send.classList.remove("is-loading");
+          send.setAttribute("aria-busy", "false");
+          send.setAttribute("aria-label", "Send");
+          send.innerHTML = SEND_ICON;
+        }
+      }
 
-      async function sendMessage() {
-        const text = inputEl.value.trim();
-        if (!text) {
+      async function sendMessage(text, appendUser) {
+        if (pending) {
           return;
         }
-
-        inputEl.value = "";
-        inputEl.style.height = "auto";
-        setInputEnabled(false);
-
-        appendMessage("user", text, false, null);
-        showThinking();
-
+        var trimmed = text.trim();
+        if (!trimmed) {
+          return;
+        }
+        if (appendUser) {
+          appendUserMessage(trimmed);
+        }
+        input.value = "";
+        input.style.height = "";
+        showTyping();
+        setPending(true);
         try {
-          let responseText;
-          try {
-            const response = await fetch("/chat", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              credentials: "same-origin",
-              body: JSON.stringify({ message: text }),
-            });
-
-            if (!response.ok) {
-              throw new Error("Server returned " + response.status);
-            }
-
-            const data = await response.json();
-            if (typeof data.response === "string" && data.response.length > 0) {
-              responseText = data.response;
-            } else {
-              responseText = "(empty response)";
-            }
-          } catch (error) {
-            hideThinking();
-            appendMessage("agent", "Error: " + (error.message || String(error)), false, "error");
+          var response = await fetch("/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ message: trimmed }),
+          });
+          hideTyping();
+          if (!response.ok) {
+            appendErrorMessage("Server returned " + response.status, trimmed);
             return;
           }
-
-          hideThinking();
-          if (typeof marked !== "undefined" && typeof marked.parse === "function") {
-            const html = DOMPurify.sanitize(marked.parse(responseText));
-            appendMessage("agent", html, true, null);
-          } else {
-            appendMessage("agent", responseText, false, null);
-          }
+          var data = await response.json();
+          var responseText = typeof data.response === "string" && data.response.length > 0 ? data.response : "(empty response)";
+          appendBotMessage(responseText);
+        } catch (error) {
+          hideTyping();
+          appendErrorMessage(error && error.message ? error.message : String(error), trimmed);
         } finally {
-          setInputEnabled(true);
-          inputEl.focus();
+          setPending(false);
+          input.focus();
         }
       }
 
-      sendBtn.addEventListener("click", function () {
-        void sendMessage();
+      input.addEventListener("input", function () {
+        input.style.height = "auto";
+        input.style.height = Math.min(input.scrollHeight, 160) + "px";
       });
 
-      inputEl.addEventListener("keydown", function (event) {
+      input.addEventListener("keydown", function (event) {
         if (event.key === "Enter" && !event.shiftKey) {
           event.preventDefault();
-          void sendMessage();
+          void sendMessage(input.value, true);
         }
       });
 
-      inputEl.focus();
+      send.addEventListener("click", function () {
+        void sendMessage(input.value, true);
+      });
+
+      input.focus();
     })();
-  </script>
-</body>
-</html>`;
+  </script>`;
+}
+
+function buildContent(config: Config, uptime: string, stats: MessageStats): string {
+  return `<div class="sb-page-h"><h1 class="sb-h1">Overview</h1><span class="sb-pill"><span class="sb-dot sb-dot-on"></span>Online · ${escapeHtml(uptime)}</span></div>
+  <div class="sb-overview">
+    ${renderChatCard()}
+    <div class="sb-overview-side">
+      ${renderBotInfoCard(config, uptime)}
+      ${renderServicesCard(config)}
+      ${renderStatisticsCard(stats)}
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.3.2/dist/purify.min.js" integrity="sha384-8hAfZQ5Oqos5HLTHfR0sLvvwpcVI4fGhV+0Dj/HCcpkKaacivQs82XHmvLOnAhXn" crossorigin="anonymous"></script>
+  ${renderChatScript()}`;
+}
+
+function buildHomePage(config: Config, uptime: string, stats: MessageStats): string {
+  return renderPageShell({
+    title: "Overview",
+    mobileTitle: "Stavrobot",
+    content: buildContent(config, uptime, stats),
+    nav: { active: "overview", model: config.model, uptime },
+  });
 }
 
 export async function serveHomePage(
@@ -567,25 +373,24 @@ export async function serveHomePage(
   pool: pg.Pool,
 ): Promise<void> {
   try {
-    log.debug("[stavrobot] serveHomePage: querying message stats");
+    log.debug("[stavrobot] serveHomePage: querying message statistics");
 
     const result = await pool.query<MessageStats>(`
       SELECT
         COUNT(*) AS total,
-        COUNT(*) FILTER (WHERE ii.service = 'signal') AS signal,
-        COUNT(*) FILTER (WHERE ii.service = 'telegram') AS telegram,
-        COUNT(*) FILTER (WHERE ii.service = 'whatsapp') AS whatsapp,
-        COUNT(*) FILTER (WHERE ii.service = 'email') AS email,
         COUNT(*) FILTER (WHERE m.sender_identity_id IS NULL AND m.sender_agent_id IS NULL) AS web,
-        COUNT(*) FILTER (WHERE m.sender_agent_id IS NOT NULL) AS agent
+        COUNT(*) FILTER (WHERE m.sender_agent_id IS NOT NULL) AS agents,
+        COUNT(*) FILTER (WHERE m.sender_identity_id IS NOT NULL AND i.owner = true) AS owner,
+        COUNT(*) FILTER (WHERE m.sender_identity_id IS NOT NULL AND i.owner = false) AS others
       FROM messages m
       LEFT JOIN interlocutor_identities ii ON ii.id = m.sender_identity_id
+      LEFT JOIN interlocutors i ON i.id = ii.interlocutor_id
       WHERE m.role = 'user'
     `);
 
     const stats = result.rows[0];
-    const uptime = formatUptime(Date.now() - startTime);
-    const html = buildHtml(config, uptime, stats);
+    const uptime = getUptime();
+    const html = buildHomePage(config, uptime, stats);
 
     log.debug("[stavrobot] serveHomePage: serving home page");
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });

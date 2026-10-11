@@ -5,4 +5,5 @@ config.json
 .env
 data
 cache
+design
 __pycache__
