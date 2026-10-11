@@ -174,12 +174,17 @@ botToken = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 # smtpPassword = "your-smtp-password"
 # fromAddress = "bot@example.com"
 
-# Enables the self-programming coder agent. Uses Claude Code headless, which
-# requires subscription auth (see README). The model must be a Claude Code
-# alias: "sonnet", "opus", or "haiku". This section also requires enabling the
-# "coder" Docker Compose profile (see README for details).
+# Enables the self-programming coder agent. Uses Claude Code headless. The model
+# must be a Claude Code alias: "sonnet", "opus", or "haiku". This section also
+# requires enabling the "coder" Docker Compose profile (see README for details).
+# By default the coder uses the subscription OAuth login (see README). To use an
+# Anthropic-compatible API endpoint instead, set both keys below; they are passed
+# to Claude Code as ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL. Setting only one of
+# the two is a startup error. The top-level apiKey/baseUrl never affect the coder.
 [coder]
 model = "opus"
+# apiKey = "your-anthropic-api-key-here"
+# baseUrl = "https://api.anthropic.com"
 
 # Optional OpenAI embeddings support. When present, the bot generates vector
 # embeddings for semantic search. This improves recall (finding relevant

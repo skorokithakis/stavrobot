@@ -21,6 +21,8 @@ export interface PostgresConfig {
 
 export interface CoderConfig {
   model: string;
+  apiKey?: string;
+  baseUrl?: string;
 }
 
 export interface SignalConfig {

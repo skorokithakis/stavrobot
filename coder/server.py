@@ -57,8 +57,11 @@ def load_config() -> tuple[str, str, str | None, str | None]:
     coder_section = config.get("coder", {})
     model = coder_section["model"]
 
-    api_key: str | None = config.get("apiKey") or None
-    base_url: str | None = config.get("baseUrl") or None
+    api_key: str | None = coder_section.get("apiKey") or None
+    base_url: str | None = coder_section.get("baseUrl") or None
+    if (api_key is None) != (base_url is None):
+        print("[stavrobot-coder] Fatal: [coder] must set both 'apiKey' and 'baseUrl', or neither")
+        raise SystemExit(1)
     if base_url is not None and base_url.endswith("/v1"):
         base_url = base_url[:-3]
 
