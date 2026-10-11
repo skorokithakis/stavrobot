@@ -239,6 +239,12 @@ function buildPluginsContent(): string {
 
   var state = { plugins: [], selectedName: null, mobileShowDetail: false, confirmName: null };
   var mobileQuery = window.matchMedia("(max-width: 768px)");
+  var DETAIL_HISTORY_STATE = { pluginDetail: true };
+  // history.back() is asynchronous, so a removal request stays "pending" until
+  // its popstate lands. This prevents duplicate back() calls and lets a detail
+  // reopened in the meantime keep a fresh marker.
+  var detailHistoryPending = false;
+  var detailHistoryReopened = false;
 
   var listBody = document.querySelector("[data-list-body]");
   var countBadge = document.querySelector("[data-count-badge]");
@@ -611,6 +617,13 @@ function buildPluginsContent(): string {
     renderList();
     renderDetail();
     updateView();
+    if (mobileQuery.matches && !detailCard.hidden) {
+      if (detailHistoryPending) {
+        detailHistoryReopened = true;
+      } else {
+        pushDetailHistory();
+      }
+    }
     if (focusItem) {
       var item = listBody.querySelector('[data-name="' + name + '"]');
       if (item) {
@@ -623,6 +636,31 @@ function buildPluginsContent(): string {
     state.mobileShowDetail = false;
     renderList();
     updateView();
+  }
+
+  function isDetailHistoryCurrent() {
+    return history.state !== null && history.state.pluginDetail === true;
+  }
+
+  function pushDetailHistory() {
+    if (!isDetailHistoryCurrent()) {
+      history.pushState(DETAIL_HISTORY_STATE, "", window.location.href);
+    }
+  }
+
+  function clearDetailHistory() {
+    if (isDetailHistoryCurrent() && !detailHistoryPending) {
+      detailHistoryPending = true;
+      history.back();
+    }
+  }
+
+  function dismissDetail() {
+    if (isDetailHistoryCurrent() && !detailHistoryPending) {
+      clearDetailHistory();
+    } else {
+      backToDetailList();
+    }
   }
 
   async function reloadPlugin(name) {
@@ -675,6 +713,7 @@ function buildPluginsContent(): string {
     if (findPlugin(state.selectedName) === null) {
       state.selectedName = loaded.length > 0 ? loaded[0].name : null;
       state.mobileShowDetail = false;
+      clearDetailHistory();
     }
   }
 
@@ -1130,7 +1169,7 @@ function buildPluginsContent(): string {
       return;
     }
     if (target.closest("[data-back]")) {
-      backToDetailList();
+      dismissDetail();
       return;
     }
     if (target.closest("[data-replace]")) {
@@ -1234,10 +1273,27 @@ function buildPluginsContent(): string {
   if (mobileQuery.addEventListener) {
     mobileQuery.addEventListener("change", function () {
       state.mobileShowDetail = false;
+      clearDetailHistory();
       renderList();
       updateView();
     });
   }
+
+  window.addEventListener("popstate", function () {
+    var pending = detailHistoryPending;
+    detailHistoryPending = false;
+    if (pending && detailHistoryReopened) {
+      detailHistoryReopened = false;
+      if (state.mobileShowDetail) {
+        pushDetailHistory();
+      }
+    } else if (state.mobileShowDetail) {
+      backToDetailList();
+    }
+    if (!state.mobileShowDetail && isDetailHistoryCurrent()) {
+      history.replaceState(null, "", window.location.href);
+    }
+  });
 
   async function init() {
     try {

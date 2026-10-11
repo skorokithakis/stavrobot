@@ -258,6 +258,12 @@ const EXPLORER_SCRIPT = `<script>
     errorMessage: ""
   };
   var pickerAutoOpened = false;
+  var PANEL_HISTORY_STATE = { dbRowPanel: true };
+  // history.back() is asynchronous, so a removal request stays "pending" until
+  // its popstate lands. This prevents duplicate back() calls and lets a panel
+  // reopened in the meantime keep a fresh marker.
+  var panelHistoryPending = false;
+  var panelHistoryReopened = false;
 
   var body = document.getElementById("db-body");
   var tableSelect = document.getElementById("db-table-select");
@@ -792,7 +798,48 @@ const EXPLORER_SCRIPT = `<script>
   function updateUrl(name) {
     var url = new URL(window.location.href);
     url.searchParams.set("table", name);
-    history.replaceState(null, "", url.toString());
+    history.replaceState(history.state, "", url.toString());
+  }
+
+  function isPanelHistoryCurrent() {
+    return history.state !== null && history.state.dbRowPanel === true;
+  }
+
+  function pushPanelHistory() {
+    if (!isPanelHistoryCurrent()) {
+      history.pushState(PANEL_HISTORY_STATE, "", window.location.href);
+    }
+  }
+
+  function clearPanelHistory() {
+    if (isPanelHistoryCurrent() && !panelHistoryPending) {
+      panelHistoryPending = true;
+      history.back();
+    }
+  }
+
+  function dismissPanel() {
+    if (isPanelHistoryCurrent() && !panelHistoryPending) {
+      clearPanelHistory();
+    } else {
+      closePanel();
+    }
+  }
+
+  // The table is tracked with replaceState rather than a new history entry, so
+  // a programmatic close that pops the marker entry can land on a URL holding a
+  // stale table name. Restore it from the authoritative in-page state.
+  function syncUrlToState() {
+    var url = new URL(window.location.href);
+    if (state.table === null) {
+      url.searchParams.delete("table");
+    } else {
+      url.searchParams.set("table", state.table);
+    }
+    var next = url.toString();
+    if (next !== window.location.href) {
+      history.replaceState(history.state, "", next);
+    }
   }
 
   function applyDefaultSort() {
@@ -892,6 +939,7 @@ const EXPLORER_SCRIPT = `<script>
     updateUrl(name);
     updateHeaderControls();
     closePanel();
+    clearPanelHistory();
     state.view = "loading";
     renderBody();
     try {
@@ -930,6 +978,8 @@ const EXPLORER_SCRIPT = `<script>
   function goToOffset(offset) {
     state.offset = Math.max(0, offset);
     state.selectedIndex = -1;
+    closePanel();
+    clearPanelHistory();
     state.view = "loading";
     renderBody();
     void loadRows();
@@ -1043,6 +1093,7 @@ const EXPLORER_SCRIPT = `<script>
     if (index < 0 || index >= state.rows.length) {
       return;
     }
+    var wasOpen = state.selectedIndex !== -1;
     state.selectedIndex = index;
     markSelected();
     var row = state.rows[index];
@@ -1080,6 +1131,13 @@ const EXPLORER_SCRIPT = `<script>
       var layout = document.getElementById("db-layout");
       if (layout !== null) {
         layout.classList.add("has-panel");
+      }
+    }
+    if (!wasOpen) {
+      if (panelHistoryPending) {
+        panelHistoryReopened = true;
+      } else {
+        pushPanelHistory();
       }
     }
   }
@@ -1303,7 +1361,7 @@ const EXPLORER_SCRIPT = `<script>
       return;
     }
     if (target.closest("[data-panel-close]")) {
-      closePanel();
+      dismissPanel();
       return;
     }
     if (target.closest("[data-retry]")) {
@@ -1330,7 +1388,7 @@ const EXPLORER_SCRIPT = `<script>
       return;
     }
     if (target.closest("[data-db-back]")) {
-      closePanel();
+      dismissPanel();
       return;
     }
     var newer = target.closest("[data-row-newer]");
@@ -1365,7 +1423,7 @@ const EXPLORER_SCRIPT = `<script>
         return;
       }
       if (state.selectedIndex !== -1) {
-        closePanel();
+        dismissPanel();
         return;
       }
     }
@@ -1396,6 +1454,7 @@ const EXPLORER_SCRIPT = `<script>
     closePicker();
     closeSortSheet();
     closePanel();
+    clearPanelHistory();
     state.selectedIndex = -1;
     resetMobileHeader();
     setTabbarVisible(true);
@@ -1406,6 +1465,23 @@ const EXPLORER_SCRIPT = `<script>
   if (mobileQuery.addEventListener) {
     mobileQuery.addEventListener("change", handleLayoutChange);
   }
+
+  window.addEventListener("popstate", function () {
+    var pending = panelHistoryPending;
+    panelHistoryPending = false;
+    if (pending && panelHistoryReopened) {
+      panelHistoryReopened = false;
+      if (state.selectedIndex !== -1) {
+        pushPanelHistory();
+      }
+    } else if (state.selectedIndex !== -1) {
+      closePanel();
+    }
+    if (state.selectedIndex === -1 && isPanelHistoryCurrent()) {
+      history.replaceState(null, "", window.location.href);
+    }
+    syncUrlToState();
+  });
 
   void loadTables();
 })();

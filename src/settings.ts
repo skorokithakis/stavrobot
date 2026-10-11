@@ -515,20 +515,20 @@ const ALLOWLIST_PAGE_SCRIPT = `<script>
     var rows = [];
     var i;
     for (i = 0; i < SERVICE_ORDER.length; i++) {
-      var ownerService = SERVICE_ORDER[i];
-      var ownerValues = listFor(ownerService);
-      for (var o = 0; o < ownerValues.length; o++) {
-        if (isOwnerValue(ownerService, ownerValues[o])) {
-          rows.push({ service: ownerService, value: ownerValues[o], owner: true, wildcard: false });
-        }
-      }
-    }
-    for (i = 0; i < SERVICE_ORDER.length; i++) {
       var wildService = SERVICE_ORDER[i];
       var wildValues = listFor(wildService);
       for (var w = 0; w < wildValues.length; w++) {
         if (String(wildValues[w]) === "*" && !isOwnerValue(wildService, wildValues[w])) {
           rows.push({ service: wildService, value: wildValues[w], owner: false, wildcard: true });
+        }
+      }
+    }
+    for (i = 0; i < SERVICE_ORDER.length; i++) {
+      var ownerService = SERVICE_ORDER[i];
+      var ownerValues = listFor(ownerService);
+      for (var o = 0; o < ownerValues.length; o++) {
+        if (isOwnerValue(ownerService, ownerValues[o])) {
+          rows.push({ service: ownerService, value: ownerValues[o], owner: true, wildcard: false });
         }
       }
     }
