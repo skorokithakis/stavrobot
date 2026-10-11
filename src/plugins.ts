@@ -477,7 +477,7 @@ function buildPluginsContent(): string {
   }
 
   function dangerZoneHtml(plugin) {
-    return '<div class="sb-danger-zone" style="max-width: 720px"><div><strong>Delete this plugin</strong><span>Stavrobot loses its tools and its saved settings. You cannot undo this.</span></div>'
+    return '<div class="sb-danger-zone"><div><strong>Delete this plugin</strong><span>Stavrobot loses its tools and its saved settings. You cannot undo this.</span></div>'
       + '<div class="sb-confirm"><button class="sb-btn sb-btn-danger" type="button" data-delete>' + TRASH + "Delete</button>"
       + '<div class="sb-popover sb-confirm-pop" data-confirm-pop role="dialog" aria-modal="true" aria-labelledby="confirm-title-desktop" hidden>'
       + '<strong id="confirm-title-desktop" data-confirm-title></strong>'
