@@ -207,4 +207,43 @@ describe("handleLoginEvents", (): void => {
     expect(firstResponse.writes.join("")).toContain("event: success");
     expect(secondResponse.writes.join("")).toContain("event: success");
   });
+
+  it("prefers the headless login method in a select prompt", async (): Promise<void> => {
+    const credential: OAuthCredential = {
+      type: "oauth",
+      refresh: "refresh-token",
+      access: "access-token",
+      expires: Date.now() + 60_000,
+    };
+    const selectedOptions: string[] = [];
+    const makeOauth = (optionIds: string[]): OAuthAuth => ({
+      name: "Test OAuth",
+      login: async (interaction): Promise<OAuthCredential> => {
+        const selected = await interaction.prompt({
+          type: "select",
+          message: "Choose a login method.",
+          options: optionIds.map((id) => ({ id, label: id })),
+        });
+        selectedOptions.push(selected);
+        return credential;
+      },
+      refresh: vi.fn(),
+      toAuth: vi.fn(),
+    });
+
+    await handleLoginEvents(
+      makeEventRequest(),
+      makeResponse() as unknown as http.ServerResponse,
+      createConfig(),
+      (): OAuthAuth => makeOauth(["browser", "copy_code"]),
+    );
+    await handleLoginEvents(
+      makeEventRequest(),
+      makeResponse() as unknown as http.ServerResponse,
+      createConfig(),
+      (): OAuthAuth => makeOauth(["browser"]),
+    );
+
+    expect(selectedOptions).toEqual(["copy_code", "browser"]);
+  });
 });

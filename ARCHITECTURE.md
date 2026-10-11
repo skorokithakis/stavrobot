@@ -459,6 +459,15 @@ Exactly one of these must be set in `config.toml`:
   refreshed with `oauth.refresh(credential, AbortSignal.timeout(30_000))` and written
   back with its `"oauth"` type tag. `oauth.toAuth(credential)` derives the API key.
 
+When the library's `oauth.login()` asks which login method to use (a `select` prompt),
+`src/login.ts` prefers the headless methods in the order `copy_code`, `device_code`,
+`device-code`, then `browser`, falling back to the first option. The browser flow's
+loopback callback port (53692) is never reachable from the user's browser, so the
+copy-code and device-code flows are the only usable ones. With Anthropic's `copy_code`,
+the provider shows a code after authorization that the user pastes into the Stavrobot
+login page. Device-code flows go the other way: Stavrobot shows the code and the user
+enters it on the provider's site.
+
 The `getApiKey(config)` function in `src/auth.ts` resolves whichever is configured and
 returns a plain string. The `Agent` receives it through `getApiKey: () => getApiKey(config)`
 and explicitly uses `streamFn: streamSimple` from `@earendil-works/pi-ai/compat`, which

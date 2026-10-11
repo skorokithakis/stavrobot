@@ -103,10 +103,10 @@ function buildLoginPageHtml(providerName: string): string {
         <li id="redirect-step3">
           <span id="redirect-return">Come back to this page.</span>
           <div class="sb-field" id="redirect-field" hidden>
-            <label for="redirect-input" id="redirect-label">Paste the full redirect URL or code here</label>
-            <input id="redirect-input" class="sb-input sb-mono" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="https://console.example.com/oauth/code/callback?code=...">
-            <span class="sb-hint" id="redirect-hint">You see it on the page after you authorize.</span>
-            <span class="sb-field-error" id="redirect-error" hidden>${WARN_ICON_SMALL}This does not look like a URL or a code. Copy the whole address from the browser.</span>
+            <label for="redirect-input" id="redirect-label">Paste the code here</label>
+            <input id="redirect-input" class="sb-input sb-mono" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="code#state">
+            <span class="sb-hint" id="redirect-hint">The provider shows the code after you authorize. Copy it and paste it here.</span>
+            <span class="sb-field-error" id="redirect-error" hidden>${WARN_ICON_SMALL}Enter the code the provider shows after you authorize.</span>
           </div>
         </li>
       </ol>
@@ -622,12 +622,14 @@ export async function handleLoginEvents(
         if (prompt.type === "select") {
           const options = prompt.options.map((option) => option.id).join(", ");
           log.debug(`[stavrobot] handleLoginEvents: select prompt received, options: [${options}]`);
-          const browserOption = prompt.options.find((option) => option.id === "browser");
-          if (browserOption !== undefined) {
-            log.debug("[stavrobot] handleLoginEvents: select prompt picking 'browser'");
-            return "browser";
+          const preferenceOrder = ["copy_code", "device_code", "device-code", "browser"];
+          for (const preferredId of preferenceOrder) {
+            if (prompt.options.some((option) => option.id === preferredId)) {
+              log.debug(`[stavrobot] handleLoginEvents: select prompt picking '${preferredId}'`);
+              return preferredId;
+            }
           }
-          log.debug(`[stavrobot] handleLoginEvents: select prompt has no 'browser' option, picking first: ${prompt.options[0].id}`);
+          log.debug(`[stavrobot] handleLoginEvents: select prompt has no preferred option, picking first: ${prompt.options[0].id}`);
           return prompt.options[0].id;
         }
 

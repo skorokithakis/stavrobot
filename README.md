@@ -65,7 +65,7 @@ The app supports two authentication modes: API key or OAuth.
 
 - **API key:** Set `apiKey` in `config.toml`. No login or logout needed.
 - **OAuth:** Set `authFile` in `config.toml` (a path where credentials will be stored). The login page works with any OAuth provider supported by Pi.
-  - **Login:** Visit `<your-hostname>/login` in a browser. Follow the prompts on the page, and credentials are saved to the auth file. If auth expires while the bot is running, it sends a message with the login URL to you via your messaging platform.
+  - **Login:** Visit `<your-hostname>/login` in a browser. Follow the prompts on the page, and credentials are saved to the auth file. Stavrobot picks the provider's headless login method, so you never get redirected to an unreachable `localhost` callback. With Anthropic, after you select Authorize, Anthropic shows a code, which you copy and paste into the Stavrobot login page. Providers with a device-code flow show the code on the Stavrobot page instead, and you type it on the provider's site. If auth expires while the bot is running, it sends a message with the login URL to you via your messaging platform.
   - **Logout:** Delete the file at the `authFile` path. The bot will detect missing credentials on the next message and prompt you to log in again.
 
 ### Claude Code setup
