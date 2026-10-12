@@ -12,3 +12,6 @@ url = "https://github.com/diegopetrucci/stavrobot-imcp-plugin"
 
 [[plugin]]
 url = "https://github.com/diegopetrucci/stavrobot-polymarket-plugin"
+
+[[plugin]]
+url = "https://github.com/diegopetrucci/stavrobot-ebooks-plugin"
