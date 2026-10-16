@@ -126,16 +126,33 @@ describe("createRunPluginToolTool", () => {
     expect(text).toBe(JSON.stringify({ result: "something" }));
   });
 
-  it("clears the plugin files directory before making the run HTTP request", async () => {
+  it("does not delete any directory before running", async () => {
     mockFetchSequence(
       { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
       { status: 200, body: JSON.stringify({ success: true, output: "done" }) },
     );
     await tool.execute("call-8", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
-    expect(vi.mocked(fs.rm)).toHaveBeenCalledWith(
-      path.join(TEMP_ATTACHMENTS_DIR, "myplugin"),
-      { recursive: true, force: true },
+    expect(vi.mocked(fs.rm)).not.toHaveBeenCalled();
+  });
+
+  it("keeps files from an earlier call by writing each call into a new output directory", async () => {
+    const fileData = Buffer.from("hello file").toString("base64");
+    const runResponse = { status: 200, body: JSON.stringify({ success: true, output: "done", files: [{ filename: "report.txt", data: fileData }] }) };
+    mockFetchSequence(
+      { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
+      runResponse,
+      { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
+      runResponse,
     );
+    await tool.execute("call-keep-1", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
+    await tool.execute("call-keep-2", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
+    const writtenPaths = vi.mocked(fs.writeFile).mock.calls.map((call) => String(call[0]));
+    expect(writtenPaths).toHaveLength(2);
+    expect(writtenPaths[0]).not.toBe(writtenPaths[1]);
+    for (const writtenPath of writtenPaths) {
+      expect(path.dirname(writtenPath)).toMatch(new RegExp(`^${TEMP_ATTACHMENTS_DIR}/output-[0-9a-f-]{36}$`));
+    }
+    expect(vi.mocked(fs.rm)).not.toHaveBeenCalled();
   });
 
   it("saves transported files and appends 'Output files' listing to result", async () => {
@@ -144,11 +161,12 @@ describe("createRunPluginToolTool", () => {
       { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
       { status: 200, body: JSON.stringify({ success: true, output: "done", files: [{ filename: "report.txt", data: fileData }] }) },
     );
-    const expectedDir = path.join(TEMP_ATTACHMENTS_DIR, "myplugin");
     vi.mocked(fs.readdir).mockResolvedValueOnce(["report.txt"] as unknown as never[]);
     vi.mocked(fs.stat).mockResolvedValueOnce({ size: 1536 } as unknown as import("fs").Stats);
     const result = await tool.execute("call-9", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
     const text = (result.content[0] as { type: string; text: string }).text;
+    const expectedDir = String(vi.mocked(fs.mkdir).mock.calls[0][0]);
+    expect(expectedDir).toMatch(new RegExp(`^${TEMP_ATTACHMENTS_DIR}/output-[0-9a-f-]{36}$`));
     expect(vi.mocked(fs.mkdir)).toHaveBeenCalledWith(expectedDir, { recursive: true });
     expect(vi.mocked(fs.writeFile)).toHaveBeenCalledWith(
       path.join(expectedDir, "report.txt"),
@@ -406,7 +424,25 @@ describe("createRunPluginToolTool", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(JSON.parse((fetchMock.mock.calls[1][1] as { body: string }).body)).toEqual({ value: 1 });
     expect(JSON.parse((fetchMock.mock.calls[2][1] as { body: string }).body)).toEqual({ value: 2 });
-    expect(vi.mocked(fs.rm)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(fs.rm)).not.toHaveBeenCalled();
+  });
+
+  it("writes each batch item's files into its own output directory", async () => {
+    const fileData = Buffer.from("hello file").toString("base64");
+    const runResponse = { status: 200, body: JSON.stringify({ success: true, output: "done", files: [{ filename: "report.txt", data: fileData }] }) };
+    mockFetchSequence(
+      { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
+      runResponse,
+      runResponse,
+    );
+    await tool.execute("call-batch-dirs", {
+      plugin: "myplugin",
+      tool: "mytool",
+      parameters: JSON.stringify([{}, {}]),
+    });
+    const writtenPaths = vi.mocked(fs.writeFile).mock.calls.map((call) => String(call[0]));
+    expect(writtenPaths).toHaveLength(2);
+    expect(path.dirname(writtenPaths[0])).not.toBe(path.dirname(writtenPaths[1]));
   });
 
   it("continues the batch when one call fails and still numbers every result", async () => {
@@ -508,7 +544,6 @@ describe("createRunPluginToolTool", () => {
     const text = (result.content[0] as { type: string; text: string }).text;
     expect(text).toBe('Error: tool "mytool" (plugin "myplugin") is asynchronous and cannot be run in a batch. Run it once per call with a single parameters object.');
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(fs.rm)).not.toHaveBeenCalled();
   });
 
   it("returns an error for an empty parameters array", async () => {

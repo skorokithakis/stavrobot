@@ -2,13 +2,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import { TEMP_ATTACHMENTS_DIR } from "./temp-dir.js";
+import { TEMP_ATTACHMENTS_DIR, createOutputDirPath } from "./temp-dir.js";
 import { log } from "./log.js";
 import { internalFetch } from "./internal-fetch.js";
 import { toolError, toolSuccess } from "./tool-result.js";
 
 const PYTHON_RUNNER_URL = "http://python-runner:3003/run";
-const PYTHON_RUNNER_OUTPUT_DIR = path.join(TEMP_ATTACHMENTS_DIR, "python-runner");
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) {
@@ -68,10 +67,6 @@ export function createRunPythonTool(): AgentTool {
         inputFiles.push({ filename: path.basename(resolvedPath), data: data.toString("base64") });
       }
 
-      // Clear the output directory before each run so stale files from previous runs
-      // are not mixed with the current run's output.
-      await fs.rm(PYTHON_RUNNER_OUTPUT_DIR, { recursive: true, force: true });
-
       let output: string;
       try {
         const response = await internalFetch(PYTHON_RUNNER_URL, {
@@ -98,7 +93,8 @@ export function createRunPythonTool(): AgentTool {
             // Save output files returned by the python-runner.
             const rawFiles = (json as Record<string, unknown>).files;
             if (Array.isArray(rawFiles) && rawFiles.length > 0) {
-              await fs.mkdir(PYTHON_RUNNER_OUTPUT_DIR, { recursive: true });
+              const outputDir = createOutputDirPath();
+              await fs.mkdir(outputDir, { recursive: true });
               const savedPaths: string[] = [];
               for (const rawFile of rawFiles) {
                 if (
@@ -111,7 +107,7 @@ export function createRunPythonTool(): AgentTool {
                 ) {
                   const filename = (rawFile as Record<string, unknown>).filename as string;
                   const data = (rawFile as Record<string, unknown>).data as string;
-                  const outPath = path.join(PYTHON_RUNNER_OUTPUT_DIR, filename);
+                  const outPath = path.join(outputDir, filename);
                   const buffer = Buffer.from(data, "base64");
                   await fs.writeFile(outPath, buffer);
                   savedPaths.push(outPath);

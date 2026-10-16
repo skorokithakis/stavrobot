@@ -3,7 +3,7 @@ import path from "path";
 import { Type } from "@earendil-works/pi-ai";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { encodeToToon } from "./toon.js";
-import { TEMP_ATTACHMENTS_DIR } from "./temp-dir.js";
+import { TEMP_ATTACHMENTS_DIR, createOutputDirPath } from "./temp-dir.js";
 import { log } from "./log.js";
 import { internalFetch } from "./internal-fetch.js";
 import { toolError, toolSuccess } from "./tool-result.js";
@@ -412,7 +412,7 @@ interface PluginToolRun {
 }
 
 // Runs the tool once: resolves file parameters, sends the request to
-// plugin-runner, and saves any returned files into pluginFilesDir. Throws only
+// plugin-runner, and saves any returned files into a fresh output directory. Throws only
 // on file-parameter resolution errors; parse failures of the run response are
 // already handled by formatRunPluginToolResult.
 async function runPluginToolOnce(
@@ -420,7 +420,6 @@ async function runPluginToolOnce(
   tool: string,
   manifest: unknown,
   parameters: unknown,
-  pluginFilesDir: string,
 ): Promise<PluginToolRun> {
   const resolvedParameters = await resolveFileParameters(plugin, tool, manifest, parameters);
 
@@ -450,6 +449,7 @@ async function runPluginToolOnce(
           typeof (f as Record<string, unknown>).data === "string"
       );
       if (validFiles.length > 0) {
+        const pluginFilesDir = createOutputDirPath();
         await fs.mkdir(pluginFilesDir, { recursive: true });
         for (const file of validFiles) {
           const filePath = path.join(pluginFilesDir, file.filename);
@@ -536,12 +536,8 @@ export function createRunPluginToolTool(): AgentTool {
         return toolError(`Error: tool "${tool}" (plugin "${plugin}") is asynchronous and cannot be run in a batch. Run it once per call with a single parameters object.`);
       }
 
-      const pluginFilesDir = path.join(TEMP_ATTACHMENTS_DIR, plugin);
-      // Clear stale files from previous runs once per batch, not per call.
-      await fs.rm(pluginFilesDir, { recursive: true, force: true });
-
       if (!isBatch) {
-        const { result, filesWritten } = await runPluginToolOnce(plugin, tool, manifest, parsedParameters, pluginFilesDir);
+        const { result, filesWritten } = await runPluginToolOnce(plugin, tool, manifest, parsedParameters);
         let output = result;
         if (filesWritten.length > 0) {
           output += await formatOutputFiles(filesWritten);
@@ -560,7 +556,7 @@ export function createRunPluginToolTool(): AgentTool {
           callResult = `The run of tool "${tool}" (plugin "${plugin}") failed:\n\`\`\`\nBatch item ${index + 1} is not a JSON object.\n\`\`\``;
         } else {
           try {
-            const { result, filesWritten } = await runPluginToolOnce(plugin, tool, manifest, itemParameters, pluginFilesDir);
+            const { result, filesWritten } = await runPluginToolOnce(plugin, tool, manifest, itemParameters);
             callResult = result;
             if (filesWritten.length > 0) {
               callResult += await formatOutputFiles(filesWritten);

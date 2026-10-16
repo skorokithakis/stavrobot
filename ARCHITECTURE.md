@@ -272,15 +272,21 @@ Plugins live in `/plugins/<name>/` (shared volume between `plugin-runner` and `c
 - `plugin-runner` receives `POST /bundles/<plugin>/tools/<tool>/run` with JSON body.
 - `run_plugin_tool` accepts either a single parameter object or a JSON array of them.
   An array runs the tool once per item, sequentially, and returns one result with each
-  call numbered (1-based). A failed call does not stop the rest of the batch. The
-  plugin's temp directory is cleared once at batch start, and file-type parameters are
-  resolved per item. Arrays are rejected for async tools; empty arrays return an error.
+  call numbered (1-based). A failed call does not stop the rest of the batch.
+  File-type parameters are resolved per item. Arrays are rejected for async tools; empty
+  arrays return an error.
 - Parameters of type `"file"` are base64-decoded from the request and materialised into
   `/tmp/<plugin>/` before the script runs.
 - The script receives all parameters as JSON on stdin.
 - stdout is captured and returned as `{ success: true, output: … }`.
 - Files written to `/tmp/<plugin>/` by the script are base64-encoded and returned in
   `{ files: [{ filename, data }] }`.
+- On the main app side, files returned by a run are written to a fresh
+  `/tmp/stavrobot-temp/output-<uuid>/` directory (one per call; in a batch, one per item,
+  and only when the call returned files). Nothing is cleared at call start, so files from
+  earlier calls stay usable and parallel calls cannot delete each other's files. `run_python`
+  uses the same scheme. The scheduler deletes `output-*` directories (recursively), and
+  `upload-*` files, older than 3 days.
 - Timeout: 30 seconds.
 
 ### Tool execution (async)

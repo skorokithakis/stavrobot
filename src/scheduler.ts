@@ -4,7 +4,7 @@ import pg from "pg";
 import { CronExpressionParser } from "cron-parser";
 import { listCronEntries, deleteCronEntry } from "./database.js";
 import { enqueueMessage } from "./queue.js";
-import { TEMP_ATTACHMENTS_DIR } from "./temp-dir.js";
+import { TEMP_ATTACHMENTS_DIR, OUTPUT_DIR_PREFIX } from "./temp-dir.js";
 import { log } from "./log.js";
 
 interface ScheduledEntry {
@@ -45,7 +45,7 @@ async function loadEntries(pool: pg.Pool): Promise<void> {
 
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 
-async function cleanupOldUploads(): Promise<void> {
+export async function cleanupOldUploads(): Promise<void> {
   let entries: string[];
   try {
     entries = await fs.promises.readdir(TEMP_ATTACHMENTS_DIR);
@@ -58,15 +58,22 @@ async function cleanupOldUploads(): Promise<void> {
 
   const now = Date.now();
   for (const entry of entries) {
-    if (!entry.startsWith("upload-")) {
+    const isUpload = entry.startsWith("upload-");
+    const isOutputDir = entry.startsWith(OUTPUT_DIR_PREFIX);
+    if (!isUpload && !isOutputDir) {
       continue;
     }
     const filePath = path.join(TEMP_ATTACHMENTS_DIR, entry);
     try {
       const stat = await fs.promises.stat(filePath);
       if (now - stat.mtimeMs > THREE_DAYS_MS) {
-        await fs.promises.unlink(filePath);
-        log.info("[stavrobot] Deleted old upload:", filePath);
+        if (isOutputDir) {
+          await fs.promises.rm(filePath, { recursive: true, force: true });
+          log.info("[stavrobot] Deleted old output directory:", filePath);
+        } else {
+          await fs.promises.unlink(filePath);
+          log.info("[stavrobot] Deleted old upload:", filePath);
+        }
       }
     } catch (error) {
       log.error("[stavrobot] Error processing upload file during cleanup:", filePath, error);
