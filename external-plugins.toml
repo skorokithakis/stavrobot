@@ -26,4 +26,7 @@ url = "https://github.com/vmasto/stavrobot-plugin-gmail"
 url = "https://github.com/vmasto/stavrobot-plugin-google-drive"
 
 [[plugin]]
+url = "https://github.com/vmasto/stavrobot-plugin-google-sheets"
+
+[[plugin]]
 url = "https://github.com/diegopetrucci/stavrobot-price-haggler-plugin"
