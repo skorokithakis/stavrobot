@@ -105,7 +105,7 @@ services:
   signal-bridge:
     build: ./signal-bridge
     profiles: ["signal"]
-    mem_limit: 256m
+    mem_limit: 512m
     restart: unless-stopped
     volumes:
       - ./data/main:/root/config:ro
