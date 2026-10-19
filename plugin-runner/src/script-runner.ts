@@ -6,6 +6,8 @@ export const TOOL_TIMEOUT_MS = 30_000;
 export const ASYNC_TIMEOUT_MS = 300_000; // 5 minutes for async scripts.
 const APP_INTERNAL_URL = "http://app:3000/chat";
 export const MAX_FILE_TRANSPORT_BYTES = 25 * 1024 * 1024; // 25MB
+export const RUN_TEMP_DIR_PREFIX = "stavrobot-run-";
+const DEFAULT_TEMP_BASE_DIR = "/tmp";
 
 // Delays before each retry of postCallback, in milliseconds. The initial attempt
 // is immediate and each entry here is one additional retry, so the whole array
@@ -140,6 +142,123 @@ export async function postCallback(source: string, message: string, files?: Tran
   }
 }
 
+// Create a fresh per-run temp directory, owned by the plugin user and readable
+// only by it. Each run gets its own directory so overlapping runs of the same
+// plugin cannot delete or read each other's input and output files.
+export function createRunTempDir(
+  uid: number,
+  gid: number,
+  baseDir: string = DEFAULT_TEMP_BASE_DIR,
+): string {
+  const runTempDir = fs.mkdtempSync(path.join(baseDir, RUN_TEMP_DIR_PREFIX));
+  try {
+    fs.chmodSync(runTempDir, 0o700);
+    fs.chownSync(runTempDir, uid, gid);
+  } catch (error) {
+    fs.rmSync(runTempDir, { recursive: true, force: true });
+    throw error;
+  }
+  return runTempDir;
+}
+
+export function removeRunTempDir(runTempDir: string): void {
+  fs.rmSync(runTempDir, { recursive: true, force: true });
+}
+
+// Clean up the directory used by older plugin-runner versions. Files written
+// there are not transported: plugins must use STAVROBOT_TEMP_DIR now, and
+// silently copying from the legacy path would let a stale run leak files into
+// an unrelated run.
+export function removeLegacyPluginTempDir(
+  bundleName: string,
+  baseDir: string = DEFAULT_TEMP_BASE_DIR,
+): void {
+  const legacyTempDir = path.join(baseDir, bundleName);
+  // Use lstat so a symlink created by the plugin user is treated as a symlink,
+  // not followed to its target.
+  let stats: fs.Stats;
+  try {
+    stats = fs.lstatSync(legacyTempDir);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+    return;
+  }
+
+  if (stats.isDirectory()) {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(legacyTempDir, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+      return;
+    }
+
+    if (entries.length > 0) {
+      console.warn(
+        `[stavrobot-plugin-runner] Plugin "${bundleName}" wrote files to the legacy temp directory ${legacyTempDir}. ` +
+        `Plugins must write output files to the directory in the STAVROBOT_TEMP_DIR environment variable. ` +
+        `Deleting ${legacyTempDir} without transporting its files.`
+      );
+    }
+  } else {
+    console.warn(
+      `[stavrobot-plugin-runner] Plugin "${bundleName}" created ${legacyTempDir} as a file or symlink. ` +
+      `Plugins must write output files to the directory in the STAVROBOT_TEMP_DIR environment variable. ` +
+      `Deleting ${legacyTempDir}.`
+    );
+  }
+
+  fs.rmSync(legacyTempDir, { recursive: true, force: true });
+}
+
+// Remove run temp directories left behind by a previous process that crashed
+// mid-run. Only directories with the per-run prefix are touched.
+export function removeStaleRunTempDirs(baseDir: string = DEFAULT_TEMP_BASE_DIR): void {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(baseDir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith(RUN_TEMP_DIR_PREFIX)) {
+      continue;
+    }
+    const staleDir = path.join(baseDir, entry.name);
+    console.warn(`[stavrobot-plugin-runner] Removing leftover run temp directory ${staleDir}`);
+    fs.rmSync(staleDir, { recursive: true, force: true });
+  }
+}
+
+export function buildScriptEnv(
+  uvCacheDir: string,
+  homeDir: string,
+  runTempDir?: string,
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    PATH: process.env.PATH,
+    UV_CACHE_DIR: uvCacheDir,
+    UV_PYTHON_INSTALL_DIR: "/opt/uv/python",
+    SSL_CERT_FILE: "/etc/ssl/certs/ca-certificates.crt",
+    REQUESTS_CA_BUNDLE: "/etc/ssl/certs/ca-certificates.crt",
+    HOME: homeDir,
+  };
+  if (runTempDir !== undefined) {
+    env.STAVROBOT_TEMP_DIR = runTempDir;
+  }
+  return env;
+}
+
+// Init scripts (run during install/update) do not get STAVROBOT_TEMP_DIR
+// because they do not produce transported files; only tool runs do.
 export async function runScript(
   entrypoint: string,
   cwd: string,
@@ -147,6 +266,7 @@ export async function runScript(
   gid: number,
   stdin: string,
   timeoutMs: number,
+  runTempDir?: string,
 ): Promise<ScriptResult> {
   const pluginName = path.relative(PLUGINS_DIR, cwd).split(path.sep)[0];
   const uvCacheDir = `/cache/${pluginName}/uv`;
@@ -163,14 +283,7 @@ export async function runScript(
       cwd,
       uid,
       gid,
-      env: {
-        PATH: process.env.PATH,
-        UV_CACHE_DIR: uvCacheDir,
-        UV_PYTHON_INSTALL_DIR: "/opt/uv/python",
-        SSL_CERT_FILE: "/etc/ssl/certs/ca-certificates.crt",
-        REQUESTS_CA_BUNDLE: "/etc/ssl/certs/ca-certificates.crt",
-        HOME: homeDir,
-      },
+      env: buildScriptEnv(uvCacheDir, homeDir, runTempDir),
     });
 
     let stdout = "";

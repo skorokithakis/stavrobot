@@ -233,12 +233,14 @@ Only set `async: true` for tools that are expected to run for more than 30 secon
 
 ## Producing files
 
-Synchronous tools can produce files by writing them to `/tmp/<plugin_name>/` (where `<plugin_name>` is the plugin's `name` from the manifest). After the tool exits, the plugin-runner scans that directory and transports any files it finds to the main app. The agent is told the directory where the files were saved and can construct the full path.
+Tools can produce files by writing them to the directory named by the `STAVROBOT_TEMP_DIR` environment variable (in Python, `os.environ["STAVROBOT_TEMP_DIR"]`). The plugin-runner creates this directory fresh for every tool run, owns it as the plugin's user, and restricts it to that user. After the tool exits, the plugin-runner scans the directory and transports any files it finds to the main app. The agent is told the directory where the files were saved and can construct the full path.
 
 Rules:
 
 - Only top-level files are transported. Subdirectories are ignored.
-- The directory is cleared before and after each tool run. Do not rely on files persisting between runs.
+- `STAVROBOT_TEMP_DIR` is different for every run and is deleted after the run. Do not hardcode `/tmp/<plugin_name>/` or rely on files persisting between runs.
+- The directory is private to the run: parallel runs of the same plugin each get their own directory, so they cannot see or delete each other's files.
+- Do not write outputs to `/tmp/<plugin_name>/`. That legacy path is not transported; the runner warns and deletes it after the run.
 - Maximum total file size per tool run is 25 MB. If the limit is exceeded, no files are transported and a warning is logged.
 - File transport works for both synchronous and asynchronous tools. For async tools, the files are delivered as attachments alongside the callback message.
 
@@ -255,6 +257,7 @@ Common use cases: TTS audio, generated images, exported data files.
 # ///
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -265,8 +268,7 @@ def main() -> None:
 
     from gtts import gTTS
 
-    output_dir = Path("/tmp/my-plugin")
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = Path(os.environ["STAVROBOT_TEMP_DIR"])
     tts = gTTS(params["text"])
     tts.save(output_dir / "output.mp3")
     json.dump({"file": "output.mp3"}, sys.stdout)
@@ -277,14 +279,15 @@ main()
 
 ## Receiving files
 
-To accept a file from the user, declare a parameter with `"type": "file"` in the tool manifest. When the LLM calls `run_plugin_tool`, it passes the absolute path to the file (e.g. a path it received from an incoming attachment or from `manage_files`). The system reads the file, transports it to the plugin-runner container, and writes it into the plugin's temp directory (`/tmp/<plugin_name>/`). At runtime, the parameter value in the JSON on stdin will be the materialized file path (e.g., `/tmp/my-plugin/voice-note.ogg`), ready to read.
+To accept a file from the user, declare a parameter with `"type": "file"` in the tool manifest. When the LLM calls `run_plugin_tool`, it passes the absolute path to the file (e.g. a path it received from an incoming attachment or from `manage_files`). The system reads the file, transports it to the plugin-runner container, and writes it into the run's temp directory (the path in `STAVROBOT_TEMP_DIR`). At runtime, the parameter value in the JSON on stdin will be the materialized file path (e.g., `/tmp/stavrobot-run-<uuid>/voice-note.ogg`), ready to read.
 
 Use `"type": "file"` any time a tool needs to operate on a file the user has sent (audio, images, documents, etc.) rather than asking the user to provide the file contents as text.
 
 Rules:
 
-- The same `/tmp/<plugin_name>/` directory is used for both input and output files. Input files are written before the tool runs; output files are scanned after.
-- The directory is cleared before each tool run, so input files from a previous run are not present.
+- Input and output files share the same per-run directory, also available as `STAVROBOT_TEMP_DIR`. Input files are written before the tool runs; output files are scanned after.
+- Each run gets a fresh, private directory, so input files from a previous or parallel run are never present.
+- Read input files through the path in the parameter. Do not assume a fixed `/tmp/<plugin_name>/` path.
 - The same 25 MB size limit applies to input files.
 
 ### Example: a tool that receives an audio file
@@ -336,7 +339,7 @@ main()
 Plugin tools run inside the `plugin-runner` Docker container, which is completely separate from the main app container. This means:
 
 - Tools cannot access the app's filesystem, source code, secrets, or config.
-- Each plugin runs as its own dedicated system user (`plug_<name>`). Plugin directories are restricted with `chmod 700`, so a plugin cannot read or write any other plugin's files or configuration. A plugin can only access its own directory (e.g., `/plugins/my-plugin/`) and its temporary output directory (`/tmp/<plugin_name>/`).
+- Each plugin runs as its own dedicated system user (`plug_<name>`). Plugin directories are restricted with `chmod 700`, so a plugin cannot read or write any other plugin's files or configuration. A plugin can only access its own directory (e.g., `/plugins/my-plugin/`) and the private temp directory for its current run (the path in `STAVROBOT_TEMP_DIR`, e.g. `/tmp/stavrobot-run-<uuid>/`).
 - Tools can make outbound network requests (there is no network isolation).
 
 The following runtimes and tools are available in the container:

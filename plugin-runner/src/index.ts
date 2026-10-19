@@ -12,6 +12,10 @@ import {
   postCallback,
   setAppPassword,
   isTransportedFile,
+  createRunTempDir,
+  removeRunTempDir,
+  removeLegacyPluginTempDir,
+  removeStaleRunTempDirs,
   TOOL_TIMEOUT_MS,
   ASYNC_TIMEOUT_MS,
   MAX_FILE_TRANSPORT_BYTES,
@@ -132,7 +136,7 @@ function handleGetBundle(bundleName: string, response: http.ServerResponse): voi
   response.end(JSON.stringify(responseBody));
 }
 
-async function handleRunTool(
+export async function handleRunTool(
   bundleName: string,
   toolName: string,
   request: http.IncomingMessage,
@@ -201,12 +205,19 @@ async function handleRunTool(
   const entrypoint = path.join(toolDir, manifest.entrypoint);
   const { uid, gid } = getPluginUserIds(bundleName);
 
-  const pluginTempDir = `/tmp/${bundleName}`;
-  // Clear any leftover files from previous runs.
-  fs.rmSync(pluginTempDir, { recursive: true, force: true });
-  fs.mkdirSync(pluginTempDir, { recursive: true });
-  // Make it writable by the plugin user.
-  fs.chownSync(pluginTempDir, uid, gid);
+  const runTempDir = createRunTempDir(uid, gid);
+
+  // Every early return after this point must remove the run temp directory.
+  const failRun = (statusCode: number, body: Record<string, unknown>): void => {
+    removeRunTempDir(runTempDir);
+    response.writeHead(statusCode, { "Content-Type": "application/json" });
+    response.end(JSON.stringify(body));
+  };
+
+  const finishRun = (): void => {
+    removeRunTempDir(runTempDir);
+    removeLegacyPluginTempDir(bundleName);
+  };
 
   // Attempt to parse the body as JSON and materialize any file parameters into
   // the temp directory. If parsing fails, pass the raw body through unchanged
@@ -231,26 +242,27 @@ async function handleRunTool(
       }
 
       if (totalBytes > MAX_FILE_TRANSPORT_BYTES) {
-        fs.rmSync(pluginTempDir, { recursive: true, force: true });
-        response.writeHead(413, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({ error: "Input files exceed the maximum allowed size" }));
+        failRun(413, { error: "Input files exceed the maximum allowed size" });
         return;
       }
 
-      for (const [paramName, file] of fileEntries) {
-        const filePath = path.join(pluginTempDir, file.filename);
-        // Reject filenames that escape the temp directory (e.g. "../../../etc/passwd").
-        if (!filePath.startsWith(pluginTempDir + path.sep) && filePath !== pluginTempDir) {
-          fs.rmSync(pluginTempDir, { recursive: true, force: true });
-          response.writeHead(400, { "Content-Type": "application/json" });
-          response.end(JSON.stringify({ error: `Invalid filename in file parameter "${paramName}"` }));
-          return;
+      try {
+        for (const [paramName, file] of fileEntries) {
+          const filePath = path.join(runTempDir, file.filename);
+          // Reject filenames that escape the temp directory (e.g. "../../../etc/passwd").
+          if (!filePath.startsWith(runTempDir + path.sep) && filePath !== runTempDir) {
+            failRun(400, { error: `Invalid filename in file parameter "${paramName}"` });
+            return;
+          }
+          const fileData = Buffer.from(file.data, "base64");
+          fs.writeFileSync(filePath, fileData);
+          fs.chownSync(filePath, uid, gid);
+          params[paramName] = filePath;
+          console.log(`[stavrobot-plugin-runner] Materialized input file for param "${paramName}": ${filePath} (${fileData.length} bytes)`);
         }
-        const fileData = Buffer.from(file.data, "base64");
-        fs.writeFileSync(filePath, fileData);
-        fs.chownSync(filePath, uid, gid);
-        params[paramName] = filePath;
-        console.log(`[stavrobot-plugin-runner] Materialized input file for param "${paramName}": ${filePath} (${fileData.length} bytes)`);
+      } catch (error) {
+        removeRunTempDir(runTempDir);
+        throw error;
       }
 
       stdinBody = JSON.stringify(params);
@@ -263,12 +275,10 @@ async function handleRunTool(
 
     for (const key of Object.keys(params)) {
       if (!(key in schema)) {
-        fs.rmSync(pluginTempDir, { recursive: true, force: true });
-        response.writeHead(400, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({
+        failRun(400, {
           error: `Unknown parameter: "${key}"`,
           parameters: schema,
-        }));
+        });
         return;
       }
     }
@@ -300,12 +310,10 @@ async function handleRunTool(
       }
 
       if (!typeOk) {
-        fs.rmSync(pluginTempDir, { recursive: true, force: true });
-        response.writeHead(400, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({
+        failRun(400, {
           error: `Parameter "${key}" must be of type "${expectedType}"`,
           parameters: schema,
-        }));
+        });
         return;
       }
     }
@@ -319,11 +327,11 @@ async function handleRunTool(
       const source = `plugin:${bundleName}/${toolName}`;
       let result: ScriptResult;
       try {
-        result = await runScript(entrypoint, toolDir, uid, gid, stdinBody, ASYNC_TIMEOUT_MS);
+        result = await runScript(entrypoint, toolDir, uid, gid, stdinBody, ASYNC_TIMEOUT_MS, runTempDir);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error(`[stavrobot-plugin-runner] Async tool ${bundleName}/${toolName} threw unexpectedly: ${errorMessage}`);
-        fs.rmSync(pluginTempDir, { recursive: true, force: true });
+        finishRun();
         await postCallback(
           source,
           `The run of tool "${toolName}" (plugin "${bundleName}") failed:\n\`\`\`\n${errorMessage}\n\`\`\``
@@ -331,9 +339,16 @@ async function handleRunTool(
         return;
       }
 
+      let files: TransportedFile[] = [];
+      try {
+        if (result.success) {
+          files = scanPluginTempDir(runTempDir, bundleName);
+        }
+      } finally {
+        finishRun();
+      }
+
       if (result.success) {
-        const files = scanPluginTempDir(pluginTempDir, bundleName);
-        fs.rmSync(pluginTempDir, { recursive: true, force: true });
         console.log(`[stavrobot-plugin-runner] Async tool ${bundleName}/${toolName} completed successfully`);
         await postCallback(
           source,
@@ -346,7 +361,6 @@ async function handleRunTool(
           ? `Tool "${toolName}" (plugin "${bundleName}") exceeded the timeout of ${ASYNC_TIMEOUT_MS / 1000} seconds`
           : (result.error ?? result.output);
         console.error(`[stavrobot-plugin-runner] Async tool ${bundleName}/${toolName} failed: ${errorText}`);
-        fs.rmSync(pluginTempDir, { recursive: true, force: true });
         await postCallback(
           source,
           `The run of tool "${toolName}" (plugin "${bundleName}") failed:\n\`\`\`\n${errorText}\n\`\`\``
@@ -357,11 +371,18 @@ async function handleRunTool(
     return;
   }
 
-  const result = await runScript(entrypoint, toolDir, uid, gid, stdinBody, TOOL_TIMEOUT_MS);
+  let result: ScriptResult;
+  let files: TransportedFile[] = [];
+  try {
+    result = await runScript(entrypoint, toolDir, uid, gid, stdinBody, TOOL_TIMEOUT_MS, runTempDir);
+    if (result.success) {
+      files = scanPluginTempDir(runTempDir, bundleName);
+    }
+  } finally {
+    finishRun();
+  }
 
   if (!result.success) {
-    fs.rmSync(pluginTempDir, { recursive: true, force: true });
-
     if (result.spawnFailed === true) {
       console.error(`[stavrobot-plugin-runner] Tool ${bundleName}/${toolName} failed to spawn: ${result.error}`);
       response.writeHead(500, { "Content-Type": "application/json" });
@@ -383,9 +404,6 @@ async function handleRunTool(
     response.end(JSON.stringify({ success: false, error: result.error }));
     return;
   }
-
-  const files = scanPluginTempDir(pluginTempDir, bundleName);
-  fs.rmSync(pluginTempDir, { recursive: true, force: true });
 
   let output: unknown;
   try {
@@ -499,6 +517,7 @@ async function handleRequest(
 
 async function main(): Promise<void> {
   loadAppPassword();
+  removeStaleRunTempDirs();
   migrateExistingPlugins();
   migrateGitInstalledMarkers();
   loadBundles();

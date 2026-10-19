@@ -275,12 +275,21 @@ Plugins live in `/plugins/<name>/` (shared volume between `plugin-runner` and `c
   call numbered (1-based). A failed call does not stop the rest of the batch.
   File-type parameters are resolved per item. Arrays are rejected for async tools; empty
   arrays return an error.
+- Each run gets a fresh `/tmp/stavrobot-run-<uuid>/` directory, owned by the plugin
+  user and mode 700, so overlapping runs of the same plugin cannot interfere.
 - Parameters of type `"file"` are base64-decoded from the request and materialised into
-  `/tmp/<plugin>/` before the script runs.
+  that run directory before the script runs. Its path is passed to the script as
+  `STAVROBOT_TEMP_DIR`.
 - The script receives all parameters as JSON on stdin.
 - stdout is captured and returned as `{ success: true, output: … }`.
-- Files written to `/tmp/<plugin>/` by the script are base64-encoded and returned in
+- Files written to the run directory by the script are base64-encoded and returned in
   `{ files: [{ filename, data }] }`.
+- The run directory is deleted after the run, including on every early-return and error
+  path. Leftover `/tmp/stavrobot-run-*` directories from a crashed process are removed
+  at plugin-runner startup.
+- Older runner versions used a shared `/tmp/<plugin>/` directory. After each run, if
+  that legacy directory contains files, the runner logs a warning and deletes it
+  without transporting those files.
 - On the main app side, files returned by a run are written to a fresh
   `/tmp/stavrobot-temp/output-<uuid>/` directory (one per call; in a batch, one per item,
   and only when the call returned files). Nothing is cleared at call start, so files from
