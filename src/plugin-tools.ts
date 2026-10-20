@@ -151,7 +151,7 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
   return {
     name: "manage_plugins",
     label: "Manage plugins",
-    description: "Install, update, remove, configure, list, show, create, or add_mcp to add an MCP server as a plugin. Always use the 'help' action for guidance first.",
+    description: "Install, update, remove, configure, list, show, create, or add MCP servers as plugins (add_mcp). Always use the 'help' action for guidance first.",
     parameters: Type.Object({
       action: Type.Union([
         Type.Literal("install"),
