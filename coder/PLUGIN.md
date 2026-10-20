@@ -348,7 +348,7 @@ The following runtimes and tools are available in the container:
 
 - `uv` (with a pre-installed Python)
 - `python3`
-- `node` (Node.js 22)
+- `node` (Node.js 26)
 - `git`
 - `ssh` / `openssh-client`
 - `curl`

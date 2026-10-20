@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=26"
   },
   "scripts": {
     "build": "tsc",
@@ -15,7 +15,7 @@
     "@modelcontextprotocol/client": "2.3.1"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
+    "@types/node": "^26.6.5",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
     "vitest": "^3.2.4"
