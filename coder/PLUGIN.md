@@ -8,6 +8,8 @@ Stavrobot is a personal AI assistant that runs as a Docker-based service. It can
 
 A plugin is a directory (or git repository) containing one or more tools. Each tool is an executable script that receives JSON on stdin and writes JSON to stdout. Plugins are installed via the plugin-runner and placed in the `data/plugins/` directory.
 
+Some plugins are MCP servers: their manifest declares `"type": "mcp"`, and their tools come from a [Model Context Protocol](https://modelcontextprotocol.io) server instead of scripts. They are created and managed by the plugin-runner through the settings page, and the coder never edits them. The rest of this guide is about script plugins.
+
 ## Directory structure
 
 A plugin is typically a git repository. The plugin manifest lives at the repository root, and each tool is a subdirectory containing its own manifest and entrypoint.

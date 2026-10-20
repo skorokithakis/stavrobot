@@ -307,6 +307,8 @@ These proxy to the plugin runner. Bodies are JSON.
   and whether it is required, and `set` maps each key to whether a value is stored. The
   values themselves are never sent to the browser.
 - `POST /api/settings/plugins/install`: body `{ "url": "<git url>" }`.
+- `POST /api/settings/plugins/add-mcp`: body `{ "name", "description", "server" }`; adds an
+  MCP server as a plugin. `server` is the spec object described below.
 - `POST /api/settings/plugins/update`: body `{ "name": "<plugin>" }`.
 - `POST /api/settings/plugins/remove`: body `{ "name": "<plugin>" }`.
 - `POST /api/settings/plugins/configure`: body `{ "name": "<plugin>", "config": { ... } }`.
@@ -453,6 +455,30 @@ against the `pages` branch.
 
 See [PLUGIN.md](coder/PLUGIN.md) for everything you need to know to create a Stavrobot
 plugin. The same document works as a reference for both humans and LLMs.
+
+## MCP servers
+
+You can add a [Model Context Protocol](https://modelcontextprotocol.io) server as a
+plugin, either by asking the bot (it uses `manage_plugins` with the `add_mcp` action) or
+from the Plugins page in the settings UI. The server's tools then work like any other
+plugin's tools.
+
+The server spec is JSON in one of two shapes:
+
+- Local server: `{"command": "npx", "args": ["-y", "@example/mcp-server"], "env": {"API_KEY": "..."}}`
+- Remote server: `{"url": "https://example.com/mcp", "headers": {"Authorization": "Bearer ..."}}`
+
+`env` and `headers` often hold secrets. They are stored in the plugin's `config.json` and
+are never shown to the agent again. If the first connection fails, the plugin is still
+created: fix the spec, then update it from the Plugins page.
+
+MCP plugins are not editable. The bot can update or remove them, but not change their
+code.
+
+Some servers need an interactive browser login the first time. There is no browser inside
+the container, so do that login on another machine with the same server, then copy the
+token file it writes into `data/plugins/<name>/`. For local servers that directory is the
+server's `HOME`, so it will find credentials stored there.
 
 ## Recommended plugins
 

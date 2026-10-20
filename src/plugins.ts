@@ -131,6 +131,34 @@ export async function handlePluginInstallRequest(
   response.end(responseBody);
 }
 
+export async function handlePluginAddMcpRequest(
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+): Promise<void> {
+  // Require a JSON content type. Adding an MCP server can start a command, so a
+  // cross-site HTML form must not be able to POST here: browsers cannot send
+  // this content type without a CORS preflight, which we never answer.
+  const contentType = request.headers["content-type"];
+  const mediaType = typeof contentType === "string" ? contentType.split(";")[0].trim().toLowerCase() : "";
+  if (mediaType !== "application/json") {
+    response.writeHead(415, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: "Content-Type must be application/json" }));
+    return;
+  }
+
+  const body = await readRequestBody(request);
+  log.debug("[stavrobot] handlePluginAddMcpRequest: proxying POST /add-mcp");
+  const pluginResponse = await internalFetch(`${PLUGIN_RUNNER_BASE_URL}/add-mcp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+  });
+  const responseBody = await pluginResponse.text();
+  log.debug("[stavrobot] handlePluginAddMcpRequest: response status", pluginResponse.status);
+  response.writeHead(pluginResponse.status, { "Content-Type": "application/json" });
+  response.end(responseBody);
+}
+
 export async function handlePluginUpdateRequest(
   request: http.IncomingMessage,
   response: http.ServerResponse,
@@ -186,16 +214,32 @@ function buildPluginsContent(): string {
   return `<div class="sb-page-h" style="align-items: flex-start">
   <div>
     <h1 class="sb-h1">Plugins</h1>
-    <p>Plugins give Stavrobot tools. Install one from a git repository.</p>
+    <p>Plugins give Stavrobot tools. Install one from a git repository or add an MCP server.</p>
   </div>
-  <form style="display: flex; flex-direction: column; gap: 8px; width: 560px" data-install-form>
-    <div class="sb-input-row">
-      <label for="install-url" class="sb-sr">Git repository URL</label>
-      <input id="install-url" class="sb-input sb-mono" data-install-url placeholder="https://github.com/example/stavrobot-plugin.git">
-      <button class="sb-btn sb-btn-primary" type="button" data-install-btn>Install</button>
-    </div>
-    <span class="sb-feedback" data-install-feedback role="status"></span>
-  </form>
+  <div style="display: flex; flex-direction: column; gap: 16px; width: 560px">
+    <form style="display: flex; flex-direction: column; gap: 8px" data-install-form>
+      <div class="sb-input-row">
+        <label for="install-url" class="sb-sr">Git repository URL</label>
+        <input id="install-url" class="sb-input sb-mono" data-install-url placeholder="https://github.com/example/stavrobot-plugin.git">
+        <button class="sb-btn sb-btn-primary" type="button" data-install-btn>Install</button>
+      </div>
+      <span class="sb-feedback" data-install-feedback role="status"></span>
+    </form>
+    <form style="display: flex; flex-direction: column; gap: 8px" data-add-mcp-form>
+      <div class="sb-input-row">
+        <label for="add-mcp-name" class="sb-sr">Name</label>
+        <input id="add-mcp-name" class="sb-input sb-mono" data-add-mcp-name placeholder="Name (lowercase, digits, hyphens)" pattern="[a-z0-9-]+" title="Lowercase letters, digits, and hyphens only">
+        <label for="add-mcp-description" class="sb-sr">Description</label>
+        <input id="add-mcp-description" class="sb-input" data-add-mcp-description placeholder="Description">
+      </div>
+      <label for="add-mcp-server" class="sb-sr">Server spec JSON</label>
+      <textarea id="add-mcp-server" class="sb-input sb-textarea sb-mono" data-add-mcp-server spellcheck="false" placeholder='{ "command": "npx", "args": ["-y", "@example/mcp-server"] }'></textarea>
+      <div class="sb-input-row" style="justify-content: flex-end">
+        <button class="sb-btn sb-btn-primary" type="button" data-add-mcp-btn>Add MCP server</button>
+      </div>
+      <span class="sb-feedback" data-add-mcp-feedback role="status"></span>
+    </form>
+  </div>
 </div>
 
 <div class="sb-mobile-only" data-mobile-install>
@@ -206,6 +250,20 @@ function buildPluginsContent(): string {
       <button class="sb-btn sb-btn-primary sb-btn-lg" type="button" data-install-btn>Install</button>
     </div>
     <span class="sb-feedback" data-install-feedback role="status"></span>
+  </form>
+  <form style="display: flex; flex-direction: column; gap: 8px; margin-top: 16px" data-add-mcp-form>
+    <div class="sb-input-row">
+      <label for="add-mcp-name-mobile" class="sb-sr">Name</label>
+      <input id="add-mcp-name-mobile" class="sb-input sb-input-lg sb-mono" data-add-mcp-name placeholder="Name (lowercase, digits, hyphens)" pattern="[a-z0-9-]+" title="Lowercase letters, digits, and hyphens only">
+    </div>
+    <div class="sb-input-row">
+      <label for="add-mcp-description-mobile" class="sb-sr">Description</label>
+      <input id="add-mcp-description-mobile" class="sb-input sb-input-lg" data-add-mcp-description placeholder="Description">
+    </div>
+    <label for="add-mcp-server-mobile" class="sb-sr">Server spec JSON</label>
+    <textarea id="add-mcp-server-mobile" class="sb-input sb-textarea sb-mono" data-add-mcp-server spellcheck="false" placeholder='{ "command": "npx", "args": ["-y", "@example/mcp-server"] }'></textarea>
+    <button class="sb-btn sb-btn-primary sb-btn-lg" type="button" data-add-mcp-btn>Add MCP server</button>
+    <span class="sb-feedback" data-add-mcp-feedback role="status"></span>
   </form>
 </div>
 
@@ -236,6 +294,7 @@ function buildPluginsContent(): string {
   var UPDATE_URL = "/api/settings/plugins/update";
   var REMOVE_URL = "/api/settings/plugins/remove";
   var INSTALL_URL = "/api/settings/plugins/install";
+  var ADD_MCP_URL = "/api/settings/plugins/add-mcp";
 
   var state = { plugins: [], selectedName: null, mobileShowDetail: false, confirmName: null };
   var mobileQuery = window.matchMedia("(max-width: 768px)");
@@ -367,9 +426,11 @@ function buildPluginsContent(): string {
 
   function listItemHtml(plugin) {
     var isActive = plugin.name === state.selectedName && (!mobileQuery.matches || state.mobileShowDetail);
-    var badge = plugin.editable
-      ? '<span class="sb-badge sb-badge-accent" style="margin-left: 6px">editable</span>'
-      : '<span class="sb-badge" style="margin-left: 6px">git</span>';
+    var badge = plugin.type === "mcp"
+      ? '<span class="sb-badge" style="margin-left: 6px">mcp</span>'
+      : plugin.editable
+        ? '<span class="sb-badge sb-badge-accent" style="margin-left: 6px">editable</span>'
+        : '<span class="sb-badge" style="margin-left: 6px">git</span>';
     var notConfigured = missingRequired(plugin) > 0
       ? '<span class="sb-status is-err" style="font-size: 12px">Not configured</span>'
       : "";
@@ -490,9 +551,11 @@ function buildPluginsContent(): string {
   function detailHtml(plugin) {
     var tools = plugin.tools || [];
     var schema = plugin.schema || {};
-    var badge = plugin.editable
-      ? '<span class="sb-badge sb-badge-accent">editable</span>'
-      : '<span class="sb-badge">git</span>';
+    var badge = plugin.type === "mcp"
+      ? '<span class="sb-badge">mcp</span>'
+      : plugin.editable
+        ? '<span class="sb-badge sb-badge-accent">editable</span>'
+        : '<span class="sb-badge">git</span>';
     var updateButton = plugin.editable
       ? ""
       : '<button class="sb-btn sb-btn-secondary" type="button" data-update>' + UPDATE + "Update</button>";
@@ -503,6 +566,9 @@ function buildPluginsContent(): string {
       + '<div class="sb-detail-b">';
     if (plugin.description) {
       html += '<p style="margin: 0; max-width: 720px">' + esc(plugin.description) + "</p>";
+    }
+    if (plugin.error) {
+      html += '<span class="sb-feedback is-error" role="status" style="margin: 0">' + ERROR + esc(plugin.error) + "</span>";
     }
     if (tools.length === 0) {
       html += '<div class="sb-detail-sec"><h3 class="sb-h3">Tools (0)</h3><div class="sb-state" style="padding: 20px; border: 1px dashed var(--border-strong); border-radius: 10px"><strong style="font-size: 14px">This plugin has no tools</strong><p style="font-size: 13px">Agents cannot call it, so it has no permissions.</p></div></div>';
@@ -674,6 +740,8 @@ function buildPluginsContent(): string {
     if (detail.ok && detail.data && typeof detail.data === "object") {
       plugin.description = detail.data.description || plugin.description;
       plugin.editable = detail.data.editable !== undefined ? detail.data.editable : plugin.editable;
+      plugin.type = detail.data.type || plugin.type;
+      plugin.error = detail.data.error || "";
       plugin.permissions = detail.data.permissions || plugin.permissions;
       plugin.tools = detail.data.tools || [];
     }
@@ -703,6 +771,8 @@ function buildPluginsContent(): string {
         name: item.name,
         description: detail.description || item.description || "",
         editable: detail.editable !== undefined ? detail.editable : item.editable,
+        type: detail.type || item.type || "script",
+        error: detail.error || "",
         permissions: detail.permissions || item.permissions || ["*"],
         tools: detail.tools || [],
         schema: config.schema || {},
@@ -743,6 +813,36 @@ function buildPluginsContent(): string {
         buttons[i].classList.remove("is-loading");
         buttons[i].setAttribute("aria-busy", "false");
         buttons[i].innerHTML = "Install";
+      }
+    }
+  }
+
+  function setAddMcpFeedback(text, kind) {
+    var elements = document.querySelectorAll("[data-add-mcp-feedback]");
+    for (var i = 0; i < elements.length; i++) {
+      elements[i].className = "sb-feedback" + (kind === true ? " is-success" : kind === false ? " is-error" : "");
+      if (kind === true) {
+        elements[i].innerHTML = CHECK + esc(text);
+      } else if (kind === false) {
+        elements[i].innerHTML = ERROR + esc(text);
+      } else {
+        elements[i].innerHTML = text ? SPINNER + esc(text) : "";
+      }
+    }
+  }
+
+  function setAddMcpBusy(busy) {
+    var buttons = document.querySelectorAll("[data-add-mcp-btn]");
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].disabled = busy;
+      if (busy) {
+        buttons[i].classList.add("is-loading");
+        buttons[i].setAttribute("aria-busy", "true");
+        buttons[i].innerHTML = SPINNER + "Adding...";
+      } else {
+        buttons[i].classList.remove("is-loading");
+        buttons[i].setAttribute("aria-busy", "false");
+        buttons[i].innerHTML = "Add MCP server";
       }
     }
   }
@@ -844,6 +944,82 @@ function buildPluginsContent(): string {
       setInstallFeedback("Could not reach the server.", false);
     } finally {
       setInstallBusy(false);
+    }
+  }
+
+  async function addMcpPlugin(form) {
+    var nameInput = form.querySelector("[data-add-mcp-name]");
+    var descriptionInput = form.querySelector("[data-add-mcp-description]");
+    var serverInput = form.querySelector("[data-add-mcp-server]");
+    var name = nameInput ? nameInput.value.trim() : "";
+    var description = descriptionInput ? descriptionInput.value.trim() : "";
+    var serverText = serverInput ? serverInput.value.trim() : "";
+    if (!name) {
+      if (nameInput) {
+        nameInput.focus();
+      }
+      return;
+    }
+    if (!/^[a-z0-9-]+$/.test(name)) {
+      setAddMcpFeedback("The name can only use lowercase letters, digits, and hyphens.", false);
+      if (nameInput) {
+        nameInput.focus();
+      }
+      return;
+    }
+    if (!description) {
+      setAddMcpFeedback("Enter a description.", false);
+      if (descriptionInput) {
+        descriptionInput.focus();
+      }
+      return;
+    }
+    if (!serverText) {
+      setAddMcpFeedback("Enter the server spec as JSON.", false);
+      if (serverInput) {
+        serverInput.focus();
+      }
+      return;
+    }
+    var server;
+    try {
+      server = JSON.parse(serverText);
+    } catch (error) {
+      setAddMcpFeedback("The server spec is not valid JSON.", false);
+      if (serverInput) {
+        serverInput.focus();
+      }
+      return;
+    }
+    setAddMcpBusy(true);
+    setAddMcpFeedback("", null);
+    try {
+      var result = await fetchJson(ADD_MCP_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name, description: description, server: server }),
+      });
+      if (!result.ok) {
+        setAddMcpFeedback(result.data && result.data.error ? result.data.error : "Could not add the MCP server.", false);
+        return;
+      }
+      var fields = document.querySelectorAll("[data-add-mcp-name], [data-add-mcp-description], [data-add-mcp-server]");
+      for (var i = 0; i < fields.length; i++) {
+        fields[i].value = "";
+      }
+      await loadAll();
+      selectPlugin(name);
+      var message = result.data && result.data.message ? result.data.message : 'Added "' + name + '".';
+      var warnings = result.data && Array.isArray(result.data.warnings) ? result.data.warnings : [];
+      if (warnings.length > 0) {
+        setAddMcpFeedback(message + " " + warnings.join(" "), false);
+      } else {
+        setAddMcpFeedback(message, true);
+      }
+    } catch (error) {
+      setAddMcpFeedback("Could not reach the server.", false);
+    } finally {
+      setAddMcpBusy(false);
     }
   }
 
@@ -1164,6 +1340,13 @@ function buildPluginsContent(): string {
       }
       return;
     }
+    if (target.closest("[data-add-mcp-btn]")) {
+      var mcpForm = target.closest("[data-add-mcp-form]");
+      if (mcpForm) {
+        addMcpPlugin(mcpForm);
+      }
+      return;
+    }
     if (target.closest("[data-retry]")) {
       init();
       return;
@@ -1242,6 +1425,14 @@ function buildPluginsContent(): string {
       var form = event.target.closest("[data-install-form]");
       if (form) {
         installPlugin(form);
+      }
+      return;
+    }
+    if (event.key === "Enter" && event.target && event.target.matches && event.target.matches("[data-add-mcp-name], [data-add-mcp-description]")) {
+      event.preventDefault();
+      var mcpForm = event.target.closest("[data-add-mcp-form]");
+      if (mcpForm) {
+        addMcpPlugin(mcpForm);
       }
     }
   });

@@ -14,6 +14,7 @@ import {
   readJsonFile,
 } from "./bundle-registry.js";
 import { ensurePluginUser, removePluginUser, getPluginUserIds, derivePluginUsername } from "./plugin-user.js";
+import { connect, disconnect, parseMcpServerSpec } from "./mcp-client.js";
 import {
   runScript,
   postCallback,
@@ -21,10 +22,18 @@ import {
   TOOL_TIMEOUT_MS,
   ASYNC_TIMEOUT_MS,
 } from "./script-runner.js";
-import type { BundleManifest } from "./bundle-registry.js";
+import type { BundleManifest, LoadedBundle, ToolManifest } from "./bundle-registry.js";
+import type { McpServerSpec } from "./mcp-client.js";
 import type { ScriptResult } from "./script-runner.js";
 
 const INSTRUCTIONS_MAX_LENGTH = 5000;
+
+const MCP_CONFIG_SCHEMA = {
+  server: {
+    description: "MCP server spec (JSON)",
+    required: true,
+  },
+};
 
 // Return true if the URL uses a scheme that git clone accepts safely. The
 // ext:: remote helper protocol can execute arbitrary commands, so we allowlist
@@ -51,8 +60,36 @@ function writeGitInstalledMarker(pluginName: string): void {
   fs.writeFileSync(gitInstalledMarkerPath(pluginName, PLUGINS_DIR), "");
 }
 
-function removeGitInstalledMarker(pluginName: string): void {
-  fs.rmSync(gitInstalledMarkerPath(pluginName, PLUGINS_DIR), { force: true });
+function removeGitInstalledMarker(pluginName: string, pluginsDir: string = PLUGINS_DIR): void {
+  fs.rmSync(gitInstalledMarkerPath(pluginName, pluginsDir), { force: true });
+}
+
+function writeMcpInstructions(bundleDir: string, instructions: string | undefined): void {
+  const manifestPath = path.join(bundleDir, "manifest.json");
+  // Refuse to follow a symlink planted by the plugin user, because reading and
+  // rewriting the target as root could copy a root-only file into the plugin.
+  removeIfSymlink(manifestPath);
+  const rawManifest = readJsonFile(manifestPath);
+  if (typeof rawManifest !== "object" || rawManifest === null) {
+    throw new Error(`Invalid manifest.json in ${bundleDir}`);
+  }
+
+  const manifest = rawManifest as Record<string, unknown>;
+  if (instructions === undefined) {
+    delete manifest["instructions"];
+  } else {
+    manifest["instructions"] = instructions.slice(0, INSTRUCTIONS_MAX_LENGTH);
+  }
+
+  removeIfSymlink(manifestPath);
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+}
+
+function describeMcpTools(tools: ToolManifest[]): string {
+  if (tools.length === 0) {
+    return " The server reported no tools.";
+  }
+  return ` Tools: ${tools.map((tool) => tool.name).join(", ")}.`;
 }
 
 export function isEditable(pluginName: string, pluginsDir: string = PLUGINS_DIR): boolean {
@@ -381,6 +418,118 @@ export async function handleCreate(
   response.end(JSON.stringify({ message: `Plugin '${pluginName}' created successfully.` }));
 }
 
+export async function handleAddMcp(
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+  readRequestBody: (request: http.IncomingMessage) => Promise<string>,
+  pluginsDir: string = PLUGINS_DIR,
+): Promise<void> {
+  const body = await readRequestBody(request);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    response.writeHead(400, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: "Invalid JSON body" }));
+    return;
+  }
+
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    typeof (parsed as Record<string, unknown>)["name"] !== "string" ||
+    typeof (parsed as Record<string, unknown>)["description"] !== "string" ||
+    !("server" in parsed)
+  ) {
+    response.writeHead(400, { "Content-Type": "application/json" });
+    response.end(
+      JSON.stringify({ error: "Body must have 'name' and 'description' string fields and a 'server' field" })
+    );
+    return;
+  }
+
+  const pluginName = (parsed as Record<string, unknown>)["name"] as string;
+  const description = (parsed as Record<string, unknown>)["description"] as string;
+
+  if (!/^[a-z0-9-]+$/.test(pluginName)) {
+    response.writeHead(400, { "Content-Type": "application/json" });
+    response.end(
+      JSON.stringify({
+        error: `Invalid plugin name "${pluginName}": only lowercase letters, digits, and hyphens are allowed`,
+      })
+    );
+    return;
+  }
+
+  let server: McpServerSpec;
+  try {
+    server = parseMcpServerSpec((parsed as Record<string, unknown>)["server"]);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    response.writeHead(400, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: `Invalid server spec: ${message}` }));
+    return;
+  }
+
+  const destDir = path.join(pluginsDir, pluginName);
+
+  if (fs.existsSync(destDir)) {
+    response.writeHead(409, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ error: `Plugin "${pluginName}" already exists` }));
+    return;
+  }
+
+  // A manually deleted plugin can leave a live connection behind, and a new
+  // plugin must not inherit that state.
+  await disconnect(pluginName);
+
+  // A plugin directory deleted by hand can leave its git-installed marker
+  // behind; a newly added MCP plugin must not inherit it.
+  removeGitInstalledMarker(pluginName, pluginsDir);
+
+  fs.mkdirSync(destDir, { recursive: true });
+
+  const manifest: BundleManifest = {
+    name: pluginName,
+    description,
+    type: "mcp",
+    config: MCP_CONFIG_SCHEMA,
+  };
+  fs.writeFileSync(path.join(destDir, "manifest.json"), JSON.stringify(manifest, null, 2));
+  fs.writeFileSync(
+    path.join(destDir, "config.json"),
+    JSON.stringify({ permissions: ["*"], server }, null, 2)
+  );
+
+  const { uid, gid } = ensurePluginUser(pluginName);
+  execFileSync("chown", ["-R", `${uid}:${gid}`, destDir], { stdio: "pipe" });
+  fs.chmodSync(destDir, 0o700);
+
+  loadBundles(pluginsDir);
+
+  // The plugin exists from this point on even if the server cannot be reached,
+  // because some servers need files copied into their directory before they
+  // start; the user does that by hand and then runs update.
+  const warnings: string[] = [];
+  let responseMessage = `MCP server plugin '${pluginName}' added successfully.`;
+
+  try {
+    const connection = await connect(pluginName);
+    writeMcpInstructions(destDir, connection.instructions);
+    loadBundles(pluginsDir);
+    responseMessage += describeMcpTools(connection.tools);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[stavrobot-plugin-runner] Could not connect MCP server for "${pluginName}": ${message}`);
+    warnings.push(`Could not connect to the MCP server: ${message}`);
+    responseMessage += " The server could not be connected to; fix its configuration and run update.";
+  }
+
+  console.log(`[stavrobot-plugin-runner] Added MCP plugin "${pluginName}"`);
+  response.writeHead(200, { "Content-Type": "application/json" });
+  response.end(JSON.stringify({ message: responseMessage, warnings }));
+}
+
 export async function handleInstall(
   request: http.IncomingMessage,
   response: http.ServerResponse,
@@ -576,6 +725,43 @@ export async function handleInstall(
   }
 }
 
+async function handleUpdateMcp(
+  pluginName: string,
+  bundle: LoadedBundle,
+  response: http.ServerResponse,
+): Promise<void> {
+  console.log(`[stavrobot-plugin-runner] Updating MCP plugin "${pluginName}" in ${bundle.bundleDir}`);
+
+  await disconnect(pluginName);
+
+  const warnings: string[] = [];
+  let responseMessage = `MCP server plugin '${pluginName}' updated successfully.`;
+
+  try {
+    const connection = await connect(pluginName);
+    writeMcpInstructions(bundle.bundleDir, connection.instructions);
+    responseMessage += describeMcpTools(connection.tools);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[stavrobot-plugin-runner] Could not connect MCP server for "${pluginName}": ${message}`);
+    warnings.push(`Could not connect to the MCP server: ${message}`);
+    responseMessage += " The server could not be connected to; fix its configuration and run update again.";
+  } finally {
+    loadBundles();
+  }
+
+  console.log(`[stavrobot-plugin-runner] Updated MCP plugin "${pluginName}"`);
+  response.writeHead(200, { "Content-Type": "application/json" });
+  response.end(
+    JSON.stringify({
+      name: pluginName,
+      description: bundle.manifest.description,
+      message: responseMessage,
+      warnings,
+    })
+  );
+}
+
 export async function handleUpdate(
   request: http.IncomingMessage,
   response: http.ServerResponse,
@@ -607,6 +793,11 @@ export async function handleUpdate(
   if (bundle === null) {
     response.writeHead(404, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ error: `Plugin "${pluginName}" not found` }));
+    return;
+  }
+
+  if (bundle.type === "mcp") {
+    await handleUpdateMcp(pluginName, bundle, response);
     return;
   }
 
@@ -747,6 +938,10 @@ export async function handleRemove(
 
   const pluginDir = bundle.bundleDir;
 
+  if (bundle.type === "mcp") {
+    await disconnect(pluginName);
+  }
+
   console.log(`[stavrobot-plugin-runner] Removing plugin "${pluginName}" from ${pluginDir}`);
   fs.rmSync(pluginDir, { recursive: true, force: true });
   removeGitInstalledMarker(pluginName);
@@ -833,6 +1028,19 @@ export async function handleConfigure(
     }
   }
 
+  let serverChanged = false;
+  if (bundle.type === "mcp" && "server" in providedConfig) {
+    try {
+      providedConfig["server"] = parseMcpServerSpec(providedConfig["server"]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      response.writeHead(400, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: `Invalid server spec: ${message}` }));
+      return;
+    }
+    serverChanged = true;
+  }
+
   const configPath = path.join(bundle.bundleDir, "config.json");
 
   // Read the existing config so we can merge rather than replace. If the file
@@ -863,6 +1071,11 @@ export async function handleConfigure(
   // Fix ownership of config.json so the plugin user can read it.
   const { uid, gid } = getPluginUserIds(pluginName);
   fs.chownSync(configPath, uid, gid);
+
+  // The next use reconnects with the new spec.
+  if (serverChanged) {
+    await disconnect(pluginName);
+  }
 
   console.log(`[stavrobot-plugin-runner] Configured plugin "${pluginName}"`);
   response.writeHead(200, { "Content-Type": "application/json" });

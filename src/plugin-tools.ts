@@ -11,6 +11,19 @@ import { toolError, toolSuccess } from "./tool-result.js";
 const PLUGIN_RUNNER_BASE_URL = "http://plugin-runner:3003";
 const CLAUDE_CODE_BASE_URL = "http://coder:3002";
 
+// Names are interpolated into plugin-runner URLs. Slashes would let a name
+// reach a different endpoint (e.g. "foo/config" reading stored config values).
+const PLUGIN_NAME_PATTERN = /^[a-z0-9-]+$/;
+const TOOL_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+function isValidPluginName(name: string): boolean {
+  return PLUGIN_NAME_PATTERN.test(name);
+}
+
+function isValidToolName(name: string): boolean {
+  return TOOL_NAME_PATTERN.test(name);
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) {
     return `${bytes} bytes`;
@@ -121,7 +134,7 @@ function formatRunPluginToolResult(pluginName: string, toolName: string, respons
   }
 }
 
-const MANAGE_PLUGINS_HELP_TEXT = `manage_plugins: install, update, remove, configure, list, show, or create plugins.
+const MANAGE_PLUGINS_HELP_TEXT = `manage_plugins: install, update, remove, configure, list, show, create, or add MCP servers (add_mcp).
 
 Actions:
 - install: install a plugin from a git URL. Parameters: url (required).
@@ -131,13 +144,14 @@ Actions:
 - list: list all enabled plugins. No additional parameters.
 - show: show the permitted tools in a plugin, including their names, descriptions, and parameter schemas. Parameters: name (required).
 - create: create a new empty editable plugin. Parameters: name (required), plugin_description (required). Only available when the coder is configured.
+- add_mcp: add an MCP server as a plugin. Parameters: name (required; lowercase letters, digits, hyphens), plugin_description (required; what the server is for, shown in your plugin list), server (required; JSON string). Local server: {"command": "npx", "args": ["-y", "@example/mcp-server"], "env": {"API_KEY": "..."}}. Remote server: {"url": "https://example.com/mcp", "headers": {"Authorization": "Bearer ..."}}. Values in env and headers are often secrets; treat them like configure secrets. The server starts on first use and its tools appear in show. If the first connection fails the plugin is still created; fix the cause, then run update. For MCP plugins: update reconnects and refreshes the tool list; configure with the single key 'server' replaces the spec; the coder cannot edit them; a tool call that takes longer than 30 seconds returns later as a follow-up message.
 - help: show this help text.`;
 
 export function createManagePluginsTool(options: { coderEnabled: boolean }): AgentTool {
   return {
     name: "manage_plugins",
     label: "Manage plugins",
-    description: "Install, update, remove, configure, list, show, or create plugins. Always use the 'help' action for guidance first.",
+    description: "Install, update, remove, configure, list, show, create, or add_mcp to add an MCP server as a plugin. Always use the 'help' action for guidance first.",
     parameters: Type.Object({
       action: Type.Union([
         Type.Literal("install"),
@@ -147,12 +161,14 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
         Type.Literal("list"),
         Type.Literal("show"),
         Type.Literal("create"),
+        Type.Literal("add_mcp"),
         Type.Literal("help"),
-      ], { description: "Action to perform: install, update, remove, configure, list, show, create, or help." }),
-      name: Type.Optional(Type.String({ description: "The plugin name. Required for update, remove, configure, show, and create." })),
+      ], { description: "Action to perform: install, update, remove, configure, list, show, create, add_mcp, or help." }),
+      name: Type.Optional(Type.String({ description: "The plugin name. Required for update, remove, configure, show, create, and add_mcp." })),
       url: Type.Optional(Type.String({ description: "The git repository URL to clone. Required for install." })),
       config: Type.Optional(Type.String({ description: "JSON string of configuration values to set. Required for configure." })),
-      plugin_description: Type.Optional(Type.String({ description: "A short description of what the plugin does. Required for create." })),
+      plugin_description: Type.Optional(Type.String({ description: "A short description of what the plugin does. Required for create and add_mcp." })),
+      server: Type.Optional(Type.String({ description: "JSON string of the MCP server spec: {\"command\", \"args\"?, \"env\"?} for a local server or {\"url\", \"headers\"?} for a remote one. Required for add_mcp." })),
     }),
     execute: async (
       toolCallId: string,
@@ -164,6 +180,7 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
         url?: string;
         config?: string;
         plugin_description?: string;
+        server?: string;
       };
 
       const action = raw.action;
@@ -191,6 +208,9 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
           return toolError("Error: name is required for update.");
         }
         const name = raw.name;
+        if (!isValidPluginName(name)) {
+          return toolError("Error: invalid plugin name.");
+        }
         const response = await internalFetch(`${PLUGIN_RUNNER_BASE_URL}/update`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -205,6 +225,9 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
           return toolError("Error: name is required for remove.");
         }
         const name = raw.name;
+        if (!isValidPluginName(name)) {
+          return toolError("Error: invalid plugin name.");
+        }
         const response = await internalFetch(`${PLUGIN_RUNNER_BASE_URL}/remove`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -222,6 +245,9 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
           return toolError("Error: config is required for configure.");
         }
         const name = raw.name;
+        if (!isValidPluginName(name)) {
+          return toolError("Error: invalid plugin name.");
+        }
         const config = raw.config;
         let parsedConfig: unknown;
         try {
@@ -283,7 +309,12 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
           return toolError("Error: name is required for show.");
         }
         const name = raw.name;
-        const response = await internalFetch(`${PLUGIN_RUNNER_BASE_URL}/bundles/${name}`);
+        if (!isValidPluginName(name)) {
+          return toolError("Error: invalid plugin name.");
+        }
+        const response = await internalFetch(
+          `${PLUGIN_RUNNER_BASE_URL}/bundles/${encodeURIComponent(name)}`,
+        );
         if (response.status === 404) {
           return toolSuccess(`Plugin '${name}' not found.`);
         }
@@ -335,6 +366,9 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
           return toolError("Error: plugin_description is required for create.");
         }
         const name = raw.name;
+        if (!isValidPluginName(name)) {
+          return toolError("Error: invalid plugin name.");
+        }
         const description = raw.plugin_description;
         const response = await internalFetch(`${PLUGIN_RUNNER_BASE_URL}/create`, {
           method: "POST",
@@ -345,7 +379,37 @@ export function createManagePluginsTool(options: { coderEnabled: boolean }): Age
         return toolSuccess(formatPluginRunnerResponse(responseText));
       }
 
-      return toolError(`Error: unknown action '${action}'. Valid actions: install, update, remove, configure, list, show, create, help.`);
+      if (action === "add_mcp") {
+        if (raw.name === undefined || raw.name.trim() === "") {
+          return toolError("Error: name is required for add_mcp.");
+        }
+        if (raw.plugin_description === undefined || raw.plugin_description.trim() === "") {
+          return toolError("Error: plugin_description is required for add_mcp.");
+        }
+        if (raw.server === undefined || raw.server.trim() === "") {
+          return toolError("Error: server is required for add_mcp.");
+        }
+        const name = raw.name;
+        if (!isValidPluginName(name)) {
+          return toolError("Error: invalid plugin name.");
+        }
+        const description = raw.plugin_description;
+        let parsedServer: unknown;
+        try {
+          parsedServer = JSON.parse(raw.server);
+        } catch {
+          return toolError("Error: server is not valid JSON.");
+        }
+        const response = await internalFetch(`${PLUGIN_RUNNER_BASE_URL}/add-mcp`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, description, server: parsedServer }),
+        });
+        const responseText = await response.text();
+        return toolSuccess(formatPluginRunnerResponse(responseText));
+      }
+
+      return toolError(`Error: unknown action '${action}'. Valid actions: install, update, remove, configure, list, show, create, add_mcp, help.`);
     },
   };
 }
@@ -423,11 +487,16 @@ async function runPluginToolOnce(
 ): Promise<PluginToolRun> {
   const resolvedParameters = await resolveFileParameters(plugin, tool, manifest, parameters);
 
-  const response = await internalFetch(`${PLUGIN_RUNNER_BASE_URL}/bundles/${plugin}/tools/${tool}/run`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(resolvedParameters),
-  });
+  const encodedPlugin = encodeURIComponent(plugin);
+  const encodedTool = encodeURIComponent(tool);
+  const response = await internalFetch(
+    `${PLUGIN_RUNNER_BASE_URL}/bundles/${encodedPlugin}/tools/${encodedTool}/run`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(resolvedParameters),
+    },
+  );
   const responseText = await response.text();
   const result = formatRunPluginToolResult(plugin, tool, responseText, response.status);
 
@@ -491,6 +560,12 @@ export function createRunPluginToolTool(): AgentTool {
       params: unknown,
     ): Promise<AgentToolResult<{ message: string }>> => {
       const { plugin, tool, parameters } = params as { plugin: string; tool: string; parameters: string };
+      if (!isValidPluginName(plugin)) {
+        return toolError("Error: invalid plugin name.");
+      }
+      if (!isValidToolName(tool)) {
+        return toolError("Error: invalid tool name.");
+      }
       const parsedParameters = JSON.parse(parameters) as unknown;
 
       const isBatch = Array.isArray(parsedParameters);
@@ -498,7 +573,9 @@ export function createRunPluginToolTool(): AgentTool {
         return toolError("Error: the parameters array is empty; provide at least one set of parameters.");
       }
 
-      const bundleResponse = await internalFetch(`${PLUGIN_RUNNER_BASE_URL}/bundles/${plugin}`);
+      const bundleResponse = await internalFetch(
+        `${PLUGIN_RUNNER_BASE_URL}/bundles/${encodeURIComponent(plugin)}`,
+      );
       if (bundleResponse.status === 404) {
         return toolSuccess(`Plugin '${plugin}' not found.`);
       }
@@ -606,8 +683,13 @@ export function createRequestCodingTaskTool(): AgentTool {
       params: unknown,
     ): Promise<AgentToolResult<{ message: string }>> => {
       const { plugin, message } = params as { plugin: string; message: string };
+      if (!isValidPluginName(plugin)) {
+        return toolError("Error: invalid plugin name.");
+      }
 
-      const bundleResponse = await internalFetch(`${PLUGIN_RUNNER_BASE_URL}/bundles/${plugin}`);
+      const bundleResponse = await internalFetch(
+        `${PLUGIN_RUNNER_BASE_URL}/bundles/${encodeURIComponent(plugin)}`,
+      );
       if (bundleResponse.status === 404) {
         return toolSuccess(`Plugin '${plugin}' not found. Create it first with manage_plugins (action: create).`);
       }
@@ -621,7 +703,7 @@ export function createRequestCodingTaskTool(): AgentTool {
       }
 
       if (!isBundleManifest(manifest) || manifest.editable !== true) {
-        return toolSuccess(`Plugin '${plugin}' is not editable. Only locally created plugins can be modified by the coding agent.`);
+        return toolSuccess(`Plugin '${plugin}' is not editable. Only locally created plugins can be modified by the coding agent; git-installed and MCP plugins are never editable.`);
       }
 
       const taskId = crypto.randomUUID();

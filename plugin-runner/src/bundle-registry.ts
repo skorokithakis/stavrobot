@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 
+import { getCachedTools } from "./mcp-client.js";
 import { getPluginUserIds } from "./plugin-user.js";
 import { removeIfSymlink } from "./script-runner.js";
 
@@ -9,17 +10,20 @@ export const GIT_INSTALLED_DIR_NAME = ".git-installed";
 export const GIT_INSTALLED_TEMP_DIR_NAME = ".git-installed-tmp";
 export const GIT_INSTALLED_DIR = path.join(PLUGINS_DIR, GIT_INSTALLED_DIR_NAME);
 
+export type BundleType = "script" | "mcp";
+
 export interface BundleManifest {
   name: string;
   description: string;
   // Consumed by the website build for the public plugin listing; not used by the runner.
   summary?: string;
+  type?: BundleType;
   config?: Record<string, { description: string; required: boolean; default?: unknown }>;
   instructions?: string;
   init?: { entrypoint: string; async?: boolean };
 }
 
-interface ToolParamSchema {
+export interface ToolParamSchema {
   type: string;
   description: string;
 }
@@ -35,6 +39,7 @@ export interface ToolManifest {
 export interface LoadedBundle {
   bundleDir: string;
   manifest: BundleManifest;
+  type: BundleType;
   tools: LoadedTool[];
   permissions: string[];
 }
@@ -65,7 +70,8 @@ export function isBundleManifest(manifest: unknown): manifest is BundleManifest 
     typeof record["name"] !== "string" ||
     typeof record["description"] !== "string" ||
     "entrypoint" in manifest ||
-    (record["instructions"] !== undefined && typeof record["instructions"] !== "string")
+    (record["instructions"] !== undefined && typeof record["instructions"] !== "string") ||
+    (record["type"] !== undefined && record["type"] !== "script" && record["type"] !== "mcp")
   ) {
     return false;
   }
@@ -161,10 +167,10 @@ export function migratePermissions(bundleDir: string, pluginName: string): strin
   return ["*"];
 }
 
-export function loadBundles(): void {
+export function loadBundles(pluginsDir: string = PLUGINS_DIR): void {
   let topLevelEntries: string[];
   try {
-    topLevelEntries = fs.readdirSync(PLUGINS_DIR);
+    topLevelEntries = fs.readdirSync(pluginsDir);
   } catch {
     console.warn("[stavrobot-plugin-runner] Plugins directory not found; no bundles loaded");
     bundles = [];
@@ -181,7 +187,7 @@ export function loadBundles(): void {
       continue;
     }
 
-    const bundleDir = path.join(PLUGINS_DIR, bundleDirName);
+    const bundleDir = path.join(pluginsDir, bundleDirName);
     const stat = fs.statSync(bundleDir);
     if (!stat.isDirectory()) {
       continue;
@@ -200,6 +206,28 @@ export function loadBundles(): void {
     if (bundleName !== bundleDirName) {
       console.warn(
         `[stavrobot-plugin-runner] Skipping "${bundleDirName}": manifest name "${bundleName}" does not match directory name`
+      );
+      continue;
+    }
+
+    if (rawBundleManifest.type === "mcp") {
+      // MCP bundles get their tools from the live server, never from the
+      // filesystem, and listing bundles must not open a connection.
+      const permissions = migratePermissions(bundleDir, bundleName);
+      const cachedTools: LoadedTool[] = getCachedTools(bundleName).map((toolManifest) => ({
+        toolDir: bundleDir,
+        manifest: toolManifest,
+      }));
+
+      loadedBundles.push({
+        bundleDir,
+        manifest: rawBundleManifest,
+        type: "mcp",
+        tools: cachedTools,
+        permissions,
+      });
+      console.log(
+        `[stavrobot-plugin-runner] Loaded MCP bundle "${bundleName}" with ${cachedTools.length} cached tool(s)`
       );
       continue;
     }
@@ -253,7 +281,7 @@ export function loadBundles(): void {
     // every loadBundles() call, which is safe because existing values win.
     const permissions = migratePermissions(bundleDir, bundleName);
 
-    loadedBundles.push({ bundleDir, manifest: rawBundleManifest, tools, permissions });
+    loadedBundles.push({ bundleDir, manifest: rawBundleManifest, type: "script", tools, permissions });
     console.log(
       `[stavrobot-plugin-runner] Loaded bundle "${bundleName}" with ${tools.length} tool(s)`
     );

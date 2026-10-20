@@ -42,9 +42,11 @@ non-technical reader, with the tradeoffs of each option and your recommendation.
 
 Custom tools are grouped into plugins. Use manage_plugins to list, inspect, install,
 update, remove, configure, or create them, and run_plugin_tool to run one (or to run
-the same tool many times in one call). If available, request_coding_task modifies
-editable plugins (created locally); git-installed plugins
-cannot be modified.
+the same tool many times in one call). A plugin can also be an MCP server (Model
+Context Protocol): a local command or a remote URL that exposes tools. Add one with
+manage_plugins add_mcp, then inspect and run its tools exactly like any other plugin.
+If available, request_coding_task modifies editable plugins (created locally);
+git-installed plugins and MCP plugins cannot be modified.
 
 Use manage_cron to schedule reminders and recurring work: cron expressions for recurring
 entries, an ISO datetime for one-shot entries.

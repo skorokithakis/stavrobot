@@ -30,6 +30,7 @@ import {
   handlePluginDetailRequest,
   handlePluginConfigRequest,
   handlePluginInstallRequest,
+  handlePluginAddMcpRequest,
   handlePluginUpdateRequest,
   handlePluginRemoveRequest,
   handlePluginConfigureRequest,
@@ -630,6 +631,8 @@ async function main(): Promise<void> {
       void handlePluginConfigRequest(response, name, config.password);
     } else if (request.method === "POST" && pathname === "/api/settings/plugins/install") {
       void handlePluginInstallRequest(request, response);
+    } else if (request.method === "POST" && pathname === "/api/settings/plugins/add-mcp") {
+      void handlePluginAddMcpRequest(request, response);
     } else if (request.method === "POST" && pathname === "/api/settings/plugins/update") {
       void handlePluginUpdateRequest(request, response);
     } else if (request.method === "POST" && pathname === "/api/settings/plugins/remove") {

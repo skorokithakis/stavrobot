@@ -200,6 +200,7 @@ The self-programming feature is split across two containers:
   - `POST /remove` — remove a plugin
   - `POST /configure` — set plugin configuration
   - `POST /create` — create a new empty editable plugin
+  - `POST /add-mcp` — add an MCP server as a plugin
 - **Claude Code container (`coder/`):** Python HTTP server that wraps the `claude`
   headless binary. Receives coding tasks for a specific plugin, runs as that plugin's
   user, and works in `/plugins/<plugin>/`. Posts results back to the main app via

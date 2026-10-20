@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Config } from "./config.js";
 import { initInternalFetch } from "./internal-fetch.js";
 import {
+  handlePluginAddMcpRequest,
   handlePluginConfigRequest,
   handlePluginsListRequest,
   servePluginsPage,
@@ -46,6 +47,18 @@ function mockFetch(status: number, body: string): void {
       text: () => Promise.resolve(body),
     }),
   );
+}
+
+function makeMockRequest(
+  body: string,
+  headers: http.IncomingHttpHeaders = { "content-type": "application/json" },
+): http.IncomingMessage {
+  return {
+    headers,
+    async *[Symbol.asyncIterator](): AsyncGenerator<Buffer, void, unknown> {
+      yield Buffer.from(body);
+    },
+  } as unknown as http.IncomingMessage;
 }
 
 function makeConfig(overrides: Partial<Config> = {}): Config {
@@ -170,6 +183,91 @@ describe("handlePluginsListRequest", (): void => {
   });
 });
 
+describe("handlePluginAddMcpRequest", (): void => {
+  it("forwards the request body to the plugin-runner add-mcp endpoint", async (): Promise<void> => {
+    const responseBody = JSON.stringify({
+      message: "MCP server plugin 'example' added successfully.",
+      warnings: [],
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      text: () => Promise.resolve(responseBody),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const requestBody = JSON.stringify({
+      name: "example",
+      description: "An example MCP server.",
+      server: { command: "npx", args: ["-y", "@example/mcp-server"] },
+    });
+    const response = makeMockResponse();
+
+    await handlePluginAddMcpRequest(
+      makeMockRequest(requestBody),
+      response as unknown as http.ServerResponse,
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://plugin-runner:3003/add-mcp",
+      expect.objectContaining({
+        method: "POST",
+        body: requestBody,
+        headers: expect.objectContaining({ "Content-Type": "application/json" }),
+      }),
+    );
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe(responseBody);
+  });
+
+  it("passes through plugin-runner errors unchanged", async (): Promise<void> => {
+    mockFetch(409, JSON.stringify({ error: 'Plugin "example" already exists' }));
+    const response = makeMockResponse();
+
+    await handlePluginAddMcpRequest(
+      makeMockRequest(JSON.stringify({ name: "example", description: "An example.", server: {} })),
+      response as unknown as http.ServerResponse,
+    );
+
+    expect(response.statusCode).toBe(409);
+    expect(response.body).toBe(JSON.stringify({ error: 'Plugin "example" already exists' }));
+  });
+
+  it("rejects a non-JSON content type without forwarding the request", async (): Promise<void> => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const response = makeMockResponse();
+
+    await handlePluginAddMcpRequest(
+      makeMockRequest(
+        JSON.stringify({ name: "example", description: "An example.", server: { command: "npx" } }),
+        { "content-type": "application/x-www-form-urlencoded" },
+      ),
+      response as unknown as http.ServerResponse,
+    );
+
+    expect(response.statusCode).toBe(415);
+    expect(JSON.parse(response.body!)).toEqual({ error: "Content-Type must be application/json" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a missing content type without forwarding the request", async (): Promise<void> => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const response = makeMockResponse();
+
+    await handlePluginAddMcpRequest(
+      makeMockRequest(
+        JSON.stringify({ name: "example", description: "An example.", server: { command: "npx" } }),
+        {},
+      ),
+      response as unknown as http.ServerResponse,
+    );
+
+    expect(response.statusCode).toBe(415);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("servePluginsPage", (): void => {
   it("renders the shared shell with the Plugins navigation active", (): void => {
     const response = makeMockResponse();
@@ -197,6 +295,31 @@ describe("servePluginsPage", (): void => {
     expect(response.body).toContain("/api/settings/plugins/configure");
     expect(response.body).toContain("/api/settings/plugins/update");
     expect(response.body).toContain("/api/settings/plugins/remove");
+    expect(response.body).toContain("/api/settings/plugins/add-mcp");
+  });
+
+  it("renders the add MCP server form in both the desktop and mobile variants", (): void => {
+    const response = makeMockResponse();
+
+    servePluginsPage(response as unknown as http.ServerResponse, makeConfig());
+
+    const forms = response.body!.match(/data-add-mcp-form>/g) ?? [];
+    expect(forms.length).toBe(2);
+    expect(response.body).toContain('pattern="[a-z0-9-]+"');
+    expect(response.body).toContain("data-add-mcp-server");
+    expect(response.body).toContain("sb-textarea");
+    expect(response.body).toContain('{ "command": "npx", "args": ["-y", "@example/mcp-server"] }');
+    expect(response.body).toContain('JSON.parse(serverText)');
+  });
+
+  it("renders a type badge and the connection error in the detail view", (): void => {
+    const response = makeMockResponse();
+
+    servePluginsPage(response as unknown as http.ServerResponse, makeConfig());
+
+    expect(response.body).toContain('plugin.type === "mcp"');
+    expect(response.body).toContain('>mcp</span>');
+    expect(response.body).toContain("esc(plugin.error)");
   });
 
   it("renders confirm feedback in both the desktop popover and the mobile sheet", (): void => {

@@ -55,6 +55,31 @@ describe("createRunPluginToolTool", () => {
     vi.mocked(fs.stat).mockClear().mockResolvedValue({ size: 0 } as unknown as import("fs").Stats);
   });
 
+  it("rejects invalid plugin and tool names without making a request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const badPlugin = await tool.execute("call-bad-plugin", {
+      plugin: "example/config",
+      tool: "mytool",
+      parameters: "{}",
+    });
+    expect((badPlugin.content[0] as { type: string; text: string }).text).toBe(
+      "Error: invalid plugin name.",
+    );
+
+    const badTool = await tool.execute("call-bad-tool", {
+      plugin: "myplugin",
+      tool: "../../config",
+      parameters: "{}",
+    });
+    expect((badTool.content[0] as { type: string; text: string }).text).toBe(
+      "Error: invalid tool name.",
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("formats a successful sync result with string output", async () => {
     mockFetchSequence(
       { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
@@ -570,6 +595,7 @@ describe("createManagePluginsTool", () => {
       expect(text).toContain("manage_plugins");
       expect(text).toContain("install");
       expect(text).toContain("create");
+      expect(text).toContain("add_mcp");
     });
   });
 
@@ -682,6 +708,86 @@ describe("createManagePluginsTool", () => {
     });
   });
 
+  describe("add_mcp action", () => {
+    const tool = createManagePluginsTool({ coderEnabled: false });
+
+    it("calls POST /add-mcp with the parsed server spec and returns the message field", async () => {
+      mockFetch(200, JSON.stringify({ message: "Plugin 'myserver' added." }));
+      const server = JSON.stringify({ command: "npx", args: ["-y", "@example/mcp-server"], env: { API_KEY: "secret" } });
+      const result = await tool.execute("call-1", { action: "add_mcp", name: "myserver", plugin_description: "A test MCP server.", server });
+      const text = (result.content[0] as { type: string; text: string }).text;
+      expect(text).toBe("Plugin 'myserver' added.");
+      const fetchMock = vi.mocked(globalThis.fetch);
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://plugin-runner:3003/add-mcp",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            name: "myserver",
+            description: "A test MCP server.",
+            server: { command: "npx", args: ["-y", "@example/mcp-server"], env: { API_KEY: "secret" } },
+          }),
+        }),
+      );
+    });
+
+    it("appends warnings when present", async () => {
+      mockFetch(200, JSON.stringify({ message: "Plugin 'myserver' added.", warnings: ["Could not connect"] }));
+      const result = await tool.execute("call-2", {
+        action: "add_mcp",
+        name: "myserver",
+        plugin_description: "A test MCP server.",
+        server: '{"url":"https://example.com/mcp"}',
+      });
+      const text = (result.content[0] as { type: string; text: string }).text;
+      expect(text).toBe("Plugin 'myserver' added.\n\nWarnings:\nCould not connect");
+    });
+
+    it("returns an error when server is not valid JSON", async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const result = await tool.execute("call-3", {
+        action: "add_mcp",
+        name: "myserver",
+        plugin_description: "A test MCP server.",
+        server: "not json",
+      });
+      const text = (result.content[0] as { type: string; text: string }).text;
+      expect(text).toBe("Error: server is not valid JSON.");
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("returns an error when name is missing", async () => {
+      const result = await tool.execute("call-4", {
+        action: "add_mcp",
+        plugin_description: "A test MCP server.",
+        server: '{"url":"https://example.com/mcp"}',
+      });
+      const text = (result.content[0] as { type: string; text: string }).text;
+      expect(text).toBe("Error: name is required for add_mcp.");
+    });
+
+    it("returns an error when plugin_description is missing", async () => {
+      const result = await tool.execute("call-5", {
+        action: "add_mcp",
+        name: "myserver",
+        server: '{"url":"https://example.com/mcp"}',
+      });
+      const text = (result.content[0] as { type: string; text: string }).text;
+      expect(text).toBe("Error: plugin_description is required for add_mcp.");
+    });
+
+    it("returns an error when server is missing", async () => {
+      const result = await tool.execute("call-6", {
+        action: "add_mcp",
+        name: "myserver",
+        plugin_description: "A test MCP server.",
+      });
+      const text = (result.content[0] as { type: string; text: string }).text;
+      expect(text).toBe("Error: server is required for add_mcp.");
+    });
+  });
+
   describe("list action", () => {
     const tool = createManagePluginsTool({ coderEnabled: false });
 
@@ -767,6 +873,16 @@ describe("createManagePluginsTool", () => {
       const result = await tool.execute("call-2", { action: "show" });
       const text = (result.content[0] as { type: string; text: string }).text;
       expect(text).toBe("Error: name is required for show.");
+    });
+
+    it("rejects a plugin name containing a slash without making a request", async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const result = await tool.execute("call-invalid-name", { action: "show", name: "example/config" });
+      const text = (result.content[0] as { type: string; text: string }).text;
+
+      expect(text).toBe("Error: invalid plugin name.");
+      expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it("returns 'not found' for a disabled plugin (permissions: [])", async () => {
@@ -952,7 +1068,7 @@ describe("createRequestCodingTaskTool", () => {
     }));
     const result = await tool.execute("call-2", { plugin: "gitplugin", message: "Add a tool." });
     const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe("Plugin 'gitplugin' is not editable. Only locally created plugins can be modified by the coding agent.");
+    expect(text).toBe("Plugin 'gitplugin' is not editable. Only locally created plugins can be modified by the coding agent; git-installed and MCP plugins are never editable.");
   });
 
   it("submits the task to the coder when the plugin is editable", async () => {

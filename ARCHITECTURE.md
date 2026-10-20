@@ -253,6 +253,43 @@ Plugins live in `/plugins/<name>/` (shared volume between `plugin-runner` and `c
   entries (`.git-installed`, its temp directory, `.tmp-install-*`); valid plugin names
   never start with a dot.
 
+### MCP plugins
+- A plugin can wrap an MCP (Model Context Protocol) server instead of scripts: its
+  `manifest.json` declares `"type": "mcp"`, and its tools come from the live server, not
+  from tool directories. The plugin directory holds `manifest.json` and `config.json`
+  (`permissions`, plus the server spec under the single `server` key), and may also hold
+  files a server needs, such as copied credentials.
+- Supported spec shapes (an object or a JSON string is accepted; a Claude Desktop
+  `"type": "stdio" | "http"` key is accepted and ignored, `command` vs `url` selects the
+  transport, and unknown fields and non-http(s) URLs are rejected):
+  - stdio: `{ "command": string, "args"?: string[], "env"?: Record<string, string> }`
+  - streamable HTTP: `{ "url": string, "headers"?: Record<string, string> }`
+- The spec usually contains secrets, so it can be written but is never returned to the
+  agent. `configure` with `server` replaces the spec and disconnects the current
+  connection, so the next use reconnects with the new spec.
+- Stdio servers run as the plugin's user: the transport starts
+  `setpriv --reuid=<uid> --regid=<gid> --clear-groups -- /usr/bin/env -- <spec env> <command> <args>`,
+  with `cwd` and `HOME` set to the plugin directory. The spec's `env` is applied only
+  after the privilege drop, so it cannot influence the launcher.
+- Connections are on demand: the first tool call or detail request opens the transport,
+  runs `listTools`, and caches the tools in memory; `add_mcp` and `update` also connect
+  explicitly. `GET /bundles` (the listing) never connects and reports cached tools only;
+  `GET /bundles/<name>` connects when needed and returns an `error` field if the server is
+  unreachable. Connecting is bounded by the 30-second tool timeout. `update` disconnects
+  and reconnects, refreshing the tool list; `remove` disconnects too.
+- Permissions are checked before connecting, so a disabled or non-permitted tool never
+  starts a server. A call that finishes within 30 seconds returns normally; a longer one
+  returns `202` and its result or failure is posted back with `postCallback()` under
+  `plugin:<name>/<tool>`. The whole call is capped at 5 minutes. MCP tool manifests are
+  always marked async, so `run_plugin_tool` refuses to batch them.
+- MCP plugins are never editable, so the coder refuses to work on them. `add_mcp` (app
+  route `POST /api/settings/plugins/add-mcp`, proxied to plugin-runner `POST /add-mcp`)
+  creates the plugin even if the first connection fails, and warns that the spec needs
+  fixing; `update` retries.
+- Dependency: `@modelcontextprotocol/client` (pinned `2.3.1`), plugin-runner's only
+  runtime dependency; the stdio transport comes from its `/stdio` subpath.
+- Non-goals: MCP resources, prompts, OAuth, and the deprecated HTTP+SSE transport.
+
 ### Security isolation
 - Each plugin gets a dedicated system user `plug_<name>` (UID/GID created by
   `plugin-runner` via `useradd --system`).
@@ -593,6 +630,7 @@ Signal rate-limits the account.
 | `prompts/agent-prompt.txt` | Base system prompt for subagents |
 | `prompts/compaction-prompt.txt` | Prompt used by the background compaction summariser |
 | `plugin-runner/src/index.ts` | Plugin HTTP server (all logic in one file) |
+| `plugin-runner/src/mcp-client.ts` | MCP client: spec validation, connections, cached tool list, call translation |
 | `coder/server.py` | Coder HTTP server, `claude -p` subprocess management |
 | `signal-bridge/bridge.py` | Signal bridge: signal-cli event handling, `/send`, `/challenge` |
 
