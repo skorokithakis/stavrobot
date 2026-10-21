@@ -153,7 +153,7 @@ full list of endpoints.
 
 ### Without Docker
 
-Requires Node.js >= 20 and a running PostgreSQL instance.
+Requires Node.js >= 26 and a running PostgreSQL instance.
 
 ```bash
 npm install && npm run build && npm start

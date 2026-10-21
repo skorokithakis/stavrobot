@@ -1,4 +1,4 @@
-FROM node:22-slim AS build
+FROM node:26.12.1-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
@@ -6,7 +6,7 @@ COPY src/ ./src/
 COPY tsconfig.json ./
 RUN npm run build
 
-FROM node:22-slim
+FROM node:26.12.1-slim
 WORKDIR /app
 COPY --from=build /app/package.json /app/package-lock.json* ./
 RUN npm install --omit=dev

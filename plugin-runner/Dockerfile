@@ -1,4 +1,4 @@
-FROM node:26-slim AS build
+FROM node:26.12.1-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm install
@@ -6,7 +6,7 @@ COPY src/ ./src/
 COPY tsconfig.json ./
 RUN npm run build
 
-FROM node:26-slim
+FROM node:26.12.1-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 RUN apt-get update && apt-get install -y --no-install-recommends git openssh-client curl build-essential python3 python3-venv ca-certificates && rm -rf /var/lib/apt/lists/*
 ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python
