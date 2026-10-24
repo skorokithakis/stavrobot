@@ -57,7 +57,7 @@ To talk to another person to complete some task:
 1. Create an interlocutor record with their display name and channel identity (service + identifier).
 2. Create a subagent via manage_agents with instructions for the task (language, topic, context, constraints). Give it only the bare minimum of tools it needs to complete the task (e.g. send_telegram_message, google_calendar).
 3. Assign the subagent to the interlocutor by setting agent_id on the interlocutor. This allows messages from the person to be routed to the agent.
-4. Send the subagent its first message via send_agent_message. The subagent will handle the conversation in its own context and can message you back if it needs information or tools.
+4. Send the subagent its first message via send_agent_message. The subagent will handle the conversation in its own context and its final responses are delivered to you.
 5. When the task is done, disable the interlocutor (set enabled: false). This stops both inbound and outbound messages. The agent assignment stays in place, so you can re-enable the interlocutor later to resume.
 
 The agent_id determines which agent handles inbound messages from this interlocutor. If agent_id is null or the interlocutor is disabled, inbound messages are dropped.

@@ -48,7 +48,7 @@ import { isInAllowlist, recordRejectedSender } from "./allowlist.js";
 import { sendSignalMessage } from "./signal.js";
 import { sendTelegramMessage } from "./telegram-api.js";
 import { sendWhatsappTextMessage } from "./whatsapp-api.js";
-import { initializeQueue, enqueueMessage, MAX_RETRIES } from "./queue.js";
+import { initializeQueue, enqueueMessage, MAX_RETRIES, NOTHING_TO_REPORT } from "./queue.js";
 
 const mockInvalidateCredentials = vi.mocked(invalidateCredentials);
 const mockHandlePrompt = vi.mocked(handlePrompt);
@@ -678,5 +678,119 @@ describe("steering", () => {
     expect(groupResult).toBe("");
     expect(mockRecordRejectedSender).toHaveBeenCalledOnce();
     expect(mockRecordRejectedSender).toHaveBeenCalledWith("signal", "group.abc123", "The Group");
+  });
+});
+
+describe("subagent final message forwarding", () => {
+  it("forwards a subagent's trimmed final text to the main agent as an agent message", async () => {
+    mockHandlePrompt.mockResolvedValueOnce("  Here is the result  ").mockResolvedValueOnce("ack");
+
+    // An agent-to-agent message targeting agent 2 makes agent 2 the subagent.
+    const result = await enqueueMessage("do the task", "agent", "1", undefined, 2);
+
+    expect(result).toBe("  Here is the result  ");
+
+    await vi.waitFor(() => expect(mockHandlePrompt).toHaveBeenCalledTimes(2));
+    const forwardedCall = mockHandlePrompt.mock.calls[1];
+    expect(forwardedCall[2]).toBe("Here is the result");
+    expect(forwardedCall[5]).toBe("agent");
+    const forwardedRouting = forwardedCall[4] as RoutingResult;
+    expect(forwardedRouting.agentId).toBe(1);
+    expect(forwardedRouting.isMainAgent).toBe(true);
+    expect(forwardedRouting.senderAgentId).toBe(2);
+  });
+
+  it("forwards a subagent final text of '/stop' literally without aborting", async () => {
+    mockHandlePrompt.mockResolvedValueOnce("/stop").mockResolvedValueOnce("ack");
+
+    const result = await enqueueMessage("do the task", "agent", "1", undefined, 2);
+
+    expect(result).toBe("/stop");
+    expect(mockAbort).not.toHaveBeenCalled();
+
+    await vi.waitFor(() => expect(mockHandlePrompt).toHaveBeenCalledTimes(2));
+    const forwardedCall = mockHandlePrompt.mock.calls[1];
+    expect(forwardedCall[2]).toBe("/stop");
+    expect(forwardedCall[5]).toBe("agent");
+    expect((forwardedCall[4] as RoutingResult).agentId).toBe(1);
+  });
+
+  it("forwards the final text of a subagent reached via an interlocutor message", async () => {
+    mockIsInAllowlist.mockReturnValue(true);
+    mockResolveInterlocutor.mockResolvedValue({
+      interlocutorId: 42,
+      identityId: 10,
+      agentId: 5,
+      isOwner: false,
+      displayName: "Alice",
+    });
+    mockHandlePrompt.mockResolvedValueOnce("reply for Alice").mockResolvedValueOnce("ack");
+
+    await enqueueMessage("hi", "signal", "+9876543210");
+
+    await vi.waitFor(() => expect(mockHandlePrompt).toHaveBeenCalledTimes(2));
+    const forwardedCall = mockHandlePrompt.mock.calls[1];
+    expect(forwardedCall[2]).toBe("reply for Alice");
+    const forwardedRouting = forwardedCall[4] as RoutingResult;
+    expect(forwardedRouting.agentId).toBe(1);
+    expect(forwardedRouting.senderAgentId).toBe(5);
+  });
+
+  it.each(["", "   ", "\n\t  \n"])("does not forward an empty final text (%j)", async (finalText) => {
+    mockHandlePrompt.mockResolvedValueOnce(finalText);
+
+    const result = await enqueueMessage("do the task", "agent", "1", undefined, 2);
+
+    expect(result).toBe(finalText);
+    expect(mockHandlePrompt).toHaveBeenCalledOnce();
+  });
+
+  it.each([NOTHING_TO_REPORT, "nothing_to_report", "  Nothing_To_Report \n"])(
+    "does not forward the NOTHING_TO_REPORT marker (%j)",
+    async (finalText) => {
+      mockHandlePrompt.mockResolvedValueOnce(finalText);
+
+      const result = await enqueueMessage("do the task", "agent", "1", undefined, 2);
+
+      expect(result).toBe(finalText);
+      expect(mockHandlePrompt).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("never forwards main agent turns", async () => {
+    mockHandlePrompt.mockResolvedValueOnce("a normal reply");
+
+    const result = await enqueueMessage("hello");
+
+    expect(result).toBe("a normal reply");
+    expect(mockHandlePrompt).toHaveBeenCalledOnce();
+  });
+
+  it("does not forward a failed subagent turn", async () => {
+    mockHandlePrompt.mockRejectedValueOnce(
+      new Error('Agent error: "400 {"type":"error","error":{"type":"invalid_request_error","message":"orphaned tool_result"}}"'),
+    );
+
+    const result = await enqueueMessage("do the task", "agent", "1", undefined, 2);
+
+    expect(result).toBe("Something went wrong: orphaned tool_result");
+    expect(mockHandlePrompt).toHaveBeenCalledOnce();
+  });
+
+  it("forwards exactly once when a subagent turn succeeds after a retry", async () => {
+    mockHandlePrompt
+      .mockRejectedValueOnce(new Error("network timeout"))
+      .mockResolvedValueOnce("done")
+      .mockResolvedValueOnce("ack");
+
+    vi.useFakeTimers();
+    const resultPromise = enqueueMessage("do the task", "agent", "1", undefined, 2);
+    await vi.runAllTimersAsync();
+    vi.useRealTimers();
+
+    expect(await resultPromise).toBe("done");
+
+    await vi.waitFor(() => expect(mockHandlePrompt).toHaveBeenCalledTimes(3));
+    expect(mockHandlePrompt.mock.calls[2][2]).toBe("done");
   });
 });

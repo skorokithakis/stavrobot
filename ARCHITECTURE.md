@@ -155,6 +155,17 @@ Subagents have `allowed_tools TEXT[]` and `allowed_plugins TEXT[]` in the DB.
 restrictions (e.g. `"manage_interlocutors.list"` allows only the `list` action).
 `run_plugin_tool` is controlled exclusively by `allowed_plugins`, not `allowed_tools`.
 The main agent (id=1) always has `allowed_tools = '{*}'` and `allowed_plugins = '{*}'`.
+Subagents never get `send_agent_message`, even if `allowed_tools` lists it. They report
+to the main agent through their final text response (see "Subagent reports" below).
+
+### Subagent reports
+When a subagent turn ends successfully, `processQueue` (`src/queue.ts`) forwards the
+final text to the main agent as an agent message (source `"agent"`, sender = the
+subagent's ID). This happens for every trigger: an inbound interlocutor message, a
+message from the main agent, or anything else. A final that is empty or exactly
+`NOTHING_TO_REPORT` (trimmed, case-insensitive) is not forwarded. Failed and aborted
+turns are not forwarded. The forward is enqueued without being awaited, because the
+main agent's turn runs behind the current one in the same queue.
 
 ### Context compaction
 After every turn whose history exceeds the compaction threshold (60% of the effective
@@ -190,7 +201,7 @@ every `Agent.prompt()` call.
 | `manage_files` | ✓ | |
 | `manage_interlocutors` | ✓ | |
 | `manage_agents` | ✓ | |
-| `send_agent_message` | ✓ | |
+| `send_agent_message` | ✓ (main agent only) | |
 | `manage_plugins` | ✓ | |
 | `run_plugin_tool` | ✓ | |
 | `request_coding_task` | | `config.coder` present |
@@ -575,7 +586,7 @@ to the endpoint (as `reasoning_effort` for `openai-completions`). It is ignored 
 | `"cron"` | Scheduler |
 | `"coder"` | Coder agent callback |
 | `"plugin:<name>/<tool>"` | Async plugin tool callback |
-| `"agent"` | Subagent-to-agent message |
+| `"agent"` | Main agent to subagent message, or a forwarded subagent final response |
 | `"upload"` | File upload trigger |
 
 Internal sources (`cli`, `cron`, `coder`, `plugin:*`, `upload`) always route to the

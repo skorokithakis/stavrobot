@@ -15,6 +15,10 @@ import { log } from "./log.js";
 export const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 30_000;
 
+// Subagents use this marker as their final text when they have nothing to report
+// to the main agent. Such turns are not forwarded.
+export const NOTHING_TO_REPORT = "NOTHING_TO_REPORT";
+
 // Sources that require allowlist + interlocutor lookup before routing.
 // All other external sources route directly to the main agent.
 const GATED_SOURCES: string[] = ["signal", "telegram", "whatsapp", "email"];
@@ -260,6 +264,26 @@ async function sendErrorToSource(
   }
 }
 
+// Forwards a subagent's final text to the main agent as an agent message, the
+// same way send_agent_message does. The enqueue is deliberately not awaited:
+// the main agent's turn runs behind this one in the same queue, so awaiting
+// would deadlock.
+function forwardSubagentFinalMessage(routing: RoutingResult, response: string): void {
+  if (routing.isMainAgent) {
+    return;
+  }
+  const text = response.trim();
+  if (text === "") {
+    return;
+  }
+  if (text.toLowerCase() === NOTHING_TO_REPORT.toLowerCase()) {
+    log.info(`[stavrobot] Subagent ${routing.agentId} reported nothing to report, not forwarding.`);
+    return;
+  }
+  log.info(`[stavrobot] Forwarding subagent ${routing.agentId} final message to main agent.`);
+  void enqueueMessage(text, "agent", String(routing.agentId), undefined, getMainAgentId());
+}
+
 async function processQueue(): Promise<void> {
   processing = true;
   while (queue.length > 0) {
@@ -275,6 +299,7 @@ async function processQueue(): Promise<void> {
         continue;
       }
       const response = await handlePrompt(queueAgent!, queuePool!, entry.message, queueConfig!, routing, entry.source, entry.attachments, entry.retries > 0, entry.participant);
+      forwardSubagentFinalMessage(routing, response);
       entry.resolve(response);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -342,7 +367,9 @@ export function enqueueMessage(
   participant?: Participant,
   senderLabel?: string,
 ): Promise<string> {
-  if (message !== undefined && message.trim().toLowerCase() === "/stop") {
+  // Agent-to-agent messages are data, not owner commands, so a subagent that
+  // happens to reply "/stop" must be delivered literally instead of aborting.
+  if (source !== "agent" && message !== undefined && message.trim().toLowerCase() === "/stop") {
     if (processing) {
       log.info("[stavrobot] /stop received, aborting running agent.");
       queueAgent!.abort();

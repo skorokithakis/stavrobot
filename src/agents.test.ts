@@ -47,6 +47,7 @@ describe("manage_agents — help", () => {
     expect(text).toContain("send_agent_message");
     expect(text).toContain("allowed_plugins");
     expect(text).toContain("dot notation");
+    expect(text).not.toContain("send_agent_message is always available");
   });
 });
 

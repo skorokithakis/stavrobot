@@ -417,20 +417,19 @@ describe("filterToolsForSubagent", () => {
   it("excludes tools not in the allowed list", () => {
     const tools = [makeTool("execute_sql"), makeTool("manage_cron"), makeTool("send_agent_message")];
     const result = filterToolsForSubagent(tools, ["execute_sql"], []);
-    expect(result.map((t) => t.name)).toEqual(["execute_sql", "send_agent_message"]);
+    expect(result.map((t) => t.name)).toEqual(["execute_sql"]);
   });
 
-  it("always includes send_agent_message even when not listed", () => {
-    const tools = [makeTool("execute_sql"), makeTool("send_agent_message")];
-    const result = filterToolsForSubagent(tools, ["execute_sql"], []);
-    expect(result.map((t) => t.name)).toContain("send_agent_message");
-  });
-
-  it("includes send_agent_message only once when explicitly listed", () => {
+  it("excludes send_agent_message even when allowedTools lists it", () => {
     const tools = [makeTool("execute_sql"), makeTool("send_agent_message")];
     const result = filterToolsForSubagent(tools, ["execute_sql", "send_agent_message"], []);
-    const names = result.map((t) => t.name);
-    expect(names.filter((n) => n === "send_agent_message")).toHaveLength(1);
+    expect(result.map((t) => t.name)).toEqual(["execute_sql"]);
+  });
+
+  it("excludes send_agent_message when it is the only allowed tool", () => {
+    const tools = [makeTool("execute_sql"), makeTool("send_agent_message")];
+    const result = filterToolsForSubagent(tools, ["send_agent_message"], []);
+    expect(result).toHaveLength(0);
   });
 
   it("includes a tool as-is when a bare name is given", async () => {
@@ -507,17 +506,16 @@ describe("filterToolsForSubagent", () => {
     expect(tool.execute).not.toHaveBeenCalled();
   });
 
-  it("returns empty list (except send_agent_message) when allowed list is empty", () => {
+  it("returns an empty list when allowed list is empty", () => {
     const tools = [makeTool("execute_sql"), makeTool("manage_cron")];
     const result = filterToolsForSubagent(tools, [], []);
-    // send_agent_message is not in the tools array, so nothing is returned.
     expect(result).toHaveLength(0);
   });
 
-  it("includes send_agent_message from tools when allowed list is empty", () => {
+  it("excludes send_agent_message when allowed list is empty", () => {
     const tools = [makeTool("execute_sql"), makeTool("send_agent_message")];
     const result = filterToolsForSubagent(tools, [], []);
-    expect(result.map((t) => t.name)).toEqual(["send_agent_message"]);
+    expect(result).toHaveLength(0);
   });
 
   it("error message lists allowed actions sorted alphabetically", async () => {

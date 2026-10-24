@@ -664,7 +664,7 @@ describe("subagent recipient scoping", () => {
     const tool = createSendSignalMessageTool(pool, config);
     const result = await tool.execute("call-1", { recipient: "+9999999999", message: "hello" });
     expect(makeText(result)).toContain("assigned interlocutor");
-    expect(makeText(result)).toContain("send_agent_message");
+    expect(makeText(result)).toContain("in your final response");
   });
 
   it("allows subagent to send to its assigned Telegram interlocutor", async () => {
@@ -685,7 +685,7 @@ describe("subagent recipient scoping", () => {
     const tool = createSendTelegramMessageTool(pool, config);
     const result = await tool.execute("call-1", { recipient: "88888", message: "hello" });
     expect(makeText(result)).toContain("assigned interlocutor");
-    expect(makeText(result)).toContain("send_agent_message");
+    expect(makeText(result)).toContain("in your final response");
   });
 
   it("allows subagent to send to its assigned WhatsApp interlocutor", async () => {
@@ -707,7 +707,7 @@ describe("subagent recipient scoping", () => {
     const tool = createSendWhatsappMessageTool(pool, config);
     const result = await tool.execute("call-1", { recipient: "+9999999999", message: "hello" });
     expect(makeText(result)).toContain("assigned interlocutor");
-    expect(makeText(result)).toContain("send_agent_message");
+    expect(makeText(result)).toContain("in your final response");
   });
 
   it("rejects subagent sending to a different email interlocutor", async () => {
@@ -719,7 +719,7 @@ describe("subagent recipient scoping", () => {
     const tool = createSendEmailTool(pool, config);
     const result = await tool.execute("call-1", { recipient: "other@example.com", subject: "Hi", message: "hello" });
     expect(makeText(result)).toContain("assigned interlocutor");
-    expect(makeText(result)).toContain("send_agent_message");
+    expect(makeText(result)).toContain("in your final response");
   });
 
   it("allows main agent to send email to any recipient", async () => {

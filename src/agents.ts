@@ -33,7 +33,7 @@ help — Show this documentation.
 create — Create a new subagent.
   name (required): A short, descriptive name for the agent.
   system_prompt (required): The agent's specific instructions, context, and constraints. This is appended to the base agent prompt. Write it as if you're briefing a colleague on a task — include what the agent should do, what information it has, and what constraints it must follow.
-  allowed_tools (optional): Whitelist of core tool names the agent may use. Defaults to [] (no tools). Allowed values: send_signal_message, send_telegram_message, send_whatsapp_message, send_email, manage_files, manage_uploads, run_python, db_search. Use dot notation to scope to specific actions: "manage_uploads.read" allows only the read action of that tool. send_agent_message is always available to all agents — do not include it here. If allowed_plugins is non-empty, run_plugin_tool is implicitly available — do not include it here either.
+  allowed_tools (optional): Whitelist of core tool names the agent may use. Defaults to [] (no tools). Allowed values: send_signal_message, send_telegram_message, send_whatsapp_message, send_email, manage_files, manage_uploads, run_python, db_search. Use dot notation to scope to specific actions: "manage_uploads.read" allows only the read action of that tool. Subagents do not have send_agent_message — do not include it here. If allowed_plugins is non-empty, run_plugin_tool is implicitly available — do not include it here either.
   allowed_plugins (optional): Whitelist of plugins the agent may use. Defaults to [] (no plugins). Use ["*"] to allow all plugins, ["weather"] to allow all tools in the weather plugin, or ["weather.get_forecast"] to allow a specific tool. Empty list or omission means no plugin access. When non-empty, run_plugin_tool is implicitly available.
   Returns the new agent's ID.
 
@@ -50,9 +50,9 @@ list — List all agents. No parameters.
 
 Guidance on creating subagents:
 
-- Give agents the minimum tool privileges needed for their task. Start with fewer tools; the subagent can ask for more via send_agent_message.
+- Give agents the minimum tool privileges needed for their task. Start with fewer tools; the subagent can ask for more in its final response.
 - Match the channel tool to the task. If the subagent's job is to handle an email conversation, give it send_email — not send_signal_message. A subagent can only message its assigned interlocutor, so the tool must match the channel the interlocutor uses.
-- send_agent_message is always available to all agents regardless of their allowed_tools list — do not include it in the list.
+- Subagents do not have send_agent_message. A subagent's final text response is delivered to the main agent automatically, so write its system_prompt to tell it to report results, ask questions, or request tools in its final response — never tell it to use send_agent_message.
 - The allowed_tools field is a whitelist: [] means no tools, and an explicit list like ["send_telegram_message"] means only those tools. Use dot notation to restrict to specific actions: ["manage_uploads.read", "manage_uploads.write"] allows only read and write.
 - Always scope plugin access to the specific tools needed. Use dot notation: ["caldav.list_events", "caldav.get_event"] rather than ["caldav"]. Granting a whole plugin or ["*"] gives the subagent access to every tool in that plugin, including destructive ones — only do this when every tool is genuinely needed.
 - The subagent's system prompt automatically includes the list of available plugins and their tools, so the subagent will know what it can use — you do not need to describe the plugins in the system_prompt.
