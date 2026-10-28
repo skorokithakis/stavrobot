@@ -167,6 +167,17 @@ message from the main agent, or anything else. A final that is empty or exactly
 turns are not forwarded. The forward is enqueued without being awaited, because the
 main agent's turn runs behind the current one in the same queue.
 
+A subagent turn triggered by an inbound chat message (source `signal`, `telegram`, or
+`whatsapp`) must reply to the person or group with a send tool, because they only see
+send-tool output. If such a turn ends without any call to `send_signal_message`,
+`send_telegram_message`, `send_whatsapp_message`, or `send_email`, the model is prompted
+once more within the same turn with a system-notice user message (persisted like a steered
+message). Any send-tool call counts, even if its result is an error. At most one nudge is
+sent; if the nudged turn still makes no send call, the turn is accepted with a warning.
+The forwarded final text is the last assistant text after the nudge. Turns triggered by
+`agent`, email, CLI, cron, or any other non-chat source, and all main agent turns, are
+never nudged.
+
 ### Context compaction
 After every turn whose history exceeds the compaction threshold (60% of the effective
 context budget), a background task (non-blocking) runs `escalatingSummarize()` on the

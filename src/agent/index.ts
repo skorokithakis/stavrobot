@@ -102,6 +102,14 @@ let compactionInProgress = false;
 // turns corrupting agent.state. Set on entry, cleared in a finally block.
 let handlePromptInProgress = false;
 
+// Inbound chat sources whose subagents must reply to the sender with a send
+// tool. Other sources (agent, email, cli, cron, etc.) are not nudged.
+const CHAT_TRIGGER_SOURCES = ["signal", "telegram", "whatsapp"];
+
+const SEND_TOOL_NAMES = ["send_signal_message", "send_telegram_message", "send_whatsapp_message", "send_email"];
+
+const NO_SEND_NUDGE_TEXT = "[System notice] You finished your turn without sending anything to the person or group who messaged you. They only see what you send with the send tools. Reply to them now with the send tool for this channel. Then give your final response for the main agent again, or exactly NOTHING_TO_REPORT if you have nothing for it.";
+
 // Set to the agent ID whose compaction just finished. The next handlePrompt
 // call for that agent checks this and reloads messages from the DB. Stored as
 // an ID rather than a boolean so that a compaction for agent A does not trigger
@@ -939,11 +947,20 @@ async function runHandlePrompt(
     // messages that get saved without sender metadata.
     let initialPromptEventConsumed = false;
 
+    // Whether the model called a send tool in this turn. Any call counts, even
+    // one whose tool result is an error, because the person may still have seen
+    // an attempt to reach them. Used to nudge chat-triggered subagents that end
+    // their turn silently.
+    let sendToolCallObserved = false;
+
     const unsubscribe = agent.subscribe((event) => {
       if (event.type === "message_end") {
         const message = event.message;
         if (message.role === "assistant") {
           const assistantMessage = message as unknown as AssistantMessage;
+          if (assistantMessage.content.some((block) => block.type === "toolCall" && SEND_TOOL_NAMES.includes(block.name))) {
+            sendToolCallObserved = true;
+          }
           if (assistantMessage.stopReason === "error" || assistantMessage.stopReason === "aborted") {
             return;
           }
@@ -977,11 +994,25 @@ async function runHandlePrompt(
       }
     });
 
+    let nudged = false;
+
     try {
       if (imageContents.length > 0) {
         await agent.prompt(messageToSend, imageContents);
       } else {
         await agent.prompt(messageToSend);
+      }
+
+      if (
+        !isMainAgent &&
+        source !== undefined &&
+        CHAT_TRIGGER_SOURCES.includes(source) &&
+        !sendToolCallObserved &&
+        !agent.state.errorMessage
+      ) {
+        log.info(`[stavrobot] Subagent ${agentId} ended a chat-triggered turn without a send tool call; nudging it to reply.`);
+        nudged = true;
+        await agent.prompt(NO_SEND_NUDGE_TEXT);
       }
     } finally {
       unsubscribe();
@@ -1025,6 +1056,10 @@ async function runHandlePrompt(
       // TurnProgressPersistedError when progress was already persisted, so a
       // retry would not replay tool side effects.
       throw new Error(`Agent error: ${errorJson}`);
+    }
+
+    if (nudged && !sendToolCallObserved) {
+      log.warn(`[stavrobot] Subagent ${agentId} still did not call a send tool after the nudge; accepting the turn.`);
     }
 
     const lastAssistantMessage = agent.state.messages

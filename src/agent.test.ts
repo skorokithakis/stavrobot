@@ -7,7 +7,7 @@ import { getApiKey } from "./auth.js";
 import { loadMessages, loadAllMemories, loadAllScratchpadTitles, getMainAgentId, saveMessage, loadAgent, loadLatestCompaction, saveCompaction, isOwnerIdentity } from "./database.js";
 import { runSearch } from "./search.js";
 import { internalFetch } from "./internal-fetch.js";
-import { TurnProgressPersistedError } from "./errors.js";
+import { AbortError, TurnProgressPersistedError } from "./errors.js";
 
 // Mock all heavy dependencies so the module loads without real infrastructure.
 vi.mock("./database.js", () => ({
@@ -150,12 +150,25 @@ const { FakeAgent } = vi.hoisted(() => {
     };
     // Set this before calling prompt() to make it throw.
     public promptError: Error | undefined = undefined;
+    // Per-prompt throw overrides. Each call shifts one entry, so a test can let
+    // the first prompt succeed and make a later prompt (e.g. the nudge) fail.
+    public promptErrors: Array<Error | undefined> = [];
+    // Per-prompt values for state.errorMessage, applied after the prompt's
+    // scripted events. Lets a test model an abort detected at the end of a
+    // specific prompt without throwing out of prompt() itself.
+    public promptStateErrorMessages: Array<string | undefined> = [];
     // Events emitted before promptError is thrown. Lets a test model a turn
     // that streams an assistant message_end (persisting progress) and then
     // fails mid-stream.
     public eventsBeforeError: unknown[] = [];
     // Steered messages to emit as message_end events during prompt().
     public steeringMessages: unknown[] = [];
+    // Events to emit during successive prompt() calls, after the initial user
+    // message and any steering messages. Each call shifts one batch, so tests
+    // can script a nudge followed by a reply. Message_end events are also
+    // appended to state.messages, mirroring the real agent's transcript.
+    public promptEvents: unknown[][] = [];
+    public promptMessages: unknown[] = [];
     private listeners: Array<(e: unknown) => void> = [];
 
     constructor(opts?: {
@@ -191,11 +204,13 @@ const { FakeAgent } = vi.hoisted(() => {
     }
 
     async prompt(message: unknown): Promise<void> {
-      if (this.promptError !== undefined) {
+      this.promptMessages.push(message);
+      const promptError = this.promptErrors.length > 0 ? this.promptErrors.shift() : this.promptError;
+      if (promptError !== undefined) {
         for (const event of this.eventsBeforeError) {
           this.emit(event);
         }
-        throw this.promptError;
+        throw promptError;
       }
       if (this.transformContextFn !== undefined) {
         // Mirror the real Agent: append the incoming user message to the stored
@@ -216,6 +231,22 @@ const { FakeAgent } = vi.hoisted(() => {
         this.emit({ type: "message_end", message: steered });
       }
       this.steeringMessages = [];
+      // Emit the scripted events for this prompt call, appending message_end
+      // messages to the transcript like the real agent does.
+      const events = this.promptEvents.shift() ?? [];
+      for (const event of events) {
+        const messageEvent = event as { type?: string; message?: unknown };
+        if (messageEvent.type === "message_end" && messageEvent.message !== undefined) {
+          this.state.messages.push(messageEvent.message);
+        }
+        this.emit(event);
+      }
+      if (this.promptStateErrorMessages.length > 0) {
+        const stateErrorMessage = this.promptStateErrorMessages.shift();
+        if (stateErrorMessage !== undefined) {
+          this.state.errorMessage = stateErrorMessage;
+        }
+      }
     }
   }
 
@@ -1653,6 +1684,274 @@ describe("handlePrompt — user message persistence", () => {
     // Exactly one user save: the pre-prompt save. The message_end for the initial
     // prompt must be skipped by the subscriber.
     expect(userSaves).toHaveLength(1);
+  });
+});
+
+describe("handlePrompt — nudge for silent chat-triggered subagents", () => {
+  const mockLoadAgent = vi.mocked(loadAgent);
+  const mockSaveMessage = vi.mocked(saveMessage);
+
+  // Kept as a literal so an accidental edit to the constant under test fails.
+  const noSendNudgeText = "[System notice] You finished your turn without sending anything to the person or group who messaged you. They only see what you send with the send tools. Reply to them now with the send tool for this channel. Then give your final response for the main agent again, or exactly NOTHING_TO_REPORT if you have nothing for it.";
+
+  const subagentRouting = {
+    agentId: 2,
+    senderIdentityId: undefined,
+    senderAgentId: undefined,
+    senderLabel: "test-user",
+    isMainAgent: false,
+  };
+
+  function setupCommonMocks(): void {
+    vi.clearAllMocks();
+    vi.mocked(loadMessages).mockResolvedValue([]);
+    vi.mocked(loadAllMemories).mockResolvedValue([]);
+    vi.mocked(loadAllScratchpadTitles).mockResolvedValue([]);
+    vi.mocked(getMainAgentId).mockReturnValue(1);
+    vi.mocked(internalFetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ plugins: [] }),
+    } as unknown as Response);
+    vi.mocked(getApiKey).mockResolvedValue("test-key");
+    vi.mocked(runSearch).mockResolvedValue({ tableResults: [], messages: [] });
+    mockSaveMessage.mockResolvedValue(42);
+    mockLoadAgent.mockResolvedValue({
+      id: 2,
+      name: "helper",
+      systemPrompt: "You are a helpful subagent.",
+      allowedTools: ["*"],
+      allowedPlugins: [],
+      createdAt: new Date(),
+    });
+  }
+
+  function assistantEvent(content: unknown[], stopReason: string = "stop"): unknown {
+    return { type: "message_end", message: { role: "assistant", content, stopReason } };
+  }
+
+  it("does not nudge when the subagent already called a send tool", async () => {
+    setupCommonMocks();
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+    fakeAgent.promptEvents = [[
+      assistantEvent([
+        { type: "toolCall", id: "tc1", name: "send_telegram_message", arguments: { message: "Hi" } },
+        { type: "text", text: "Sent." },
+      ]),
+    ]];
+
+    await handlePrompt(agent, makePool(), "hello", minimalConfig, subagentRouting, "telegram");
+
+    expect(fakeAgent.promptMessages).toHaveLength(1);
+  });
+
+  it("counts a send tool call whose result is an error", async () => {
+    setupCommonMocks();
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+    fakeAgent.promptEvents = [[
+      assistantEvent([
+        { type: "toolCall", id: "tc1", name: "send_signal_message", arguments: { message: "Hi" } },
+      ]),
+      {
+        type: "message_end",
+        message: {
+          role: "toolResult",
+          toolCallId: "tc1",
+          toolName: "send_signal_message",
+          content: [{ type: "text", text: "send failed" }],
+          isError: true,
+          timestamp: 0,
+        },
+      },
+      assistantEvent([{ type: "text", text: "Could not send." }]),
+    ]];
+
+    await handlePrompt(agent, makePool(), "hello", minimalConfig, subagentRouting, "signal");
+
+    expect(fakeAgent.promptMessages).toHaveLength(1);
+  });
+
+  it("nudges once and persists the nudge when no send happened, then sends after the nudge", async () => {
+    setupCommonMocks();
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+    fakeAgent.promptEvents = [
+      [assistantEvent([{ type: "text", text: "Looking into it." }])],
+      [
+        assistantEvent([
+          { type: "toolCall", id: "tc1", name: "send_whatsapp_message", arguments: { message: "All done." } },
+          { type: "text", text: "Done." },
+        ]),
+      ],
+    ];
+
+    const response = await handlePrompt(agent, makePool(), "hello", minimalConfig, subagentRouting, "whatsapp");
+
+    expect(fakeAgent.promptMessages).toHaveLength(2);
+    expect(fakeAgent.promptMessages[1]).toBe(noSendNudgeText);
+    expect(response).toBe("Done.");
+
+    // The nudge is persisted like a steered user message, without sender metadata.
+    const userSaves = mockSaveMessage.mock.calls.filter(
+      (call) => (call[1] as { role: string }).role === "user",
+    );
+    expect(userSaves).toHaveLength(2);
+    expect((userSaves[1][1] as { content: unknown }).content).toEqual([
+      { type: "text", text: noSendNudgeText },
+    ]);
+    expect(userSaves[1][3]).toBeUndefined();
+    expect(userSaves[1][4]).toBeUndefined();
+  });
+
+  it("accepts the turn after a single nudge when the subagent still does not send", async () => {
+    setupCommonMocks();
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+    fakeAgent.promptEvents = [
+      [assistantEvent([{ type: "text", text: "Still thinking." }])],
+      [assistantEvent([{ type: "text", text: "NOTHING_TO_REPORT" }])],
+    ];
+
+    const response = await handlePrompt(agent, makePool(), "hello", minimalConfig, subagentRouting, "telegram");
+
+    // Exactly one nudge: two prompts total, not three.
+    expect(fakeAgent.promptMessages).toHaveLength(2);
+    expect(fakeAgent.promptMessages[1]).toBe(noSendNudgeText);
+    expect(response).toBe("NOTHING_TO_REPORT");
+  });
+
+  it("does not nudge when the first prompt throws", async () => {
+    setupCommonMocks();
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+    fakeAgent.promptError = new Error("model unreachable");
+
+    await expect(
+      handlePrompt(agent, makePool(), "hello", minimalConfig, subagentRouting, "signal"),
+    ).rejects.toThrow("model unreachable");
+
+    expect(fakeAgent.promptMessages).toHaveLength(1);
+  });
+
+  it("does not nudge when the first prompt is aborted", async () => {
+    setupCommonMocks();
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+    fakeAgent.promptEvents = [[assistantEvent([], "aborted")]];
+    fakeAgent.promptStateErrorMessages = ["aborted"];
+
+    await expect(
+      handlePrompt(agent, makePool(), "hello", minimalConfig, subagentRouting, "signal"),
+    ).rejects.toBeInstanceOf(AbortError);
+
+    // The nudge would have been a second prompt, so the abort must have skipped it.
+    expect(fakeAgent.promptMessages).toHaveLength(1);
+  });
+
+  it("surfaces a provider error during the nudge as TurnProgressPersistedError", async () => {
+    setupCommonMocks();
+    mockLoadAgent.mockResolvedValue({
+      id: 2,
+      name: "restricted",
+      systemPrompt: "You are a restricted subagent.",
+      allowedTools: ["manage_cron"],
+      allowedPlugins: [],
+      createdAt: new Date(),
+    });
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+    const fullTools = fakeAgent.state.tools;
+    fakeAgent.promptEvents = [[assistantEvent([{ type: "text", text: "Looking into it." }])]];
+    fakeAgent.promptErrors = [undefined, new Error("provider failed")];
+
+    let caughtError: unknown;
+    try {
+      await handlePrompt(agent, makePool(), "hello", minimalConfig, subagentRouting, "signal");
+    } catch (error) {
+      caughtError = error;
+    }
+
+    expect(caughtError).toBeInstanceOf(TurnProgressPersistedError);
+    expect((caughtError as Error).message).toBe("provider failed");
+    // The first prompt triggered the nudge, so two prompts were attempted.
+    expect(fakeAgent.promptMessages).toHaveLength(2);
+    expect(fakeAgent.promptMessages[1]).toBe(noSendNudgeText);
+    // The restricted tool list must still be restored on a nudge failure.
+    expect(fakeAgent.state.tools).toBe(fullTools);
+  });
+
+  it("surfaces an abort during the nudge as AbortError and saves the cancellation row", async () => {
+    setupCommonMocks();
+    mockLoadAgent.mockResolvedValue({
+      id: 2,
+      name: "restricted",
+      systemPrompt: "You are a restricted subagent.",
+      allowedTools: ["manage_cron"],
+      allowedPlugins: [],
+      createdAt: new Date(),
+    });
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+    const fullTools = fakeAgent.state.tools;
+    fakeAgent.promptEvents = [
+      [assistantEvent([{ type: "text", text: "Looking into it." }])],
+      [assistantEvent([], "aborted")],
+    ];
+    fakeAgent.promptStateErrorMessages = [undefined, "aborted"];
+
+    let caughtError: unknown;
+    try {
+      await handlePrompt(agent, makePool(), "hello", minimalConfig, subagentRouting, "signal");
+    } catch (error) {
+      caughtError = error;
+    }
+
+    expect(caughtError).toBeInstanceOf(AbortError);
+    expect(fakeAgent.promptMessages).toHaveLength(2);
+    expect(fakeAgent.promptMessages[1]).toBe(noSendNudgeText);
+
+    // The abort path must persist the cancellation marker for the transcript.
+    const cancellationSave = mockSaveMessage.mock.calls.find(
+      (call) => (call[1] as { role: string }).role === "user"
+        && JSON.stringify((call[1] as { content: unknown }).content).includes("cancelled the previous request"),
+    );
+    expect(cancellationSave).toBeDefined();
+
+    expect(fakeAgent.state.tools).toBe(fullTools);
+  });
+
+  it("does not nudge an agent-triggered subagent turn", async () => {
+    setupCommonMocks();
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+    fakeAgent.promptEvents = [[assistantEvent([{ type: "text", text: "Report." }])]];
+
+    await handlePrompt(agent, makePool(), "hello", minimalConfig, subagentRouting, "agent");
+
+    expect(fakeAgent.promptMessages).toHaveLength(1);
+  });
+
+  it("does not nudge an email-triggered subagent turn", async () => {
+    setupCommonMocks();
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+    fakeAgent.promptEvents = [[assistantEvent([{ type: "text", text: "Read the email." }])]];
+
+    await handlePrompt(agent, makePool(), "hello", minimalConfig, subagentRouting, "email");
+
+    expect(fakeAgent.promptMessages).toHaveLength(1);
+  });
+
+  it("does not nudge a main agent turn", async () => {
+    setupCommonMocks();
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+    fakeAgent.promptEvents = [[assistantEvent([{ type: "text", text: "Hello." }])]];
+
+    await handlePrompt(agent, makePool(), "hello", minimalConfig, mainAgentRouting, "signal");
+
+    expect(fakeAgent.promptMessages).toHaveLength(1);
   });
 });
 
