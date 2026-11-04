@@ -139,15 +139,20 @@ The main agent is seeded at startup by `seedOwner()` in `src/database.ts` with a
 database ID is always `1` — this is an invariant of the seed INSERT and must not change.
 After seeding, the ID is cached in a module-level variable and exposed via
 `getMainAgentId()` (also in `src/database.ts`). All routing, permission checks, and
-user-facing strings use `getMainAgentId()` rather than the literal `1`. The only place
-the literal `1` appears is the seed INSERT itself (`src/database.ts`).
+user-facing strings use `getMainAgentId()` rather than the literal `1`. The only places
+the literal `1` appears are the seed INSERT itself (`src/database.ts`) and the baseline
+migration's `memories`/`scratchpad` `agent_id` backfill, which runs before `seedOwner()`
+and therefore cannot call `getMainAgentId()`. Because that migration may run on a database
+that has memory or scratchpad rows but no agents yet, it inserts the same main agent row
+first (`ON CONFLICT (id) DO NOTHING`) so the backfill satisfies the foreign key; the
+`seedOwner()` upsert still sets the final values.
 
 ### System prompt assembly (per turn)
 - **Main agent**: `baseSystemPrompt` + optional `customPrompt` + timezone/hostname suffix
   + injected memories (full text) + scratchpad titles + plugin list.
 - **Subagent**: `baseAgentPrompt` + timezone/hostname suffix + filtered plugin list
   (only plugins the subagent has access to, with tool-level detail) + subagent's own
-  `system_prompt` from the DB.
+  `system_prompt` from the DB + its own memories (full text) + its own scratchpad titles.
 
 ### Tool filtering for subagents
 Subagents have `allowed_tools TEXT[]` and `allowed_plugins TEXT[]` in the DB.
@@ -157,6 +162,8 @@ restrictions (e.g. `"manage_interlocutors.list"` allows only the `list` action).
 The main agent (id=1) always has `allowed_tools = '{*}'` and `allowed_plugins = '{*}'`.
 Subagents never get `send_agent_message`, even if `allowed_tools` lists it. They report
 to the main agent through their final text response (see "Subagent reports" below).
+`manage_knowledge` is always granted to every subagent in full, regardless of
+`allowed_tools`, so each agent can keep private memories and a scratchpad.
 
 ### Subagent reports
 When a subagent turn ends successfully, `processQueue` (`src/queue.ts`) forwards the
@@ -226,13 +233,22 @@ params, and truncated result at `info` level.
 
 ### db_search tool (src/search.ts)
 - Tool name: `db_search`.
-- Searches all public tables with text-like columns via PostgreSQL full-text search
-  (`to_tsvector` / `plainto_tsquery`). Excludes `messages` and `compactions` tables
-  from the table scan.
+- Searches as the agent currently running the turn (`currentAgentId`). Messages and
+  the compaction boundary are scoped to that agent, so no agent ever sees another
+  agent's conversation history.
+- `memories` and `scratchpad` results are always filtered to
+  `agent_id = <searching agent>`, for both the main agent and subagents.
+- The main agent searches all public tables with text-like columns via PostgreSQL
+  full-text search (`to_tsvector` / `plainto_tsquery`). Excludes `messages` and
+  `compactions` tables from the table scan.
+- Subagents skip the generic table scan entirely and search only their own messages,
+  memories, and scratchpad entries.
 - Searches `messages` separately with a JSONB-aware text extraction query.
 - If `config.embeddings` is present (OpenAI API key), also runs a semantic vector
   search on `message_embeddings` and merges results via Reciprocal Rank Fusion (RRF,
   k=60).
+- The automatic pre-turn search in `src/agent/index.ts` calls `runSearch` with the
+  main agent id, so it only returns main-agent knowledge rows.
 - Default limit: 10 rows per table; max: 20.
 
 ---
@@ -378,9 +394,9 @@ Plugins live in `/plugins/<name>/` (shared volume between `plugin-runner` and `c
 | Table | Purpose |
 |---|---|
 | `messages` | Per-agent conversation history (role, content JSONB, sender_identity_id, sender_agent_id) |
-| `memories` | Always-injected knowledge (short facts, full text in system prompt every turn) |
+| `memories` | Per-agent always-injected knowledge (agent_id FK; short facts, full text in system prompt every turn) |
 | `compactions` | Summarised history snapshots (up_to_message_id boundary); only the latest row per agent is retained |
-| `scratchpad` | On-demand knowledge (title injected, body fetched on read via manage_knowledge) |
+| `scratchpad` | Per-agent on-demand knowledge (agent_id FK; title injected, body fetched on read via manage_knowledge) |
 | `cron_entries` | Scheduled entries (cron expression or one-shot fire_at) |
 | `pages` | LLM-authored pages (path, mimetype, data BYTEA, is_public, queries JSONB, mutations JSONB, version INTEGER); append-only versioning — each update inserts a new row; empty `data` is a tombstone |
 | `agents` | Subagent definitions (name, system_prompt, allowed_tools TEXT[], allowed_plugins TEXT[]) |

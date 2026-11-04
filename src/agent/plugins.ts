@@ -10,6 +10,8 @@ const PLUGIN_RUNNER_BASE_URL = "http://plugin-runner:3003";
  * tool list for a subagent. `send_agent_message` is always excluded, even if
  * `allowedTools` lists it: a subagent's final text response is delivered to the
  * main agent automatically, so the tool would only produce duplicate reports.
+ * `manage_knowledge` is always included unscoped, because every agent needs
+ * private memory and a scratchpad.
  *
  * Entries without a dot grant full access to that tool. Entries with a dot
  * (e.g. "manage_interlocutors.list") restrict the tool to only the named
@@ -47,6 +49,13 @@ export function filterToolsForSubagent(tools: AgentTool[], allowedTools: string[
   for (const tool of tools) {
     if (tool.name === "send_agent_message") {
       // Subagents never get send_agent_message, even if allowedTools lists it.
+      continue;
+    }
+
+    if (tool.name === "manage_knowledge") {
+      // Every agent needs private memory and a scratchpad, so this tool is
+      // always granted in full, regardless of allowedTools.
+      result.push(tool);
       continue;
     }
 

@@ -15,7 +15,7 @@ vi.mock("./toon.js", () => ({
 vi.mock("fs");
 
 import fs from "fs";
-import { resolveInterlocutor, seedOwner, seedCronEntries, upsertPage, deletePage, getPageByPath, getPageQueryByPath, getPageMutationByPath, readPage, listPageVersions, restorePageVersion, readScratchpad, saveMessage, saveCompaction } from "./database.js";
+import { resolveInterlocutor, seedOwner, seedCronEntries, upsertPage, deletePage, getPageByPath, getPageQueryByPath, getPageMutationByPath, readPage, listPageVersions, restorePageVersion, readScratchpad, loadAllMemories, upsertMemory, deleteMemory, loadAllScratchpadTitles, upsertScratchpad, deleteScratchpad, saveMessage, saveCompaction } from "./database.js";
 import type { OwnerConfig } from "./config.js";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
@@ -906,7 +906,7 @@ describe("readScratchpad", () => {
       Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult),
     );
 
-    const result = await readScratchpad(pool, 99);
+    const result = await readScratchpad(pool, 1, 99);
 
     expect(result).toBeNull();
   });
@@ -919,14 +919,16 @@ describe("readScratchpad", () => {
       } as unknown as QueryResult),
     );
 
-    const result = await readScratchpad(pool, 7);
+    const result = await readScratchpad(pool, 1, 7);
 
     expect(result).toEqual({ id: 7, title: "My note", body: "Some content here." });
   });
 
-  it("queries with the correct id parameter", async () => {
+  it("queries with the entry id and owner agent id", async () => {
+    let capturedText: string | undefined;
     let capturedValues: unknown[] | undefined;
-    const pool = makeMockPool((_text, values) => {
+    const pool = makeMockPool((text, values) => {
+      capturedText = text;
       capturedValues = values;
       return Promise.resolve({
         rows: [{ id: 3, title: "Test", body: "Body text." }],
@@ -934,9 +936,138 @@ describe("readScratchpad", () => {
       } as unknown as QueryResult);
     });
 
-    await readScratchpad(pool, 3);
+    await readScratchpad(pool, 2, 3);
 
-    expect(capturedValues).toEqual([3]);
+    expect(capturedText).toContain("agent_id = $2");
+    expect(capturedValues).toEqual([3, 2]);
+  });
+});
+
+describe("per-agent knowledge scoping", () => {
+  it("loads only the given agent's memories", async () => {
+    let capturedText: string | undefined;
+    let capturedValues: unknown[] | undefined;
+    const pool = makeMockPool((text, values) => {
+      capturedText = text;
+      capturedValues = values;
+      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
+    });
+
+    await loadAllMemories(pool, 2);
+
+    expect(capturedText).toContain("WHERE agent_id = $1");
+    expect(capturedValues).toEqual([2]);
+  });
+
+  it("inserts new memories with the owner agent id", async () => {
+    let capturedText: string | undefined;
+    let capturedValues: unknown[] | undefined;
+    const pool = makeMockPool((text, values) => {
+      capturedText = text;
+      capturedValues = values;
+      return Promise.resolve({ rows: [{ id: 5 }], rowCount: 1 } as unknown as QueryResult);
+    });
+
+    const result = await upsertMemory(pool, 2, undefined, "A fact.");
+
+    expect(capturedText).toContain("INSERT INTO memories (agent_id, content)");
+    expect(capturedValues).toEqual([2, "A fact."]);
+    expect(result).toEqual({ id: 5, rowCount: 1 });
+  });
+
+  it("updates a memory only when the owner agent matches", async () => {
+    let capturedText: string | undefined;
+    let capturedValues: unknown[] | undefined;
+    const pool = makeMockPool((text, values) => {
+      capturedText = text;
+      capturedValues = values;
+      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
+    });
+
+    const result = await upsertMemory(pool, 2, 7, "Changed.");
+
+    expect(capturedText).toContain("WHERE id = $2 AND agent_id = $3");
+    expect(capturedValues).toEqual(["Changed.", 7, 2]);
+    expect(result).toEqual({ id: 7, rowCount: 0 });
+  });
+
+  it("deletes a memory only when the owner agent matches", async () => {
+    let capturedText: string | undefined;
+    let capturedValues: unknown[] | undefined;
+    const pool = makeMockPool((text, values) => {
+      capturedText = text;
+      capturedValues = values;
+      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
+    });
+
+    const rowCount = await deleteMemory(pool, 2, 7);
+
+    expect(capturedText).toContain("WHERE id = $1 AND agent_id = $2");
+    expect(capturedValues).toEqual([7, 2]);
+    expect(rowCount).toBe(0);
+  });
+
+  it("loads only the given agent's scratchpad titles", async () => {
+    let capturedText: string | undefined;
+    let capturedValues: unknown[] | undefined;
+    const pool = makeMockPool((text, values) => {
+      capturedText = text;
+      capturedValues = values;
+      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
+    });
+
+    await loadAllScratchpadTitles(pool, 2);
+
+    expect(capturedText).toContain("WHERE agent_id = $1");
+    expect(capturedValues).toEqual([2]);
+  });
+
+  it("inserts new scratchpad entries with the owner agent id", async () => {
+    let capturedText: string | undefined;
+    let capturedValues: unknown[] | undefined;
+    const pool = makeMockPool((text, values) => {
+      capturedText = text;
+      capturedValues = values;
+      return Promise.resolve({ rows: [{ id: 9 }], rowCount: 1 } as unknown as QueryResult);
+    });
+
+    const result = await upsertScratchpad(pool, 2, undefined, "Title", "Body");
+
+    expect(capturedText).toContain("INSERT INTO scratchpad (agent_id, title, body)");
+    expect(capturedValues).toEqual([2, "Title", "Body"]);
+    expect(result).toEqual({ id: 9, rowCount: 1 });
+  });
+
+  it("updates a scratchpad entry only when the owner agent matches", async () => {
+    let capturedText: string | undefined;
+    let capturedValues: unknown[] | undefined;
+    const pool = makeMockPool((text, values) => {
+      capturedText = text;
+      capturedValues = values;
+      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
+    });
+
+    const result = await upsertScratchpad(pool, 2, 9, "Title", "Body");
+
+    expect(capturedText).toContain("WHERE id = $3 AND agent_id = $4");
+    expect(capturedValues).toEqual(["Title", "Body", 9, 2]);
+    expect(result).toEqual({ id: 9, rowCount: 0 });
+  });
+
+  it("deletes a scratchpad entry only when the owner agent matches", async () => {
+    let capturedText: string | undefined;
+    let capturedValues: unknown[] | undefined;
+    const pool = makeMockPool((text, values) => {
+      capturedText = text;
+      capturedValues = values;
+      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
+    });
+
+    const rowCount = await deleteScratchpad(pool, 2, 9);
+
+    expect(capturedText).toContain("WHERE id = $1 AND agent_id = $2");
+    expect(capturedValues).toEqual([9, 2]);
+    expect(rowCount).toBe(0);
   });
 });
 

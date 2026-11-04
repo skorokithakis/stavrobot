@@ -122,6 +122,7 @@ const migrations: Migration[] = [
     await client.query(`
       CREATE TABLE IF NOT EXISTS memories (
         id SERIAL PRIMARY KEY,
+        agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
         content TEXT NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -130,6 +131,19 @@ const migrations: Migration[] = [
     // Existing databases created before these columns were added need them backfilled.
     await client.query(`ALTER TABLE memories ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
     await client.query(`ALTER TABLE memories ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`);
+    await client.query(`ALTER TABLE memories ADD COLUMN IF NOT EXISTS agent_id INTEGER REFERENCES agents(id) ON DELETE CASCADE`);
+    // Backfill existing rows to the main agent. This runs before seedOwner(), so
+    // getMainAgentId() is not available; the main agent id is the seeded literal 1.
+    // Old databases may have memories or scratchpad rows but no main agent row yet, so
+    // insert it first to satisfy the foreign key. These values mirror seedOwner(), which
+    // still owns the final values via its ON CONFLICT (id) DO UPDATE.
+    await client.query(`
+      INSERT INTO agents (id, name, system_prompt, allowed_tools, allowed_plugins)
+      VALUES (1, 'main', '', '{*}', '{*}')
+      ON CONFLICT (id) DO NOTHING
+    `);
+    await client.query(`UPDATE memories SET agent_id = 1 WHERE agent_id IS NULL`);
+    await client.query(`ALTER TABLE memories ALTER COLUMN agent_id SET NOT NULL`);
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS compactions (
@@ -202,12 +216,19 @@ const migrations: Migration[] = [
     await client.query(`
       CREATE TABLE IF NOT EXISTS scratchpad (
         id SERIAL PRIMARY KEY,
+        agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
         title TEXT NOT NULL,
         body TEXT NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await client.query(`ALTER TABLE scratchpad ADD COLUMN IF NOT EXISTS agent_id INTEGER REFERENCES agents(id) ON DELETE CASCADE`);
+    // Backfill existing rows to the main agent. This runs before seedOwner(), so
+    // getMainAgentId() is not available; the main agent id is the seeded literal 1.
+    // The main agent row was inserted above, so the foreign key holds here.
+    await client.query(`UPDATE scratchpad SET agent_id = 1 WHERE agent_id IS NULL`);
+    await client.query(`ALTER TABLE scratchpad ALTER COLUMN agent_id SET NOT NULL`);
 
     await client.query(`CREATE EXTENSION IF NOT EXISTS vector`);
     await client.query(`

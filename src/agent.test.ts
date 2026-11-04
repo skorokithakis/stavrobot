@@ -430,9 +430,13 @@ describe("serializeMessagesForSummary", () => {
   });
 });
 
+function resultText(result: Awaited<ReturnType<AgentTool["execute"]>>): string {
+  const block = result.content.find((entry) => entry.type === "text");
+  return block !== undefined && block.type === "text" ? block.text : "";
+}
+
 // Minimal AgentTool factory for testing filterToolsForSubagent.
-function makeTool(name: string): AgentTool {
-  return {
+function makeTool(name: string): AgentTool {  return {
     name,
     label: name,
     description: `Tool ${name}`,
@@ -547,6 +551,20 @@ describe("filterToolsForSubagent", () => {
     const tools = [makeTool("execute_sql"), makeTool("send_agent_message")];
     const result = filterToolsForSubagent(tools, [], []);
     expect(result).toHaveLength(0);
+  });
+
+  it("always includes manage_knowledge even when the allowed list is empty", () => {
+    const manageKnowledge = makeTool("manage_knowledge");
+    const tools = [makeTool("execute_sql"), manageKnowledge];
+    const result = filterToolsForSubagent(tools, [], []);
+    expect(result).toEqual([manageKnowledge]);
+  });
+
+  it("includes manage_knowledge unscoped when allowedTools scopes it to actions", () => {
+    const manageKnowledge = makeTool("manage_knowledge");
+    const result = filterToolsForSubagent([manageKnowledge], ["manage_knowledge.read"], []);
+    // It must be the original tool, not a wrapper that restricts actions.
+    expect(result[0]).toBe(manageKnowledge);
   });
 
   it("error message lists allowed actions sorted alphabetically", async () => {
@@ -906,45 +924,109 @@ describe("truncateContext", () => {
   });
 });
 
-describe("createManageKnowledgeTool — read action", () => {
-  // Import the mocked readScratchpad after vi.mock has been set up.
-  async function getReadScratchpadMock(): Promise<MockedFunction<() => Promise<unknown>>> {
-    const db = await import("./database.js");
-    return db.readScratchpad as unknown as MockedFunction<() => Promise<unknown>>;
+describe("createManageKnowledgeTool — agent scoping", () => {
+  const AGENT_ID = 2;
+  const pool = {} as Pool;
+
+  function makeTool(): AgentTool {
+    return createManageKnowledgeTool(pool, () => AGENT_ID);
   }
 
-  it("returns the title and body when the entry exists", async () => {
-    const readScratchpad = await getReadScratchpadMock();
+  // Import the mocks after vi.mock has been set up.
+  async function getMock(name: "readScratchpad" | "upsertMemory" | "deleteMemory" | "upsertScratchpad" | "deleteScratchpad"): Promise<MockedFunction<(...args: never[]) => Promise<unknown>>> {
+    const db = await import("./database.js");
+    return db[name] as unknown as MockedFunction<(...args: never[]) => Promise<unknown>>;
+  }
+
+  it("passes the current agent id when reading a scratchpad entry", async () => {
+    const readScratchpad = await getMock("readScratchpad");
     readScratchpad.mockResolvedValueOnce({ id: 5, title: "My note", body: "Some content." });
 
-    const tool = createManageKnowledgeTool({} as Pool);
-    const result = await tool.execute("tc1", { action: "read", store: "scratchpad", id: 5 });
+    const result = await makeTool().execute("tc1", { action: "read", store: "scratchpad", id: 5 });
 
+    expect(readScratchpad).toHaveBeenCalledWith(pool, AGENT_ID, 5);
     expect(result.content[0]).toMatchObject({ type: "text", text: "Title: My note\n\nSome content." });
   });
 
-  it("returns an error when the entry is not found", async () => {
-    const readScratchpad = await getReadScratchpadMock();
+  it("returns an error when reading another agent's entry", async () => {
+    const readScratchpad = await getMock("readScratchpad");
+    // The DB layer filters by agent_id, so another agent's row looks like a miss.
     readScratchpad.mockResolvedValueOnce(null);
 
-    const tool = createManageKnowledgeTool({} as Pool);
-    const result = await tool.execute("tc1", { action: "read", store: "scratchpad", id: 99 });
+    const result = await makeTool().execute("tc1", { action: "read", store: "scratchpad", id: 99 });
 
-    expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("not found") });
+    expect(resultText(result)).toContain("not found");
   });
 
   it("returns an error when store is not scratchpad", async () => {
-    const tool = createManageKnowledgeTool({} as Pool);
-    const result = await tool.execute("tc1", { action: "read", store: "memory", id: 1 });
+    const result = await makeTool().execute("tc1", { action: "read", store: "memory", id: 1 });
 
-    expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("only supported for the scratchpad store") });
+    expect(resultText(result)).toContain("only supported for the scratchpad store");
   });
 
   it("returns an error when id is missing", async () => {
-    const tool = createManageKnowledgeTool({} as Pool);
-    const result = await tool.execute("tc1", { action: "read", store: "scratchpad" });
+    const result = await makeTool().execute("tc1", { action: "read", store: "scratchpad" });
 
-    expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("id is required") });
+    expect(resultText(result)).toContain("id is required");
+  });
+
+  it("creates a memory owned by the current agent", async () => {
+    const upsertMemory = await getMock("upsertMemory");
+    upsertMemory.mockResolvedValueOnce({ id: 11, rowCount: 1 });
+
+    await makeTool().execute("tc1", { action: "upsert", store: "memory", content: "A fact." });
+
+    expect(upsertMemory).toHaveBeenCalledWith(pool, AGENT_ID, undefined, "A fact.");
+  });
+
+  it("returns an error when updating another agent's memory", async () => {
+    const upsertMemory = await getMock("upsertMemory");
+    // The DB layer scopes the UPDATE by agent_id, so another agent's row is a miss.
+    upsertMemory.mockResolvedValueOnce({ id: 7, rowCount: 0 });
+
+    const result = await makeTool().execute("tc1", { action: "upsert", store: "memory", id: 7, content: "Changed." });
+
+    expect(upsertMemory).toHaveBeenCalledWith(pool, AGENT_ID, 7, "Changed.");
+    expect(resultText(result)).toContain("memory 7 not found");
+  });
+
+  it("returns an error when deleting another agent's memory", async () => {
+    const deleteMemory = await getMock("deleteMemory");
+    deleteMemory.mockResolvedValueOnce(0);
+
+    const result = await makeTool().execute("tc1", { action: "delete", store: "memory", id: 7 });
+
+    expect(deleteMemory).toHaveBeenCalledWith(pool, AGENT_ID, 7);
+    expect(resultText(result)).toContain("memory 7 not found");
+  });
+
+  it("creates a scratchpad entry owned by the current agent", async () => {
+    const upsertScratchpad = await getMock("upsertScratchpad");
+    upsertScratchpad.mockResolvedValueOnce({ id: 12, rowCount: 1 });
+
+    await makeTool().execute("tc1", { action: "upsert", store: "scratchpad", title: "Note", body: "Body." });
+
+    expect(upsertScratchpad).toHaveBeenCalledWith(pool, AGENT_ID, undefined, "Note", "Body.");
+  });
+
+  it("returns an error when updating another agent's scratchpad entry", async () => {
+    const upsertScratchpad = await getMock("upsertScratchpad");
+    upsertScratchpad.mockResolvedValueOnce({ id: 9, rowCount: 0 });
+
+    const result = await makeTool().execute("tc1", { action: "upsert", store: "scratchpad", id: 9, title: "Note", body: "Body." });
+
+    expect(upsertScratchpad).toHaveBeenCalledWith(pool, AGENT_ID, 9, "Note", "Body.");
+    expect(resultText(result)).toContain("scratchpad entry 9 not found");
+  });
+
+  it("returns an error when deleting another agent's scratchpad entry", async () => {
+    const deleteScratchpad = await getMock("deleteScratchpad");
+    deleteScratchpad.mockResolvedValueOnce(0);
+
+    const result = await makeTool().execute("tc1", { action: "delete", store: "scratchpad", id: 9 });
+
+    expect(deleteScratchpad).toHaveBeenCalledWith(pool, AGENT_ID, 9);
+    expect(resultText(result)).toContain("scratchpad entry 9 not found");
   });
 });
 
@@ -1989,6 +2071,91 @@ describe("handlePrompt — system prompt placement", () => {
       : JSON.stringify(leadingMessage?.content);
     expect(promptText).toContain(minimalConfig.baseSystemPrompt);
     expect(promptText).toContain(minimalConfig.publicHostname);
+  });
+});
+
+describe("handlePrompt — per-agent knowledge injection", () => {
+  const subagentRouting = {
+    agentId: 2,
+    senderIdentityId: undefined,
+    senderAgentId: undefined,
+    senderLabel: "test-user",
+    isMainAgent: false,
+  };
+
+  function setupCommonMocks(): void {
+    vi.clearAllMocks();
+    vi.mocked(loadMessages).mockResolvedValue([]);
+    vi.mocked(getMainAgentId).mockReturnValue(1);
+    vi.mocked(internalFetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ plugins: [] }),
+    } as unknown as Response);
+    vi.mocked(getApiKey).mockResolvedValue("test-key");
+    vi.mocked(runSearch).mockResolvedValue({ tableResults: [], messages: [] });
+    vi.mocked(saveMessage).mockResolvedValue(42);
+    vi.mocked(loadAgent).mockResolvedValue({
+      id: 2,
+      name: "helper",
+      systemPrompt: "You are a helpful subagent.",
+      allowedTools: [],
+      allowedPlugins: [],
+      createdAt: new Date(),
+    });
+
+    // The DB layer scopes both loaders by agent_id, so the mock returns each
+    // agent only its own rows.
+    vi.mocked(loadAllMemories).mockImplementation((_pool, agentId) => Promise.resolve(
+      agentId === 1
+        ? [{ id: 1, content: "main agent fact", createdAt: new Date(0), updatedAt: new Date(0) }]
+        : [{ id: 2, content: "subagent fact", createdAt: new Date(0), updatedAt: new Date(0) }],
+    ));
+    vi.mocked(loadAllScratchpadTitles).mockImplementation((_pool, agentId) => Promise.resolve(
+      agentId === 1
+        ? [{ id: 11, title: "main agent note" }]
+        : [{ id: 22, title: "subagent note" }],
+    ));
+  }
+
+  function leadingSystemPrompt(agent: unknown): string {
+    const messages = (agent as InstanceType<typeof FakeAgent>).state.messages as Array<{ role: string; content: unknown }>;
+    const leadingMessage = messages[0];
+    expect(leadingMessage?.role).toBe("system");
+    return typeof leadingMessage?.content === "string"
+      ? leadingMessage.content
+      : JSON.stringify(leadingMessage?.content);
+  }
+
+  it("injects only the main agent's memories and scratchpad titles", async () => {
+    setupCommonMocks();
+
+    const agent = await createAgent(minimalConfig, makePool());
+    await handlePrompt(agent, makePool(), "hello", minimalConfig, mainAgentRouting);
+
+    expect(loadAllMemories).toHaveBeenCalledWith(expect.anything(), 1);
+    expect(loadAllScratchpadTitles).toHaveBeenCalledWith(expect.anything(), 1);
+
+    const promptText = leadingSystemPrompt(agent);
+    expect(promptText).toContain("main agent fact");
+    expect(promptText).toContain("[Scratchpad 11] main agent note");
+    expect(promptText).not.toContain("subagent fact");
+    expect(promptText).not.toContain("subagent note");
+  });
+
+  it("injects only the subagent's own memories and scratchpad titles", async () => {
+    setupCommonMocks();
+
+    const agent = await createAgent(minimalConfig, makePool());
+    await handlePrompt(agent, makePool(), "hello", minimalConfig, subagentRouting);
+
+    expect(loadAllMemories).toHaveBeenCalledWith(expect.anything(), 2);
+    expect(loadAllScratchpadTitles).toHaveBeenCalledWith(expect.anything(), 2);
+
+    const promptText = leadingSystemPrompt(agent);
+    expect(promptText).toContain("subagent fact");
+    expect(promptText).toContain("[Scratchpad 22] subagent note");
+    expect(promptText).not.toContain("main agent fact");
+    expect(promptText).not.toContain("main agent note");
   });
 });
 

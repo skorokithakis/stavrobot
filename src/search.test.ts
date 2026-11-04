@@ -21,7 +21,7 @@ vi.mock("./log.js", () => ({
 
 import { fetchEmbeddings } from "./embeddings.js";
 import { loadLatestCompaction } from "./database.js";
-import { runSearch } from "./search.js";
+import { createSearchTool, runSearch } from "./search.js";
 import type { EmbeddingsConfig } from "./config.js";
 
 const fetchEmbeddingsMock = vi.mocked(fetchEmbeddings);
@@ -307,6 +307,84 @@ describe("runSearch — recent-message exclusion", () => {
     // Old messages must be present.
     expect(resultIds).toContain(20);
     expect(resultIds).toContain(60);
+  });
+});
+
+describe("runSearch — agent scoping", () => {
+  const columnRows = [
+    { table_name: "notes", column_name: "body", has_created_at: false },
+    { table_name: "memories", column_name: "content", has_created_at: true },
+    { table_name: "scratchpad", column_name: "title", has_created_at: true },
+  ];
+
+  interface CapturedQuery {
+    text: string;
+    values?: unknown[];
+  }
+
+  function scopingPool(captured: CapturedQuery[]): Pool {
+    return makeMockPool((text, values) => {
+      if (isColumnDiscoveryQuery(text)) {
+        return Promise.resolve({
+          rows: columnRows,
+          rowCount: columnRows.length,
+        } as unknown as QueryResult);
+      }
+      captured.push({ text, values });
+      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
+    });
+  }
+
+  it("filters memories and scratchpad to the main agent", async () => {
+    const captured: CapturedQuery[] = [];
+    await runSearch(scopingPool(captured), "test", 10, 1, undefined);
+
+    const memoriesQuery = captured.find((query) => query.text.includes(`FROM "memories"`));
+    expect(memoriesQuery).toBeDefined();
+    expect(memoriesQuery?.text).toContain(`"agent_id" = $2`);
+    expect(memoriesQuery?.values).toEqual(["test", 1]);
+
+    const scratchpadQuery = captured.find((query) => query.text.includes(`FROM "scratchpad"`));
+    expect(scratchpadQuery).toBeDefined();
+    expect(scratchpadQuery?.text).toContain(`"agent_id" = $2`);
+    expect(scratchpadQuery?.values).toEqual(["test", 1]);
+
+    // Other tables are not agent-scoped for the main agent.
+    const notesQuery = captured.find((query) => query.text.includes(`FROM "notes"`));
+    expect(notesQuery).toBeDefined();
+    expect(notesQuery?.text).not.toContain(`"agent_id"`);
+    expect(notesQuery?.values).toEqual(["test"]);
+  });
+
+  it("searches only messages, memories, and scratchpad for a subagent", async () => {
+    const captured: CapturedQuery[] = [];
+    const pool = scopingPool(captured);
+
+    await runSearch(pool, "test", 10, 2, undefined);
+
+    expect(captured.some((query) => query.text.includes(`FROM "notes"`))).toBe(false);
+
+    const memoriesQuery = captured.find((query) => query.text.includes(`FROM "memories"`));
+    expect(memoriesQuery?.values).toEqual(["test", 2]);
+
+    const scratchpadQuery = captured.find((query) => query.text.includes(`FROM "scratchpad"`));
+    expect(scratchpadQuery?.values).toEqual(["test", 2]);
+
+    const fullTextQuery = captured.find((query) => isFullTextMessageQuery(query.text));
+    expect(fullTextQuery?.values?.[2]).toBe(2);
+
+    expect(loadLatestCompactionMock).toHaveBeenCalledWith(pool, 2);
+  });
+
+  it("db_search searches as the currently running agent", async () => {
+    const captured: CapturedQuery[] = [];
+    const pool = scopingPool(captured);
+    const tool = createSearchTool(pool, () => 2, undefined);
+
+    await tool.execute("call-1", { query: "test" });
+
+    const fullTextQuery = captured.find((query) => isFullTextMessageQuery(query.text));
+    expect(fullTextQuery?.values?.[2]).toBe(2);
   });
 });
 

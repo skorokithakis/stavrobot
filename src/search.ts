@@ -9,6 +9,9 @@ import { log } from "./log.js";
 import { toolSuccess } from "./tool-result.js";
 
 const EXCLUDED_TABLES = new Set(["messages", "compactions"]);
+// Tables whose rows belong to a single agent. Every search filters these to the
+// searching agent, and subagents search only these tables.
+const AGENT_SCOPED_TABLES = new Set(["memories", "scratchpad"]);
 const TEXT_LIKE_TYPES = new Set(["text", "varchar", "character", "character varying"]);
 const LIMIT_DEFAULT = 10;
 const LIMIT_MAX = 20;
@@ -69,9 +72,10 @@ export async function runSearch(
   pool: pg.Pool,
   query: string,
   limit: number,
-  mainAgentId: number,
+  agentId: number,
   embeddingsConfig?: EmbeddingsConfig,
 ): Promise<SearchResults> {
+  const isMainAgent = agentId === getMainAgentId();
   const columnsResult = await pool.query<ColumnRow>(
     `SELECT
        c.table_name,
@@ -90,11 +94,16 @@ export async function runSearch(
     [Array.from(TEXT_LIKE_TYPES)],
   );
 
-  // Group text-like columns by table, skipping excluded tables.
+  // Group text-like columns by table, skipping excluded tables. Subagents search
+  // only their own knowledge, so the generic table scan is limited to the
+  // agent-scoped tables for them.
   const tableColumns = new Map<string, string[]>();
   const tableHasCreatedAt = new Map<string, boolean>();
   for (const row of columnsResult.rows) {
     if (EXCLUDED_TABLES.has(row.table_name)) {
+      continue;
+    }
+    if (!isMainAgent && !AGENT_SCOPED_TABLES.has(row.table_name)) {
       continue;
     }
     const columns = tableColumns.get(row.table_name) ?? [];
@@ -115,15 +124,20 @@ export async function runSearch(
       ? `ORDER BY "created_at" DESC`
       : "";
 
+    const agentScoped = AGENT_SCOPED_TABLES.has(tableName);
+    const agentClause = agentScoped ? `AND "agent_id" = $2` : "";
+    const params = agentScoped ? [query, agentId] : [query];
+
     const searchQuery = `
       SELECT *
       FROM "${tableName}"
       WHERE to_tsvector('english', ${tsvectorExpr}) @@ plainto_tsquery('english', $1)
+      ${agentClause}
       ${orderClause}
       LIMIT ${limit}
     `;
 
-    const searchResult = await pool.query(searchQuery, [query]);
+    const searchResult = await pool.query(searchQuery, params);
 
     if (searchResult.rows.length > 0) {
       tableResults.push({
@@ -140,7 +154,7 @@ export async function runSearch(
   // still in context and are excluded from search results to avoid redundancy.
   // When no compaction exists, all messages are in context but search is still
   // useful, so no exclusion is applied.
-  const compaction = await loadLatestCompaction(pool, mainAgentId);
+  const compaction = await loadLatestCompaction(pool, agentId);
 
   // Build the optional upper-bound clause. When a compaction exists, restrict
   // to messages at or before the compaction boundary (those are the archived
@@ -160,8 +174,8 @@ export async function runSearch(
   // info, usage stats, etc.). User messages may store their inner content as
   // a plain string; assistant messages store it as an array of typed parts.
   const fullTextParams: unknown[] = compaction !== null
-    ? [query, limit, mainAgentId, compactionParam]
-    : [query, limit, mainAgentId];
+    ? [query, limit, agentId, compactionParam]
+    : [query, limit, agentId];
   const fullTextResult = await pool.query<MessageRow>(
     `SELECT m.id, m.role, m.content, m.created_at
      FROM messages m
@@ -204,8 +218,8 @@ export async function runSearch(
       const queryVector = `[${queryEmbedding.join(",")}]`;
 
       const semanticParams: unknown[] = compaction !== null
-        ? [queryVector, limit, mainAgentId, compactionParam]
-        : [queryVector, limit, mainAgentId];
+        ? [queryVector, limit, agentId, compactionParam]
+        : [queryVector, limit, agentId];
       const semanticResult = await pool.query<MessageRow>(
         `SELECT m.id, m.role, m.content, m.created_at
          FROM messages m
@@ -264,11 +278,11 @@ export async function runSearch(
   return { tableResults: capTableResults(tableResults), messages: topMessages, queryEmbedding };
 }
 
-export function createSearchTool(pool: pg.Pool, embeddingsConfig?: EmbeddingsConfig): AgentTool {
+export function createSearchTool(pool: pg.Pool, getCurrentAgentId: () => number, embeddingsConfig?: EmbeddingsConfig): AgentTool {
   return {
     name: "db_search",
     label: "Search",
-    description: "Search conversation history and all database tables. Always call this tool when the user asks about something that seems familiar but isn't in your current context — search before saying you don't remember.",
+    description: "Search your conversation history and your memories and scratchpad entries, plus other database tables when running as the main agent. Always call this tool when the user asks about something that seems familiar but isn't in your current context — search before saying you don't remember.",
     parameters: Type.Object({
       query: Type.String({ description: "The text to search for" }),
       limit: Type.Optional(
@@ -285,8 +299,8 @@ export function createSearchTool(pool: pg.Pool, embeddingsConfig?: EmbeddingsCon
       const { query, limit: rawLimit } = params as { query: string; limit?: number };
       const limit = Math.min(LIMIT_MAX, Math.max(1, rawLimit ?? LIMIT_DEFAULT));
 
-      const mainAgentId = getMainAgentId();
-      const { tableResults, messages: topMessages } = await runSearch(pool, query, limit, mainAgentId, embeddingsConfig);
+      const agentId = getCurrentAgentId();
+      const { tableResults, messages: topMessages } = await runSearch(pool, query, limit, agentId, embeddingsConfig);
 
       const parts: string[] = [];
 

@@ -151,7 +151,7 @@ Constraints:
 - Memory entries are injected in full every turn; keep them concise.
 - Scratchpad bodies are not injected automatically; use the read action to retrieve them.`;
 
-export function createManageKnowledgeTool(pool: pg.Pool): AgentTool {
+export function createManageKnowledgeTool(pool: pg.Pool, getCurrentAgentId: () => number): AgentTool {
   return {
     name: "manage_knowledge",
     label: "Manage knowledge",
@@ -186,6 +186,7 @@ export function createManageKnowledgeTool(pool: pg.Pool): AgentTool {
       };
 
       const { action, store } = raw;
+      const agentId = getCurrentAgentId();
 
       if (action === "help") {
         return toolSuccess(MANAGE_KNOWLEDGE_HELP_TEXT);
@@ -200,7 +201,7 @@ export function createManageKnowledgeTool(pool: pg.Pool): AgentTool {
           if (raw.content === undefined || raw.content.trim() === "") {
             return toolError("Error: content is required when upserting a memory entry.");
           }
-          const memoryResult = await upsertMemory(pool, raw.id, raw.content);
+          const memoryResult = await upsertMemory(pool, agentId, raw.id, raw.content);
           if (raw.id !== undefined && memoryResult.rowCount === 0) {
             return toolError(`Error: memory ${raw.id} not found.`);
           }
@@ -216,7 +217,7 @@ export function createManageKnowledgeTool(pool: pg.Pool): AgentTool {
           if (raw.body === undefined || raw.body.trim() === "") {
             return toolError("Error: body is required when upserting a scratchpad entry.");
           }
-          const scratchpadResult = await upsertScratchpad(pool, raw.id, raw.title, raw.body);
+          const scratchpadResult = await upsertScratchpad(pool, agentId, raw.id, raw.title, raw.body);
           if (raw.id !== undefined && scratchpadResult.rowCount === 0) {
             return toolError(`Error: scratchpad entry ${raw.id} not found.`);
           }
@@ -238,7 +239,7 @@ export function createManageKnowledgeTool(pool: pg.Pool): AgentTool {
         }
 
         if (store === "memory") {
-          const rowCount = await deleteMemory(pool, raw.id);
+          const rowCount = await deleteMemory(pool, agentId, raw.id);
           if (rowCount === 0) {
             return toolError(`Error: memory ${raw.id} not found.`);
           }
@@ -248,7 +249,7 @@ export function createManageKnowledgeTool(pool: pg.Pool): AgentTool {
         }
 
         if (store === "scratchpad") {
-          const rowCount = await deleteScratchpad(pool, raw.id);
+          const rowCount = await deleteScratchpad(pool, agentId, raw.id);
           if (rowCount === 0) {
             return toolError(`Error: scratchpad entry ${raw.id} not found.`);
           }
@@ -269,7 +270,7 @@ export function createManageKnowledgeTool(pool: pg.Pool): AgentTool {
           return toolError("Error: id is required for read.");
         }
 
-        const entry = await readScratchpad(pool, raw.id);
+        const entry = await readScratchpad(pool, agentId, raw.id);
         if (entry === null) {
           return toolError(`Error: scratchpad entry ${raw.id} not found.`);
         }
@@ -458,7 +459,7 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
   if (knownModel === undefined && config.baseUrl === undefined) {
     log.warn(`[stavrobot] Model "${config.model}" not found in provider "${config.provider}" model registry, using fallback (contextWindow=${DEFAULT_CONTEXT_WINDOW}, maxTokens=${DEFAULT_MAX_TOKENS}).`);
   }
-  const tools = [createExecuteSqlTool(pool), createManageKnowledgeTool(pool), createManageCronTool(pool), createRunPythonTool(), createManagePagesTool(pool), createManageUploadsTool(), createSearchTool(pool, config.embeddings), createManageFilesTool(), createManageInterlocutorsTool(pool), createManageAgentsTool(pool), createSendAgentMessageTool(pool, () => currentAgentId)];
+  const tools = [createExecuteSqlTool(pool), createManageKnowledgeTool(pool, () => currentAgentId), createManageCronTool(pool), createRunPythonTool(), createManagePagesTool(pool), createManageUploadsTool(), createSearchTool(pool, () => currentAgentId, config.embeddings), createManageFilesTool(), createManageInterlocutorsTool(pool), createManageAgentsTool(pool), createSendAgentMessageTool(pool, () => currentAgentId)];
   tools.push(
     createManagePluginsTool({ coderEnabled: config.coder !== undefined }),
     createRunPluginToolTool(),
@@ -550,20 +551,8 @@ export function formatUserMessage(userMessage: string, source?: string, sender?:
   return `${formatted}\nText: ${userMessage}`;
 }
 
-function buildMainAgentSystemPrompt(config: Config, allPlugins: PluginEntry[] | undefined, memories: Memory[], scratchpadTitles: { id: number; title: string }[]): string {
-  const effectiveBasePrompt = (config.customPrompt !== undefined
-    ? `${config.baseSystemPrompt}\n\n${config.customPrompt}`
-    : config.baseSystemPrompt) + buildPromptSuffix(config.publicHostname);
-
-  const visiblePlugins = allPlugins !== undefined && allPlugins.length > 0 ? allPlugins : undefined;
-  const pluginListSection = visiblePlugins !== undefined ? formatPluginListSection(visiblePlugins) : undefined;
-  log.debug(`[stavrobot] fetchPluginList: injecting ${visiblePlugins?.length ?? 0} plugin(s) into system prompt`);
-
-  const promptWithPlugins = pluginListSection !== undefined
-    ? `${effectiveBasePrompt}\n\n${pluginListSection}`
-    : effectiveBasePrompt;
-
-  let systemPrompt = promptWithPlugins;
+function appendKnowledgeToSystemPrompt(systemPrompt: string, memories: Memory[], scratchpadTitles: { id: number; title: string }[]): string {
+  let result = systemPrompt;
 
   if (memories.length > 0) {
     const memoryLines: string[] = ["Your memories:", ""];
@@ -579,7 +568,7 @@ function buildMainAgentSystemPrompt(config: Config, allPlugins: PluginEntry[] | 
       memoryLines.push("");
     }
 
-    systemPrompt = `${systemPrompt}\n\n${memoryLines.join("\n")}`;
+    result = `${result}\n\n${memoryLines.join("\n")}`;
   }
 
   if (scratchpadTitles.length > 0) {
@@ -588,13 +577,29 @@ function buildMainAgentSystemPrompt(config: Config, allPlugins: PluginEntry[] | 
       scratchpadLines.push(`[Scratchpad ${entry.id}] ${entry.title}`);
     }
     log.debug(`[stavrobot] Injecting ${scratchpadTitles.length} scratchpad title(s) into system prompt`);
-    systemPrompt = `${systemPrompt}\n\n${scratchpadLines.join("\n")}`;
+    result = `${result}\n\n${scratchpadLines.join("\n")}`;
   }
 
-  return systemPrompt;
+  return result;
 }
 
-async function buildSubagentSystemPrompt(config: Config, subagentRow: AgentRow | null, allPlugins: PluginEntry[] | undefined): Promise<string> {
+function buildMainAgentSystemPrompt(config: Config, allPlugins: PluginEntry[] | undefined, memories: Memory[], scratchpadTitles: { id: number; title: string }[]): string {
+  const effectiveBasePrompt = (config.customPrompt !== undefined
+    ? `${config.baseSystemPrompt}\n\n${config.customPrompt}`
+    : config.baseSystemPrompt) + buildPromptSuffix(config.publicHostname);
+
+  const visiblePlugins = allPlugins !== undefined && allPlugins.length > 0 ? allPlugins : undefined;
+  const pluginListSection = visiblePlugins !== undefined ? formatPluginListSection(visiblePlugins) : undefined;
+  log.debug(`[stavrobot] fetchPluginList: injecting ${visiblePlugins?.length ?? 0} plugin(s) into system prompt`);
+
+  const promptWithPlugins = pluginListSection !== undefined
+    ? `${effectiveBasePrompt}\n\n${pluginListSection}`
+    : effectiveBasePrompt;
+
+  return appendKnowledgeToSystemPrompt(promptWithPlugins, memories, scratchpadTitles);
+}
+
+async function buildSubagentSystemPrompt(config: Config, subagentRow: AgentRow | null, allPlugins: PluginEntry[] | undefined, memories: Memory[], scratchpadTitles: { id: number; title: string }[]): Promise<string> {
   const agentSystemPrompt = subagentRow?.systemPrompt ?? "";
   const subagentAllowedPlugins = subagentRow?.allowedPlugins ?? [];
 
@@ -630,9 +635,11 @@ async function buildSubagentSystemPrompt(config: Config, subagentRow: AgentRow |
     ? `${basePrompt}\n\n${pluginListSection}`
     : basePrompt;
 
-  return agentSystemPrompt.trim() !== ""
+  const promptWithAgentInstructions = agentSystemPrompt.trim() !== ""
     ? `${promptWithPlugins}\n\n${agentSystemPrompt}`
     : promptWithPlugins;
+
+  return appendKnowledgeToSystemPrompt(promptWithAgentInstructions, memories, scratchpadTitles);
 }
 
 async function processAttachments(attachments: FileAttachment[]): Promise<{ resolvedMessage: string | undefined; imageContents: ImageContent[] }> {
@@ -809,12 +816,13 @@ async function runHandlePrompt(
 
   let systemPrompt: string;
 
+  const memories = await loadAllMemories(pool, agentId);
+  const scratchpadTitles = await loadAllScratchpadTitles(pool, agentId);
+
   if (isMainAgent) {
-    const memories = await loadAllMemories(pool);
-    const scratchpadTitles = await loadAllScratchpadTitles(pool);
     systemPrompt = buildMainAgentSystemPrompt(config, allPlugins, memories, scratchpadTitles);
   } else {
-    systemPrompt = await buildSubagentSystemPrompt(config, subagentRow, allPlugins);
+    systemPrompt = await buildSubagentSystemPrompt(config, subagentRow, allPlugins, memories, scratchpadTitles);
   }
 
   // Pi's transcript owns the system prompt now, and state.systemPrompt is

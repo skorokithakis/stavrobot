@@ -247,8 +247,11 @@ export interface Memory {
   updatedAt: Date;
 }
 
-export async function loadAllMemories(pool: pg.Pool): Promise<Memory[]> {
-  const result = await pool.query("SELECT id, content, created_at, updated_at FROM memories ORDER BY created_at");
+export async function loadAllMemories(pool: pg.Pool, agentId: number): Promise<Memory[]> {
+  const result = await pool.query(
+    "SELECT id, content, created_at, updated_at FROM memories WHERE agent_id = $1 ORDER BY created_at",
+    [agentId],
+  );
   return result.rows.map((row) => ({
     id: row.id as number,
     content: row.content as string,
@@ -257,24 +260,24 @@ export async function loadAllMemories(pool: pg.Pool): Promise<Memory[]> {
   }));
 }
 
-export async function upsertMemory(pool: pg.Pool, id: number | undefined, content: string): Promise<{ id: number; rowCount: number }> {
+export async function upsertMemory(pool: pg.Pool, agentId: number, id: number | undefined, content: string): Promise<{ id: number; rowCount: number }> {
   if (id === undefined) {
     const result = await pool.query(
-      "INSERT INTO memories (content) VALUES ($1) RETURNING id",
-      [content]
+      "INSERT INTO memories (agent_id, content) VALUES ($1, $2) RETURNING id",
+      [agentId, content]
     );
     return { id: result.rows[0].id as number, rowCount: 1 };
   } else {
     const result = await pool.query(
-      "UPDATE memories SET content = $1, updated_at = NOW() WHERE id = $2",
-      [content, id]
+      "UPDATE memories SET content = $1, updated_at = NOW() WHERE id = $2 AND agent_id = $3",
+      [content, id, agentId]
     );
     return { id, rowCount: result.rowCount ?? 0 };
   }
 }
 
-export async function deleteMemory(pool: pg.Pool, id: number): Promise<number> {
-  const result = await pool.query("DELETE FROM memories WHERE id = $1", [id]);
+export async function deleteMemory(pool: pg.Pool, agentId: number, id: number): Promise<number> {
+  const result = await pool.query("DELETE FROM memories WHERE id = $1 AND agent_id = $2", [id, agentId]);
   return result.rowCount ?? 0;
 }
 
@@ -948,10 +951,10 @@ export interface ScratchpadEntry {
   body: string;
 }
 
-export async function readScratchpad(pool: pg.Pool, id: number): Promise<ScratchpadEntry | null> {
+export async function readScratchpad(pool: pg.Pool, agentId: number, id: number): Promise<ScratchpadEntry | null> {
   const result = await pool.query<{ id: number; title: string; body: string }>(
-    "SELECT id, title, body FROM scratchpad WHERE id = $1",
-    [id],
+    "SELECT id, title, body FROM scratchpad WHERE id = $1 AND agent_id = $2",
+    [id, agentId],
   );
   if (result.rows.length === 0) {
     return null;
@@ -964,32 +967,35 @@ export async function readScratchpad(pool: pg.Pool, id: number): Promise<Scratch
   };
 }
 
-export async function loadAllScratchpadTitles(pool: pg.Pool): Promise<ScratchpadTitle[]> {
-  const result = await pool.query("SELECT id, title FROM scratchpad ORDER BY created_at");
+export async function loadAllScratchpadTitles(pool: pg.Pool, agentId: number): Promise<ScratchpadTitle[]> {
+  const result = await pool.query(
+    "SELECT id, title FROM scratchpad WHERE agent_id = $1 ORDER BY created_at",
+    [agentId],
+  );
   return result.rows.map((row) => ({
     id: row.id as number,
     title: row.title as string,
   }));
 }
 
-export async function upsertScratchpad(pool: pg.Pool, id: number | undefined, title: string, body: string): Promise<{ id: number; rowCount: number }> {
+export async function upsertScratchpad(pool: pg.Pool, agentId: number, id: number | undefined, title: string, body: string): Promise<{ id: number; rowCount: number }> {
   if (id === undefined) {
     const result = await pool.query(
-      "INSERT INTO scratchpad (title, body) VALUES ($1, $2) RETURNING id",
-      [title, body],
+      "INSERT INTO scratchpad (agent_id, title, body) VALUES ($1, $2, $3) RETURNING id",
+      [agentId, title, body],
     );
     return { id: result.rows[0].id as number, rowCount: 1 };
   } else {
     const result = await pool.query(
-      "UPDATE scratchpad SET title = $1, body = $2, updated_at = NOW() WHERE id = $3",
-      [title, body, id],
+      "UPDATE scratchpad SET title = $1, body = $2, updated_at = NOW() WHERE id = $3 AND agent_id = $4",
+      [title, body, id, agentId],
     );
     return { id, rowCount: result.rowCount ?? 0 };
   }
 }
 
-export async function deleteScratchpad(pool: pg.Pool, id: number): Promise<number> {
-  const result = await pool.query("DELETE FROM scratchpad WHERE id = $1", [id]);
+export async function deleteScratchpad(pool: pg.Pool, agentId: number, id: number): Promise<number> {
+  const result = await pool.query("DELETE FROM scratchpad WHERE id = $1 AND agent_id = $2", [id, agentId]);
   return result.rowCount ?? 0;
 }
 
