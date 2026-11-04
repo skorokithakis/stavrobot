@@ -63,6 +63,12 @@ export async function seedOwner(pool: pg.Pool, ownerConfig: OwnerConfig): Promis
   const seededMainAgentId = agentResult.rows[0].id;
   log.info(`[stavrobot] Main agent seeded: id=${seededMainAgentId}`);
 
+  // Explicit ids do not advance the SERIAL sequence, so without this the first
+  // subagent insert would draw id 1 from the sequence and fail with a duplicate key.
+  await pool.query(
+    "SELECT setval(pg_get_serial_sequence('agents', 'id'), (SELECT MAX(id) FROM agents))",
+  );
+
   // Backfill existing messages and compactions that predate the agents system.
   const messagesResult = await pool.query(
     "UPDATE messages SET agent_id = $1 WHERE agent_id IS NULL",

@@ -145,7 +145,9 @@ migration's `memories`/`scratchpad` `agent_id` backfill, which runs before `seed
 and therefore cannot call `getMainAgentId()`. Because that migration may run on a database
 that has memory or scratchpad rows but no agents yet, it inserts the same main agent row
 first (`ON CONFLICT (id) DO NOTHING`) so the backfill satisfies the foreign key; the
-`seedOwner()` upsert still sets the final values.
+`seedOwner()` upsert still sets the final values. Because explicit IDs do not advance the
+`agents.id` sequence, `seedOwner()` then calls `setval` to move the sequence to
+`MAX(id)`, so the first subagent insert does not collide with the main agent.
 
 ### System prompt assembly (per turn)
 - **Main agent**: `baseSystemPrompt` + optional `customPrompt` + timezone/hostname suffix
