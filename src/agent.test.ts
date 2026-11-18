@@ -8,6 +8,7 @@ import { loadMessages, loadAllMemories, loadAllScratchpadTitles, getMainAgentId,
 import { runSearch } from "./search.js";
 import { internalFetch } from "./internal-fetch.js";
 import { AbortError, TurnProgressPersistedError } from "./errors.js";
+import { NOTHING_TO_REPORT } from "./subagent-report.js";
 
 // Mock all heavy dependencies so the module loads without real infrastructure.
 vi.mock("./database.js", () => ({
@@ -1774,7 +1775,7 @@ describe("handlePrompt — nudge for silent chat-triggered subagents", () => {
   const mockSaveMessage = vi.mocked(saveMessage);
 
   // Kept as a literal so an accidental edit to the constant under test fails.
-  const noSendNudgeText = "[System notice] You finished your turn without sending anything to the person or group who messaged you. They only see what you send with the send tools. Reply to them now with the send tool for this channel. Then give your final response for the main agent again, or exactly NOTHING_TO_REPORT if you have nothing for it.";
+  const noSendNudgeText = "[System notice] You finished your turn without sending anything to the person or group who messaged you. They do not see your final response; only the main agent does. If any part of it was meant for them, send it now with the send tool for this channel. If you chose not to reply, do not send anything. Then give your final response for the main agent again, or exactly NOTHING_TO_REPORT if you have nothing for it.";
 
   const subagentRouting = {
     agentId: 2,
@@ -1854,6 +1855,33 @@ describe("handlePrompt — nudge for silent chat-triggered subagents", () => {
     expect(fakeAgent.promptMessages).toHaveLength(1);
   });
 
+  it.each([NOTHING_TO_REPORT, "nothing_to_report", "  Nothing_To_Report \n"])(
+    "does not nudge when the final text is the NOTHING_TO_REPORT marker (%j)",
+    async (finalText) => {
+      setupCommonMocks();
+      const agent = await createAgent(minimalConfig, makePool());
+      const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+      fakeAgent.promptEvents = [[assistantEvent([{ type: "text", text: finalText }])]];
+
+      const response = await handlePrompt(agent, makePool(), "hello", minimalConfig, subagentRouting, "telegram");
+
+      expect(fakeAgent.promptMessages).toHaveLength(1);
+      expect(response).toBe(finalText);
+    },
+  );
+
+  it("does not nudge when the final text is empty", async () => {
+    setupCommonMocks();
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+    fakeAgent.promptEvents = [[assistantEvent([])]];
+
+    const response = await handlePrompt(agent, makePool(), "hello", minimalConfig, subagentRouting, "telegram");
+
+    expect(fakeAgent.promptMessages).toHaveLength(1);
+    expect(response).toBe("");
+  });
+
   it("nudges once and persists the nudge when no send happened, then sends after the nudge", async () => {
     setupCommonMocks();
     const agent = await createAgent(minimalConfig, makePool());
@@ -1901,6 +1929,22 @@ describe("handlePrompt — nudge for silent chat-triggered subagents", () => {
     expect(fakeAgent.promptMessages).toHaveLength(2);
     expect(fakeAgent.promptMessages[1]).toBe(noSendNudgeText);
     expect(response).toBe("NOTHING_TO_REPORT");
+  });
+
+  it("accepts a silent turn after the nudge and returns its last text", async () => {
+    setupCommonMocks();
+    const agent = await createAgent(minimalConfig, makePool());
+    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
+    fakeAgent.promptEvents = [
+      [assistantEvent([{ type: "text", text: "Still thinking." }])],
+      [assistantEvent([{ type: "text", text: "Could not send anything." }])],
+    ];
+
+    const response = await handlePrompt(agent, makePool(), "hello", minimalConfig, subagentRouting, "telegram");
+
+    expect(fakeAgent.promptMessages).toHaveLength(2);
+    expect(fakeAgent.promptMessages[1]).toBe(noSendNudgeText);
+    expect(response).toBe("Could not send anything.");
   });
 
   it("does not nudge when the first prompt throws", async () => {

@@ -26,6 +26,7 @@ import { toolError, toolSuccess } from "../tool-result.js";
 import { createSendSignalMessageTool, createSendTelegramMessageTool, createSendWhatsappMessageTool, createSendEmailTool } from "../send-tools.js";
 import { currentAgentId, setCurrentAgentId } from "../agent-context.js";
 export { currentAgentId } from "../agent-context.js";
+import { shouldForwardSubagentFinalText } from "../subagent-report.js";
 import {
   buildPromptSuffix,
   AUTO_SEARCH_MIN_LENGTH,
@@ -102,13 +103,14 @@ let compactionInProgress = false;
 // turns corrupting agent.state. Set on entry, cleared in a finally block.
 let handlePromptInProgress = false;
 
-// Inbound chat sources whose subagents must reply to the sender with a send
-// tool. Other sources (agent, email, cli, cron, etc.) are not nudged.
+// Inbound chat sources whose subagents are nudged when they end a turn without
+// a send tool call but left text that the queue would forward to the main
+// agent. Other sources (agent, email, cli, cron, etc.) are not nudged.
 const CHAT_TRIGGER_SOURCES = ["signal", "telegram", "whatsapp"];
 
 const SEND_TOOL_NAMES = ["send_signal_message", "send_telegram_message", "send_whatsapp_message", "send_email"];
 
-const NO_SEND_NUDGE_TEXT = "[System notice] You finished your turn without sending anything to the person or group who messaged you. They only see what you send with the send tools. Reply to them now with the send tool for this channel. Then give your final response for the main agent again, or exactly NOTHING_TO_REPORT if you have nothing for it.";
+const NO_SEND_NUDGE_TEXT = "[System notice] You finished your turn without sending anything to the person or group who messaged you. They do not see your final response; only the main agent does. If any part of it was meant for them, send it now with the send tool for this channel. If you chose not to reply, do not send anything. Then give your final response for the main agent again, or exactly NOTHING_TO_REPORT if you have nothing for it.";
 
 // Set to the agent ID whose compaction just finished. The next handlePrompt
 // call for that agent checks this and reloads messages from the DB. Stored as
@@ -749,6 +751,23 @@ export function triggerCompactionIfNeeded(agent: Agent, pool: pg.Pool, agentId: 
   })();
 }
 
+// The final assistant text is the joined text blocks of the last assistant
+// message. This is the text the queue forwards as the subagent's report, so the
+// nudge condition and the returned response use the same extraction.
+function extractFinalAssistantText(messages: AgentMessage[]): string {
+  const lastAssistantMessage = messages
+    .slice()
+    .reverse()
+    .find((message) => message.role === "assistant");
+  if (lastAssistantMessage === undefined) {
+    return "";
+  }
+  return lastAssistantMessage.content
+    .filter((block): block is TextContent => block.type === "text")
+    .map((block) => block.text)
+    .join("");
+}
+
 export function handlePrompt(
   agent: Agent,
   pool: pg.Pool,
@@ -1002,8 +1021,6 @@ async function runHandlePrompt(
       }
     });
 
-    let nudged = false;
-
     try {
       if (imageContents.length > 0) {
         await agent.prompt(messageToSend, imageContents);
@@ -1016,10 +1033,10 @@ async function runHandlePrompt(
         source !== undefined &&
         CHAT_TRIGGER_SOURCES.includes(source) &&
         !sendToolCallObserved &&
-        !agent.state.errorMessage
+        !agent.state.errorMessage &&
+        shouldForwardSubagentFinalText(extractFinalAssistantText(agent.state.messages))
       ) {
-        log.info(`[stavrobot] Subagent ${agentId} ended a chat-triggered turn without a send tool call; nudging it to reply.`);
-        nudged = true;
+        log.info(`[stavrobot] Subagent ${agentId} ended a chat-triggered turn without a send tool call but left a report; nudging it to send any reply.`);
         await agent.prompt(NO_SEND_NUDGE_TEXT);
       }
     } finally {
@@ -1066,21 +1083,7 @@ async function runHandlePrompt(
       throw new Error(`Agent error: ${errorJson}`);
     }
 
-    if (nudged && !sendToolCallObserved) {
-      log.warn(`[stavrobot] Subagent ${agentId} still did not call a send tool after the nudge; accepting the turn.`);
-    }
-
-    const lastAssistantMessage = agent.state.messages
-      .slice()
-      .reverse()
-      .find((message) => message.role === "assistant");
-
-    const responseText = lastAssistantMessage
-      ? lastAssistantMessage.content
-          .filter((block): block is TextContent => block.type === "text")
-          .map((block) => block.text)
-          .join("")
-      : "";
+    const responseText = extractFinalAssistantText(agent.state.messages);
 
     const compactionThreshold = agentCompactionThresholds.get(agent) ?? Math.floor(agent.state.model.contextWindow * COMPACTION_THRESHOLD_FRACTION);
     void triggerCompactionIfNeeded(agent, pool, agentId, config, compactionThreshold);

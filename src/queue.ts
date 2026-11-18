@@ -11,13 +11,12 @@ import { sendWhatsappTextMessage } from "./whatsapp-api.js";
 import type { FileAttachment } from "./uploads.js";
 import { getMainAgentId, isOwnerIdentity, resolveInterlocutor, loadAgent } from "./database.js";
 import { log } from "./log.js";
+import { shouldForwardSubagentFinalText } from "./subagent-report.js";
+
+export { NOTHING_TO_REPORT } from "./subagent-report.js";
 
 export const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 30_000;
-
-// Subagents use this marker as their final text when they have nothing to report
-// to the main agent. Such turns are not forwarded.
-export const NOTHING_TO_REPORT = "NOTHING_TO_REPORT";
 
 // Sources that require allowlist + interlocutor lookup before routing.
 // All other external sources route directly to the main agent.
@@ -272,16 +271,12 @@ function forwardSubagentFinalMessage(routing: RoutingResult, response: string): 
   if (routing.isMainAgent) {
     return;
   }
-  const text = response.trim();
-  if (text === "") {
-    return;
-  }
-  if (text.toLowerCase() === NOTHING_TO_REPORT.toLowerCase()) {
-    log.info(`[stavrobot] Subagent ${routing.agentId} reported nothing to report, not forwarding.`);
+  if (!shouldForwardSubagentFinalText(response)) {
+    log.info(`[stavrobot] Subagent ${routing.agentId} has nothing to report, not forwarding.`);
     return;
   }
   log.info(`[stavrobot] Forwarding subagent ${routing.agentId} final message to main agent.`);
-  void enqueueMessage(text, "agent", String(routing.agentId), undefined, getMainAgentId());
+  void enqueueMessage(response.trim(), "agent", String(routing.agentId), undefined, getMainAgentId());
 }
 
 async function processQueue(): Promise<void> {
