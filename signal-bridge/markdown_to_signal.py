@@ -20,6 +20,10 @@ def convert_markdown(text: str) -> tuple[str, list[str]]:
     Offsets are in UTF-16 code units.
     """
     md = mistune.create_markdown(renderer="ast", plugins=["strikethrough"])
+    # Signal does not render HTML, so bracketed emails like <user@example.com>
+    # must survive verbatim instead of becoming mailto links. The rules list is
+    # an undocumented attribute, hence the pinned mistune version in the Dockerfile.
+    md.inline.rules.remove("auto_email")
     ast = md(text)
     converter = _Converter()
     converter.walk_nodes(ast)
@@ -69,6 +73,10 @@ class _Converter:
             self._handle_codespan(node)
         elif node_type == "block_code":
             self._handle_block_code(node)
+        elif node_type == "block_html":
+            self._handle_block_html(node)
+        elif node_type == "inline_html":
+            self._append(node["raw"])
         elif node_type == "text":
             self._append(node["raw"])
         elif node_type == "softbreak":
@@ -136,6 +144,16 @@ class _Converter:
         self._apply_style("MONOSPACE", start)
         self._append("\n\n")
 
+    def _handle_block_html(self, node: dict) -> None:
+        if self.text and not self.text.endswith("\n\n"):
+            if self.text.endswith("\n"):
+                self._append("\n")
+            else:
+                self._append("\n\n")
+        # Strip trailing newline that mistune appends to block html raw content.
+        self._append(node["raw"].rstrip("\n"))
+        self._append("\n\n")
+
     def _handle_link(self, node: dict) -> None:
         url = node["attrs"]["url"]
         # Collect the link text by temporarily diverting output.
@@ -180,6 +198,9 @@ class _Converter:
             if child["type"] == "paragraph":
                 # Inline the paragraph content without the surrounding newlines.
                 self.walk_nodes(child["children"])
+            elif child["type"] == "block_html":
+                # Inline block HTML too, so it stays on the list item's line.
+                self._append(child["raw"].rstrip("\n"))
             elif child["type"] == "list":
                 # Nested list: start on a new line with indentation.
                 self._append("\n")

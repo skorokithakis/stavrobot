@@ -10,9 +10,11 @@ from unittest.mock import patch
 # Allow importing from the signal-bridge directory without installing.
 sys.path.insert(0, os.path.dirname(__file__))
 
-# Stub out mistune so bridge (via markdown_to_signal) can be imported without the package.
-mistune_stub = types.ModuleType("mistune")
-sys.modules.setdefault("mistune", mistune_stub)
+# Stub out mistune only if it isn't installed, so real-mistune tests aren't affected.
+try:
+    import mistune  # noqa: F401
+except ImportError:
+    sys.modules["mistune"] = types.ModuleType("mistune")
 
 import bridge  # noqa: E402
 

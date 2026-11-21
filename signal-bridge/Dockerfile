@@ -8,7 +8,7 @@ RUN apt-get update && \
     python3 \
     python3-pip \
     qrencode && \
-    pip3 install --break-system-packages mistune && \
+    pip3 install --break-system-packages mistune==3.4.0 && \
     rm -rf /var/lib/apt/lists/*
 
 # Download and install signal-cli native build.
