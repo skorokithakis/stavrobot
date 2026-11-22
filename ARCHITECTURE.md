@@ -295,6 +295,29 @@ Plugins live in `/plugins/<name>/` (shared volume between `plugin-runner` and `c
   entries (`.git-installed`, its temp directory, `.tmp-install-*`); valid plugin names
   never start with a dot.
 
+### Updating git-installed plugins
+- `update` records `git rev-parse HEAD`, fetches, runs
+  `git remote set-head origin --auto` (so clones without an `origin/HEAD` ref and
+  remotes whose default branch was renamed both resolve), then resets hard to
+  `origin/HEAD` and records HEAD again. It chowns the checkout after the reset on every
+  update, because the reset runs as root and can restore modified or deleted tracked
+  files.
+- If HEAD did not change, `update` returns with `changed: false`. It skips the init
+  script (sync and async), config defaults, and the instructions relay.
+- If HEAD changed, it computes a bounded changelog (`git log --oneline -n 21
+  old..origin/HEAD`, truncated to 20 lines with a note) before the reset, runs the init
+  script (sync or async), applies config defaults, and returns `changed: true` with the
+  short `from` and `to` hashes. It includes the `instructions` field only when the
+  manifest's `instructions` value differs from the pre-update manifest, along with the
+  relay-instructions line.
+- `manage_plugins` appends the `instructions` text to the tool result (under "Setup
+  instructions:"), so the agent can relay instructions from both install and update
+  responses.
+- If the sync init fails, `update` resets the checkout back to the pre-update commit
+  (and re-chowns it) before returning 500, so the next update still sees a change and
+  retries the init. Async init failures are reported through the callback and do not
+  roll back the checkout.
+
 ### MCP plugins
 - A plugin can wrap an MCP (Model Context Protocol) server instead of scripts: its
   `manifest.json` declares `"type": "mcp"`, and its tools come from the live server, not

@@ -90,6 +90,10 @@ function formatPluginRunnerResponse(responseText: string): string {
       result += `\n\nInit script output:\n\`\`\`\n${obj["init_output"]}\n\`\`\``;
     }
 
+    if (typeof obj["instructions"] === "string") {
+      result += `\n\nSetup instructions:\n${obj["instructions"]}`;
+    }
+
     if (Array.isArray(obj["warnings"]) && obj["warnings"].length > 0) {
       const warnings = (obj["warnings"] as unknown[])
         .filter((w): w is string => typeof w === "string")

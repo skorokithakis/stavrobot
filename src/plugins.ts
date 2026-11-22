@@ -1042,7 +1042,8 @@ function buildPluginsContent(): string {
         renderList();
         renderDetail();
         updateView();
-        setDetailFeedback("Updated", true);
+        var unchanged = result.data && result.data.changed === false;
+        setDetailFeedback(unchanged ? "Already up to date" : "Updated", true);
       } else {
         setDetailFeedback(result.data && result.data.error ? result.data.error : "Update failed.", false);
       }

@@ -43,7 +43,7 @@ vi.mock("./bundle-registry.js", async (importOriginal) => {
   return { ...actual, loadBundles: loadBundlesMock, findBundle: findBundleMock };
 });
 
-import { handleAddMcp, handleConfigure } from "./plugin-lifecycle.js";
+import { handleAddMcp, handleConfigure, handleUpdate } from "./plugin-lifecycle.js";
 
 const tempDirs: string[] = [];
 
@@ -248,6 +248,51 @@ describe("handleAddMcp", () => {
 
     expect(response.statusCode).toBe(409);
     expect(connectMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleUpdate for MCP bundles", () => {
+  it("reconnects and reports the server as reconnected", async () => {
+    const bundleDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(bundleDir, "manifest.json"),
+      JSON.stringify({
+        name: "my-mcp",
+        description: "Test MCP server",
+        type: "mcp",
+        config: { server: { description: "MCP server spec (JSON)", required: true } },
+      }),
+    );
+    findBundleMock.mockReturnValue({
+      bundleDir,
+      manifest: {
+        name: "my-mcp",
+        description: "Test MCP server",
+        type: "mcp",
+        config: { server: { description: "MCP server spec (JSON)", required: true } },
+      },
+      type: "mcp",
+      tools: [],
+      permissions: ["*"],
+    });
+    connectMock.mockResolvedValue({ tools: [], instructions: "New instructions" });
+
+    const response = makeResponse();
+    await handleUpdate(
+      makeRequest({ name: "my-mcp" }),
+      response as unknown as http.ServerResponse,
+      readRequestBody,
+    );
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as { message: string; warnings: string[] };
+    expect(body.message).toBe("MCP server plugin 'my-mcp' reconnected. The server reported no tools.");
+    expect(body.warnings).toEqual([]);
+    expect(disconnectMock).toHaveBeenCalledWith("my-mcp");
+    expect(connectMock).toHaveBeenCalledWith("my-mcp");
+    expect(readJson(path.join(bundleDir, "manifest.json"))).toMatchObject({
+      instructions: "New instructions",
+    });
   });
 });
 

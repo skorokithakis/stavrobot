@@ -620,6 +620,19 @@ describe("createManagePluginsTool", () => {
       expect(text).toBe("Plugin 'myplugin' installed successfully.\n\nInit script output:\n```\nInstalled dependencies.\n\n```");
     });
 
+    it("appends instructions when present", async () => {
+      mockFetch(200, JSON.stringify({
+        name: "myplugin",
+        message: "Plugin 'myplugin' installed successfully.",
+        instructions: "Set the API key in the settings page.",
+      }));
+      const result = await tool.execute("call-3", { action: "install", url: "https://example.com/plugin.git" });
+      const text = (result.content[0] as { type: string; text: string }).text;
+      expect(text).toBe(
+        "Plugin 'myplugin' installed successfully.\n\nSetup instructions:\nSet the API key in the settings page.",
+      );
+    });
+
     it("falls back to raw text when response is not valid JSON", async () => {
       mockFetch(200, "not json");
       const result = await tool.execute("call-3", { action: "install", url: "https://example.com/plugin.git" });

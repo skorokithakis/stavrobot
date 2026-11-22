@@ -165,7 +165,7 @@ Tools must not read or depend on the `permissions` key. It is reserved for the s
 
 The plugin manifest can include an optional `instructions` field containing setup notes, usage guidance, or other information intended for the end user.
 
-When a plugin is installed, updated, or inspected, the agent relays these instructions to the user verbatim. The agent will not follow the instructions itself.
+When a plugin is installed or inspected, the agent receives these instructions and relays them to the user verbatim. After an update, it receives and relays them only when the update changes them. The agent will not follow the instructions itself.
 
 Instructions longer than 5000 characters are truncated before being shown to the user.
 
@@ -173,7 +173,7 @@ Instructions longer than 5000 characters are truncated before being shown to the
 
 An init script is declared in the plugin manifest via the `init` field. The `entrypoint` value names the executable file at the plugin root. The script must be executable (`chmod +x`).
 
-The init script runs automatically after install and after update. It runs as the plugin's system user with the same restricted environment as tools. The working directory is the plugin root (not a tool subdirectory). It receives no stdin input.
+The init script runs automatically after install, and after an update that changes the plugin's commit. If an update finds the plugin already at the latest commit, it does nothing and does not run the init script. The init runs as the plugin's system user with the same restricted environment as tools. The working directory is the plugin root (not a tool subdirectory). It receives no stdin input.
 
 Anything the init script writes to stdout is captured and returned to the agent as `init_output` in the install/update response. Use this to report setup results, generated credentials, or other information the agent should see.
 

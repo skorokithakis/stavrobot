@@ -309,7 +309,9 @@ These proxy to the plugin runner. Bodies are JSON.
 - `POST /api/settings/plugins/install`: body `{ "url": "<git url>" }`.
 - `POST /api/settings/plugins/add-mcp`: body `{ "name", "description", "server" }`; adds an
   MCP server as a plugin. `server` is the spec object described below.
-- `POST /api/settings/plugins/update`: body `{ "name": "<plugin>" }`.
+- `POST /api/settings/plugins/update`: body `{ "name": "<plugin>" }`. Skips the init
+  script and the instructions relay when a git-installed plugin is already at its latest
+  commit; otherwise it applies the update and reruns the init script.
 - `POST /api/settings/plugins/remove`: body `{ "name": "<plugin>" }`.
 - `POST /api/settings/plugins/configure`: body `{ "name": "<plugin>", "config": { ... } }`.
   Replaces the plugin's configuration.
