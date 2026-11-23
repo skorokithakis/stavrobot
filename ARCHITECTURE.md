@@ -713,7 +713,7 @@ The `coder` container wraps the `claude` headless CLI binary. It:
 6. Copies refreshed credentials back and cleans up.
 7. Posts the result to `app:3000/chat` with `source: "coder"`.
 
-Authentication is selected from the `[coder]` section only. With no `[coder].apiKey`/`[coder].baseUrl` the coder uses the subscription OAuth credentials described above. When both are set, it passes them to `claude` as `ANTHROPIC_API_KEY`/`ANTHROPIC_BASE_URL` and skips the credentials copy. Setting only one of the two is a startup error, and the top-level `apiKey`/`baseUrl` never affect the coder.
+Authentication is selected from the `[coder]` section only. With no `[coder].apiKey`/`[coder].baseUrl` the coder uses the subscription OAuth credentials described above. When both are set, it passes them to `claude` as `ANTHROPIC_API_KEY`/`ANTHROPIC_BASE_URL` and skips the credentials copy. Setting only one of the two is a startup error, and the top-level `apiKey`/`baseUrl` never affect the coder. When `[coder].oauthToken` is set (a long-lived token from `claude setup-token`), it passes it as `CLAUDE_CODE_OAUTH_TOKEN` and also skips the credentials copy. Setting both `oauthToken` and `apiKey`/`baseUrl` is a startup error.
 
 A background thread runs `claude update` as the coder user (uid/gid 9999) at startup
 and every 24 hours, keeping the CLI current; the native installer swaps versions

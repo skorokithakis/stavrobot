@@ -23,6 +23,7 @@ export interface CoderConfig {
   model: string;
   apiKey?: string;
   baseUrl?: string;
+  oauthToken?: string;
 }
 
 export interface SignalConfig {
