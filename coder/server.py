@@ -40,8 +40,8 @@ PLUGIN_NAME_RE = re.compile(r"^[a-z0-9-]+$")
 CALLBACK_RETRY_DELAYS_SECONDS = [5, 15, 30, 60, 120]
 
 
-def load_config() -> tuple[str, str, str | None, str | None]:
-    """Read config.toml and return (password, model, api_key, coder_base_url).
+def load_config() -> tuple[str, str, str | None, str | None, str | None]:
+    """Read config.toml and return (password, model, api_key, coder_base_url, oauth_token).
 
     Raises SystemExit if the password is missing, since the server must not
     start without authentication configured.
@@ -65,10 +65,15 @@ def load_config() -> tuple[str, str, str | None, str | None]:
     if base_url is not None and base_url.endswith("/v1"):
         base_url = base_url[:-3]
 
-    return password, model, api_key, base_url
+    oauth_token: str | None = coder_section.get("oauthToken") or None
+    if oauth_token is not None and api_key is not None:
+        print("[stavrobot-coder] Fatal: [coder] must set either 'oauthToken' or 'apiKey'/'baseUrl', not both")
+        raise SystemExit(1)
+
+    return password, model, api_key, base_url, oauth_token
 
 
-PASSWORD, MODEL, API_KEY, BASE_URL = load_config()
+PASSWORD, MODEL, API_KEY, BASE_URL, OAUTH_TOKEN = load_config()
 
 
 def ensure_plugin_user(plugin_name: str, uid: int, gid: int) -> None:
@@ -227,6 +232,8 @@ def run_coding_task(task_id: str, message: str, plugin: str) -> None:
 
         if use_api_key_auth:
             print(f"[stavrobot-coder] Using API key auth for task {task_id}")
+        elif OAUTH_TOKEN is not None:
+            print(f"[stavrobot-coder] Using OAuth token auth for task {task_id}")
         else:
             # Copy credentials into the plugin directory so claude can authenticate when
             # running as the plugin user. HOME is set to the plugin directory so claude
@@ -259,6 +266,8 @@ def run_coding_task(task_id: str, message: str, plugin: str) -> None:
             assert API_KEY is not None and BASE_URL is not None
             subprocess_env["ANTHROPIC_API_KEY"] = API_KEY
             subprocess_env["ANTHROPIC_BASE_URL"] = BASE_URL
+        elif OAUTH_TOKEN is not None:
+            subprocess_env["CLAUDE_CODE_OAUTH_TOKEN"] = OAUTH_TOKEN
 
         print(f"[stavrobot-coder] Running as uid={uid} gid={gid} in {cwd}")
 

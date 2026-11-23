@@ -181,10 +181,14 @@ botToken = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
 # Anthropic-compatible API endpoint instead, set both keys below; they are passed
 # to Claude Code as ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL. Setting only one of
 # the two is a startup error. The top-level apiKey/baseUrl never affect the coder.
+# The interactive OAuth login expires and must then be repeated by hand. To avoid
+# that, run `claude setup-token` and put the token in oauthToken; it is passed to
+# Claude Code as CLAUDE_CODE_OAUTH_TOKEN. It can't be combined with apiKey/baseUrl.
 [coder]
 model = "opus"
 # apiKey = "your-anthropic-api-key-here"
 # baseUrl = "https://api.anthropic.com"
+# oauthToken = "your-claude-setup-token-here"
 
 # Optional OpenAI embeddings support. When present, the bot generates vector
 # embeddings for semantic search. This improves recall (finding relevant

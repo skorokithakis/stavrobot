@@ -72,11 +72,13 @@ The app supports two authentication modes: API key or OAuth.
 
 The `coder` container is optional (needed only for the self-programming feature). By default it uses Claude Code with subscription auth (OAuth), separate from the main app's API key. To use an Anthropic-compatible API endpoint instead, set both `[coder].apiKey` and `[coder].baseUrl` in `config.toml`; Claude Code then uses them as `ANTHROPIC_API_KEY` and `ANTHROPIC_BASE_URL`. The top-level `apiKey`/`baseUrl` only configure the main app's model and never affect the coder. Setting only one of the two `[coder]` keys is a startup error.
 
+The interactive OAuth login below expires after a while, and every coding task then fails until you log in again. To avoid that, run `claude setup-token` (in the coder container or on any machine with Claude Code) and set the printed token as `[coder].oauthToken`. Claude Code then uses it as `CLAUDE_CODE_OAUTH_TOKEN`, and you can skip steps 3 and 4. `oauthToken` can't be combined with `[coder].apiKey`/`[coder].baseUrl`.
+
 Docker Compose profiles are comma-separated, so you can combine them (e.g. `COMPOSE_PROFILES=signal,coder`).
 
 1. Set `COMPOSE_PROFILES` in your `.env` file to include `coder` (e.g. `COMPOSE_PROFILES=coder`, or `COMPOSE_PROFILES=signal,coder` if you are also using Signal).
 2. Start the containers: `docker compose --profile coder up --build`
-3. Log in (skip this and the next step if you set `[coder].apiKey`/`[coder].baseUrl`): `docker compose exec -u coder coder claude` (it will prompt you to log in if you haven't).
+3. Log in (skip this and the next step if you set `[coder].oauthToken` or `[coder].apiKey`/`[coder].baseUrl`): `docker compose exec -u coder coder claude` (it will prompt you to log in if you haven't).
 4. Follow the browser-based OAuth flow.
 5. Set `[coder].model` in your config to a Claude Code model alias (`sonnet`, `opus`, or `haiku`).
 
