@@ -394,9 +394,18 @@ export function enqueueMessage(
   senderLabel?: string,
   addressedToBot?: boolean,
 ): Promise<string> {
+  const isStopText = message !== undefined && message.trim().toLowerCase() === "/stop";
   // Agent-to-agent messages are data, not owner commands, so a subagent that
   // happens to reply "/stop" must be delivered literally instead of aborting.
-  if (source !== "agent" && message !== undefined && message.trim().toLowerCase() === "/stop") {
+  // Only the owner may stop a turn either: this check runs before routing and
+  // before the Signal allowlist, so accepting /stop from anyone would let an
+  // arbitrary external sender abort the main agent's running turn.
+  const isOwnerStop =
+    source !== "agent" &&
+    isStopText &&
+    (isInteractiveOwnerMessage(source, sender) ||
+      (participant !== undefined && source !== undefined && isOwnerIdentity(source, participant.id)));
+  if (isOwnerStop) {
     if (processing) {
       log.info("[stavrobot] /stop received, aborting running agent.");
       queueAgent!.abort();

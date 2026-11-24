@@ -599,6 +599,114 @@ describe("/stop command", () => {
     expect(promptResult).toBe("Aborted.");
     expect(mockHandlePrompt).toHaveBeenCalledOnce();
   });
+
+  it("aborts the running turn for the owner's /stop from a direct chat on a channel", async () => {
+    mockIsOwnerIdentity.mockReturnValue(true);
+    mockHandlePrompt.mockImplementationOnce(
+      () => new Promise<string>((_, reject) => {
+        mockAbort.mockImplementationOnce(() => {
+          reject(new AbortError());
+        });
+      }),
+    );
+
+    const promptPromise = enqueueMessage("hello");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const stopResult = await enqueueMessage("/stop", "telegram", "+1111111111");
+    expect(stopResult).toBe("Aborted.");
+    expect(mockAbort).toHaveBeenCalledOnce();
+
+    const promptResult = await promptPromise;
+    expect(promptResult).toBe("Aborted.");
+    expect(mockHandlePrompt).toHaveBeenCalledOnce();
+  });
+
+  it("does not abort for a non-owner direct sender's /stop and queues it as text", async () => {
+    mockIsInAllowlist.mockReturnValue(true);
+    mockResolveInterlocutor.mockResolvedValue({
+      interlocutorId: 42,
+      identityId: 10,
+      agentId: 1,
+      isOwner: false,
+      mentionsOnly: false,
+      displayName: "Alice",
+    });
+    mockHandlePrompt.mockImplementationOnce(
+      () => new Promise<string>((resolve) => {
+        setTimeout(() => resolve("done"), 10);
+      }),
+    );
+
+    const promptPromise = enqueueMessage("hello", "signal", "+9876543210");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const stopPromise = enqueueMessage("/stop", "signal", "+9876543210");
+    expect(mockAbort).not.toHaveBeenCalled();
+
+    await promptPromise;
+    expect(await stopPromise).toBe("");
+    expect(mockHandlePrompt).toHaveBeenCalledTimes(2);
+    expect(mockHandlePrompt.mock.calls[1][2]).toBe("/stop");
+  });
+
+  it("does not abort for a non-owner group participant's /stop and queues it as text", async () => {
+    const participant = { id: "99", name: "Alice" };
+    mockIsInAllowlist.mockReturnValue(true);
+    mockResolveInterlocutor.mockResolvedValue({
+      interlocutorId: 42,
+      identityId: 10,
+      agentId: 1,
+      isOwner: false,
+      mentionsOnly: false,
+      displayName: "Alice",
+    });
+    mockHandlePrompt.mockImplementationOnce(
+      () => new Promise<string>((resolve) => {
+        setTimeout(() => resolve("done"), 10);
+      }),
+    );
+
+    const promptPromise = enqueueMessage("hello", "signal", "group.abc123", undefined, undefined, participant);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const stopPromise = enqueueMessage("/stop", "signal", "group.abc123", undefined, undefined, participant);
+    expect(mockAbort).not.toHaveBeenCalled();
+
+    await promptPromise;
+    expect(await stopPromise).toBe("");
+    expect(mockHandlePrompt).toHaveBeenCalledTimes(2);
+    expect(mockHandlePrompt.mock.calls[1][2]).toBe("/stop");
+  });
+
+  it("aborts the running turn when the owner sends /stop as a group participant", async () => {
+    mockIsOwnerIdentity.mockImplementation(
+      (_source: string, identifier: string) => identifier === "+1111111111" || identifier === "42",
+    );
+    mockHandlePrompt.mockImplementationOnce(
+      () => new Promise<string>((_, reject) => {
+        mockAbort.mockImplementationOnce(() => {
+          reject(new AbortError());
+        });
+      }),
+    );
+
+    const promptPromise = enqueueMessage("hello", "signal", "+1111111111");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const stopResult = await enqueueMessage(
+      "/stop",
+      "signal",
+      "group.abc123",
+      undefined,
+      undefined,
+      { id: "42", name: "Owner" },
+    );
+    expect(stopResult).toBe("Aborted.");
+    expect(mockAbort).toHaveBeenCalledOnce();
+
+    await promptPromise;
+  });
 });
 
 describe("steering", () => {

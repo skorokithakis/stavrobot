@@ -206,8 +206,11 @@ Routing by `source`:
 
 Two special cases:
 
-- If the message is exactly `/stop`, the running agent turn is aborted. Nothing is queued.
-  A synchronous request receives `Aborted.`.
+- If the message is exactly `/stop` and it is yours, the running agent turn is aborted.
+  Nothing is queued. A synchronous request receives `Aborted.`. A `/stop` is yours when
+  the call has no `source`, when `sender` matches one of your identities in `[owner]`, or
+  when the `participant` of a group message does. A `/stop` from anyone else, or with any
+  other `source`, is treated as ordinary text.
 - If the agent is busy with one of your messages and another message from you arrives, the
   new message is injected into the running turn instead of being queued. A synchronous
   steering request receives `Message received, steering the current request.` The agent's
@@ -216,10 +219,10 @@ Two special cases:
 
 Response: with `async` omitted or set to `false`, `200` with
 `{"response": "<agent reply>"}`. With `async: true`, the response is `202` with
-`{"accepted":true}`; it follows the same enqueue path, preserving routing, `/stop`, and
-owner steering behavior, but no agent reply is returned to that request. For synchronous
-calls, a dropped message (unknown sender on a gated channel) also returns `200`, with an
-empty `response` string.
+`{"accepted":true}`; it follows the same enqueue path, preserving routing, the
+owner-only `/stop` command, and owner steering behavior, but no agent reply is returned
+to that request. For synchronous calls, a dropped message (unknown sender on a gated
+channel) also returns `200`, with an empty `response` string.
 
 The acknowledgement confirms submission to the in-memory queue, not eventual completion.
 Queued work is lost if the app restarts before processing it, and any later enqueue
@@ -428,7 +431,8 @@ The group ID is Telegram's negative chat ID or Signal's opaque group ID.
 A group interlocutor can be marked mentions only, in which case the bot only acts on
 messages that mention it or reply to one of its messages; everything else is dropped
 silently. This only works on Signal and Telegram, and it applies to your own messages in
-the group too. It is a cost-saving feature rather than a security boundary.
+the group too, except `/stop`, which always works when you send it. It is a cost-saving
+feature rather than a security boundary.
 
 Telegram groups need extra setup: a bot only receives every message if its privacy mode
 is disabled (talk to @BotFather and turn off Group Privacy) or if the bot is an

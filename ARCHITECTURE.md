@@ -47,9 +47,9 @@ Webhook handlers acknowledge the request before their queued message is processe
 handler validates the request and submits it through `enqueueMessage` once, then returns
 `202 {"accepted":true}` without awaiting the turn. When the field is omitted or `false`,
 the caller waits for the normal response string. The async path does not bypass the
-queue, so its serialization, routing, `/stop`, and owner-steering behavior remain the
-same. A present non-boolean `async` value is rejected before raw file attachments are
-written.
+queue, so its serialization, routing, owner-only `/stop`, and owner-steering behavior
+remain the same. A present non-boolean `async` value is rejected before raw file
+attachments are written.
 
 `POST /chat` also accepts two optional fields that channels may supply:
 `participant` (`{ id, name }`, the individual who sent a group message) and
