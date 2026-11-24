@@ -83,32 +83,27 @@ class ProcessSignalEventTests(unittest.TestCase):
 
         send.assert_called_once_with("hi", PHONE_NUMBER, None, None, "Alice", False)
 
-    def test_sender_falls_back_to_the_uuid_when_source_number_is_missing(self) -> None:
-        event = {
-            "envelope": {
-                "sourceUuid": UUID,
-                "sourceName": "Alice",
-                "dataMessage": {"message": "hi"},
-            }
-        }
-        with patch.object(bridge, "send_agent_request") as send:
-            bridge.process_signal_event(event, bridge.RequestCounter())
+    def test_sender_falls_back_to_the_uuid_when_source_number_is_missing_or_empty(self) -> None:
+        cases = [
+            (
+                "missing",
+                {"sourceUuid": UUID, "sourceName": "Alice", "dataMessage": {"message": "hi"}},
+                "Alice",
+            ),
+            (
+                "empty",
+                {"sourceNumber": "", "sourceUuid": UUID, "dataMessage": {"message": "hi"}},
+                None,
+            ),
+        ]
+        for description, envelope, expected_label in cases:
+            with self.subTest(description):
+                with patch.object(bridge, "send_agent_request") as send:
+                    bridge.process_signal_event({"envelope": envelope}, bridge.RequestCounter())
 
-        # A direct message carries no participant, and the label is the profile name.
-        send.assert_called_once_with("hi", UUID, None, None, "Alice", False)
-
-    def test_sender_falls_back_to_the_uuid_when_source_number_is_empty(self) -> None:
-        event = {
-            "envelope": {
-                "sourceNumber": "",
-                "sourceUuid": UUID,
-                "dataMessage": {"message": "hi"},
-            }
-        }
-        with patch.object(bridge, "send_agent_request") as send:
-            bridge.process_signal_event(event, bridge.RequestCounter())
-
-        send.assert_called_once_with("hi", UUID, None, None, None, False)
+                # A direct message carries no participant, and the label is the
+                # profile name when there is one.
+                send.assert_called_once_with("hi", UUID, None, None, expected_label, False)
 
     def test_group_message_is_routed_by_group_id_with_participant_and_label(self) -> None:
         event = {
@@ -419,14 +414,15 @@ class RecipientParamTests(unittest.TestCase):
         """Reset the recorded connections before each test."""
         FakeHTTPConnection.instances = []
 
-    def test_e164_phone_number_is_a_recipient(self) -> None:
-        self.assertEqual(bridge.recipient_params(PHONE_NUMBER), {"recipient": [PHONE_NUMBER]})
-
-    def test_uuid_is_a_recipient(self) -> None:
-        self.assertEqual(bridge.recipient_params(UUID), {"recipient": [UUID]})
-
-    def test_other_values_are_group_ids(self) -> None:
-        self.assertEqual(bridge.recipient_params(GROUP_ID), {"groupId": GROUP_ID})
+    def test_recipient_params_classifies_people_and_groups(self) -> None:
+        cases = [
+            ("e164 phone number is a recipient", PHONE_NUMBER, {"recipient": [PHONE_NUMBER]}),
+            ("uuid is a recipient", UUID, {"recipient": [UUID]}),
+            ("other values are group ids", GROUP_ID, {"groupId": GROUP_ID}),
+        ]
+        for description, recipient, expected in cases:
+            with self.subTest(description):
+                self.assertEqual(bridge.recipient_params(recipient), expected)
 
     def test_text_send_uses_the_recipient_list_for_a_phone_number(self) -> None:
         with patch("http.client.HTTPConnection", FakeHTTPConnection):

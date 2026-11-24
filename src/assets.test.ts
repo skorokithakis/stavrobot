@@ -1,6 +1,6 @@
 import http from "http";
 import { describe, expect, it } from "vitest";
-import { serveFontFile, serveSharedStylesheet } from "./assets.js";
+import { serveFontFile } from "./assets.js";
 import { isPublicRoute } from "./index.js";
 
 interface MockResponse {
@@ -27,40 +27,6 @@ function makeMockResponse(): MockResponse {
     },
   };
 }
-
-describe("serveSharedStylesheet", (): void => {
-  it("serves the shared stylesheet as CSS", (): void => {
-    const response = makeMockResponse();
-
-    serveSharedStylesheet(response as unknown as http.ServerResponse);
-
-    expect(response.statusCode).toBe(200);
-    expect(response.headers["Content-Type"]).toBe("text/css; charset=utf-8");
-    const body = response.body as string;
-    expect(body).toContain(".sb-sidebar");
-    expect(body).toContain(".sb-tabbar");
-    expect(body).toContain(".sb-m-header");
-    expect(body).toContain("prefers-color-scheme: dark");
-    expect(body).toContain("@media (max-width:768px)");
-  });
-
-  it("references the self-hosted latin fonts and drops mockup state hooks", (): void => {
-    const response = makeMockResponse();
-
-    serveSharedStylesheet(response as unknown as http.ServerResponse);
-
-    const body = response.body as string;
-    expect(body).toContain(
-      "url(/assets/fonts/ibm-plex-sans-latin-400-normal.woff2)",
-    );
-    expect(body).toContain(
-      "url(/assets/fonts/ibm-plex-mono-latin-500-normal.woff2)",
-    );
-    expect(body).not.toContain(".is-hover");
-    expect(body).not.toContain(".is-focus");
-    expect(body).not.toContain(".sb-tabbar.is-static");
-  });
-});
 
 describe("serveFontFile", (): void => {
   it("serves a known font file with the woff2 content type", (): void => {

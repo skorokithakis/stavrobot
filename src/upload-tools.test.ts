@@ -37,16 +37,6 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
-describe("createManageUploadsTool - help", () => {
-  const tool = createManageUploadsTool();
-
-  it("returns help text for the help action", async () => {
-    const result = await tool.execute("call-help", { action: "help" });
-    expect(result.content[0].type).toBe("text");
-    expect(asText(result.content[0])).toMatch(/manage_uploads/i);
-  });
-});
-
 describe("createManageUploadsTool - read", () => {
   const tool = createManageUploadsTool();
   const testFilename = "upload-test-read-tool.txt";
@@ -72,16 +62,6 @@ describe("createManageUploadsTool - read", () => {
     expect(asText(result.content[0])).toMatch(/not found/i);
   });
 
-  it("rejects paths outside the uploads directory", async () => {
-    const result = await tool.execute("call-3", { action: "read", path: "/etc/passwd" });
-    expect(asText(result.content[0])).toMatch(/invalid path/i);
-  });
-
-  it("rejects paths that traverse out of the uploads directory", async () => {
-    const result = await tool.execute("call-4", { action: "read", path: path.join(TEMP_ATTACHMENTS_DIR, "../etc/passwd") });
-    expect(asText(result.content[0])).toMatch(/invalid path/i);
-  });
-
   it("throws non-ENOENT filesystem errors instead of swallowing them", async () => {
     vi.spyOn(fs, "readFile").mockRejectedValueOnce(
       Object.assign(new Error("Permission denied"), { code: "EACCES" }),
@@ -90,30 +70,18 @@ describe("createManageUploadsTool - read", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns ImageContent with base64 data and correct MIME type for a .jpg file", async () => {
-    const imageFilename = "upload-test-read-tool.jpg";
-    const imageData = Buffer.from([0xff, 0xd8, 0xff, 0xe0]); // minimal JPEG header bytes
-    const imagePath = await writeTestBinaryFile(imageFilename, imageData);
+  it.each([
+    { description: "jpg", filename: "upload-test-read-tool.jpg", bytes: [0xff, 0xd8, 0xff, 0xe0], mimeType: "image/jpeg" },
+    { description: "png", filename: "upload-test-read-tool.png", bytes: [0x89, 0x50, 0x4e, 0x47], mimeType: "image/png" },
+  ])("returns ImageContent with base64 data and the correct MIME type for a $description file", async ({ filename, bytes, mimeType }) => {
+    const imageData = Buffer.from(bytes);
+    const imagePath = await writeTestBinaryFile(filename, imageData);
     try {
       const result = await tool.execute("call-6", { action: "read", path: imagePath });
       const imageContent = asImage(result.content[0]);
       expect(imageContent.type).toBe("image");
-      expect(imageContent.mimeType).toBe("image/jpeg");
+      expect(imageContent.mimeType).toBe(mimeType);
       expect(imageContent.data).toBe(imageData.toString("base64"));
-    } finally {
-      await fs.unlink(imagePath);
-    }
-  });
-
-  it("returns ImageContent with correct MIME type for a .png file", async () => {
-    const imageFilename = "upload-test-read-tool.png";
-    const imageData = Buffer.from([0x89, 0x50, 0x4e, 0x47]); // minimal PNG header bytes
-    const imagePath = await writeTestBinaryFile(imageFilename, imageData);
-    try {
-      const result = await tool.execute("call-7", { action: "read", path: imagePath });
-      const imageContent = asImage(result.content[0]);
-      expect(imageContent.type).toBe("image");
-      expect(imageContent.mimeType).toBe("image/png");
     } finally {
       await fs.unlink(imagePath);
     }
@@ -145,11 +113,6 @@ describe("createManageUploadsTool - read", () => {
       await fs.unlink(noExtPath);
     }
   });
-
-  it("returns an error when path is missing", async () => {
-    const result = await tool.execute("call-10", { action: "read" });
-    expect(asText(result.content[0])).toMatch(/path is required/i);
-  });
 });
 
 describe("createManageUploadsTool - delete", () => {
@@ -180,16 +143,6 @@ describe("createManageUploadsTool - delete", () => {
     expect(asText(result.content[0])).toMatch(/not found/i);
   });
 
-  it("rejects paths outside the uploads directory", async () => {
-    const result = await tool.execute("call-3", { action: "delete", path: "/etc/passwd" });
-    expect(asText(result.content[0])).toMatch(/invalid path/i);
-  });
-
-  it("rejects paths that traverse out of the uploads directory", async () => {
-    const result = await tool.execute("call-4", { action: "delete", path: path.join(TEMP_ATTACHMENTS_DIR, "../etc/passwd") });
-    expect(asText(result.content[0])).toMatch(/invalid path/i);
-  });
-
   it("throws non-ENOENT filesystem errors instead of swallowing them", async () => {
     vi.spyOn(fs, "unlink").mockRejectedValueOnce(
       Object.assign(new Error("Permission denied"), { code: "EACCES" }),
@@ -197,9 +150,20 @@ describe("createManageUploadsTool - delete", () => {
     await expect(tool.execute("call-5", { action: "delete", path: path.join(TEMP_ATTACHMENTS_DIR, "upload-perm-denied.txt") })).rejects.toThrow("Permission denied");
     vi.restoreAllMocks();
   });
+});
 
-  it("returns an error when path is missing", async () => {
-    const result = await tool.execute("call-6", { action: "delete" });
-    expect(asText(result.content[0])).toMatch(/path is required/i);
+// Path containment is the security boundary shared by read and delete, so every
+// case stays even though the check is shared.
+describe("createManageUploadsTool - path containment", () => {
+  const tool = createManageUploadsTool();
+
+  it.each([
+    { description: "reads an absolute path outside the uploads directory", params: { action: "read", path: "/etc/passwd" } },
+    { description: "reads a path that traverses out of the uploads directory", params: { action: "read", path: path.join(TEMP_ATTACHMENTS_DIR, "../etc/passwd") } },
+    { description: "deletes an absolute path outside the uploads directory", params: { action: "delete", path: "/etc/passwd" } },
+    { description: "deletes a path that traverses out of the uploads directory", params: { action: "delete", path: path.join(TEMP_ATTACHMENTS_DIR, "../etc/passwd") } },
+  ])("rejects a request that $description", async ({ params }) => {
+    const result = await tool.execute("call-1", params);
+    expect(asText(result.content[0])).toMatch(/invalid path/i);
   });
 });

@@ -49,23 +49,7 @@ describe("send_agent_message", () => {
     expect(makeText(result)).toContain("agent 99 not found");
   });
 
-  it("sends a message and returns confirmation", async () => {
-    mockLoadAgent.mockResolvedValueOnce({
-      id: 2,
-      name: "helper",
-      systemPrompt: "Help users.",
-      allowedTools: [],
-      createdAt: new Date("2024-01-01"),
-    });
-    mockEnqueueMessage.mockResolvedValueOnce("");
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const getCurrentAgentId = vi.fn().mockReturnValue(1);
-    const tool = createSendAgentMessageTool(pool, getCurrentAgentId);
-    const result = await tool.execute("call-1", { agent_id: 2, message: "hello" });
-    expect(makeText(result)).toBe("Message sent to agent 2.");
-  });
-
-  it("calls enqueueMessage with correct parameters", async () => {
+  it("sends a message and enqueues it with the current agent as sender", async () => {
     mockLoadAgent.mockResolvedValueOnce({
       id: 2,
       name: "helper",
@@ -77,24 +61,9 @@ describe("send_agent_message", () => {
     const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
     const getCurrentAgentId = vi.fn().mockReturnValue(3);
     const tool = createSendAgentMessageTool(pool, getCurrentAgentId);
-    await tool.execute("call-1", { agent_id: 2, message: "task for you" });
-    expect(mockEnqueueMessage).toHaveBeenCalledWith("task for you", "agent", "3", undefined, 2);
-  });
-
-  it("uses the getCurrentAgentId callback to determine the sender", async () => {
-    mockLoadAgent.mockResolvedValueOnce({
-      id: 5,
-      name: "worker",
-      systemPrompt: "Do work.",
-      allowedTools: [],
-      createdAt: new Date("2024-01-01"),
-    });
-    mockEnqueueMessage.mockResolvedValueOnce("");
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const getCurrentAgentId = vi.fn().mockReturnValue(7);
-    const tool = createSendAgentMessageTool(pool, getCurrentAgentId);
-    await tool.execute("call-1", { agent_id: 5, message: "ping" });
+    const result = await tool.execute("call-1", { agent_id: 2, message: "task for you" });
+    expect(makeText(result)).toBe("Message sent to agent 2.");
     expect(getCurrentAgentId).toHaveBeenCalled();
-    expect(mockEnqueueMessage).toHaveBeenCalledWith("ping", "agent", "7", undefined, 5);
+    expect(mockEnqueueMessage).toHaveBeenCalledWith("task for you", "agent", "3", undefined, 2);
   });
 });

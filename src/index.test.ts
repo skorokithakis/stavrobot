@@ -79,27 +79,16 @@ describe("handlePageQueryRequest auth enforcement", () => {
   const pathname = "/api/pages/mypage/queries/myquery";
   const password = "secret";
   const url = new URL("http://localhost/api/pages/mypage/queries/myquery");
+  const unauthorizedRequests: Array<{ label: string; headers: Record<string, string> }> = [
+    { label: "no auth header is provided", headers: {} },
+    {
+      label: "the wrong password is provided",
+      headers: { authorization: `Basic ${Buffer.from("user:wrongpassword").toString("base64")}` },
+    },
+  ];
 
-  it("returns 401 for a private page when no auth header is provided", async () => {
-    const request = makeMockRequest();
-    const response = makeMockResponse();
-    const pool = makeMockPool(false);
-
-    await handlePageQueryRequest(
-      request,
-      response as unknown as http.ServerResponse,
-      pathname,
-      password,
-      pool,
-      url,
-    );
-
-    expect(response.statusCode).toBe(401);
-  });
-
-  it("returns 401 for a private page when wrong password is provided", async () => {
-    const credentials = Buffer.from("user:wrongpassword").toString("base64");
-    const request = makeMockRequest({ authorization: `Basic ${credentials}` });
+  it.each(unauthorizedRequests)("returns 401 for a private page when $label", async ({ headers }) => {
+    const request = makeMockRequest(headers);
     const response = makeMockResponse();
     const pool = makeMockPool(false);
 
@@ -290,35 +279,27 @@ describe("handlePageMutationRequest", () => {
     expect(queryMock).toHaveBeenCalledOnce();
   });
 
-  it("returns 400 for invalid JSON", async () => {
+  it.each([
+    { label: "invalid JSON", body: "not json", errorPattern: /Invalid JSON/ },
+    { label: "a non-object JSON body", body: JSON.stringify([1, 2, 3]), errorPattern: /object/i },
+  ])("returns 400 for $label", async ({ body, errorPattern }) => {
     const { pool } = makeMutationPool();
-    const response = await invokeMutation(pool, "not json");
+    const response = await invokeMutation(pool, body);
 
     expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body ?? "{}").error).toMatch(errorPattern);
   });
 
-  it("returns 400 for a non-object JSON body", async () => {
-    const { pool } = makeMutationPool();
-    const response = await invokeMutation(pool, JSON.stringify([1, 2, 3]));
-
-    expect(response.statusCode).toBe(400);
-    expect(JSON.parse(response.body ?? "{}").error).toMatch(/object/i);
-  });
-
-  it("returns 415 when the content type is not JSON", async () => {
+  it.each([
+    { label: "is not JSON", contentType: "application/x-www-form-urlencoded" },
+    { label: "is empty", contentType: "" },
+  ])("returns 415 when the content type $label", async ({ contentType }) => {
     const { pool, queryMock } = makeMutationPool();
-    const response = await invokeMutation(pool, "{}", { "content-type": "application/x-www-form-urlencoded" });
+    const response = await invokeMutation(pool, "{}", { "content-type": contentType });
 
     expect(response.statusCode).toBe(415);
     // Only the lookup ran; the mutation execution did not.
     expect(queryMock).toHaveBeenCalledOnce();
-  });
-
-  it("returns 415 when the content type is empty", async () => {
-    const { pool } = makeMutationPool();
-    const response = await invokeMutation(pool, "{}", { "content-type": "" });
-
-    expect(response.statusCode).toBe(415);
   });
 
   it("allows a JSON content type with parameters such as charset", async () => {
@@ -363,21 +344,23 @@ describe("isPublicRoute — page mutations", () => {
 });
 
 describe("checkBasicAuth", () => {
-  it("returns false when no authorization header is present", () => {
-    const request = makeMockRequest();
-    expect(checkBasicAuth(request, "secret")).toBe(false);
-  });
+  const cases: Array<{ label: string; headers: Record<string, string>; expected: boolean }> = [
+    { label: "no authorization header", headers: {}, expected: false },
+    {
+      label: "a wrong password",
+      headers: { authorization: `Basic ${Buffer.from("user:wrong").toString("base64")}` },
+      expected: false,
+    },
+    {
+      label: "the correct password",
+      headers: { authorization: `Basic ${Buffer.from("user:secret").toString("base64")}` },
+      expected: true,
+    },
+  ];
 
-  it("returns false when the password is wrong", () => {
-    const credentials = Buffer.from("user:wrong").toString("base64");
-    const request = makeMockRequest({ authorization: `Basic ${credentials}` });
-    expect(checkBasicAuth(request, "secret")).toBe(false);
-  });
-
-  it("returns true when the correct password is provided", () => {
-    const credentials = Buffer.from("user:secret").toString("base64");
-    const request = makeMockRequest({ authorization: `Basic ${credentials}` });
-    expect(checkBasicAuth(request, "secret")).toBe(true);
+  it.each(cases)("returns $expected when given $label", ({ headers, expected }) => {
+    const request = makeMockRequest(headers);
+    expect(checkBasicAuth(request, "secret")).toBe(expected);
   });
 });
 

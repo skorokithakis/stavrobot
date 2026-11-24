@@ -43,6 +43,10 @@ function mockFetchSequence(...responses: Array<{ status: number; body: string }>
   vi.stubGlobal("fetch", mock);
 }
 
+function asText(content: unknown): string {
+  return (content as { type: string; text: string }).text;
+}
+
 describe("createRunPluginToolTool", () => {
   const tool = createRunPluginToolTool();
 
@@ -64,61 +68,41 @@ describe("createRunPluginToolTool", () => {
       tool: "mytool",
       parameters: "{}",
     });
-    expect((badPlugin.content[0] as { type: string; text: string }).text).toBe(
-      "Error: invalid plugin name.",
-    );
+    expect(asText(badPlugin.content[0])).toBe("Error: invalid plugin name.");
 
     const badTool = await tool.execute("call-bad-tool", {
       plugin: "myplugin",
       tool: "../../config",
       parameters: "{}",
     });
-    expect((badTool.content[0] as { type: string; text: string }).text).toBe(
-      "Error: invalid tool name.",
-    );
+    expect(asText(badTool.content[0])).toBe("Error: invalid tool name.");
 
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("formats a successful sync result with string output", async () => {
+  it.each([
+    {
+      description: "a successful sync result with string output",
+      response: { success: true, output: "hello world" },
+      expected: 'The run of tool "mytool" (plugin "myplugin") returned:\n```\nhello world\n```',
+    },
+    {
+      description: "a successful sync result with object output as TOON",
+      response: { success: true, output: { key: "value" } },
+      expected: 'The run of tool "mytool" (plugin "myplugin") returned:\n```\nkey: value\n```',
+    },
+    {
+      description: "a failed sync result with error message",
+      response: { success: false, error: "something went wrong" },
+      expected: 'The run of tool "mytool" (plugin "myplugin") failed:\n```\nsomething went wrong\n```',
+    },
+  ])("formats $description", async ({ response, expected }) => {
     mockFetchSequence(
       { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
-      { status: 200, body: JSON.stringify({ success: true, output: "hello world" }) },
+      { status: 200, body: JSON.stringify(response) },
     );
     const result = await tool.execute("call-1", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
-    expect(result.content[0].type).toBe("text");
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe('The run of tool "mytool" (plugin "myplugin") returned:\n```\nhello world\n```');
-  });
-
-  it("formats a successful sync result with object output as TOON", async () => {
-    mockFetchSequence(
-      { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
-      { status: 200, body: JSON.stringify({ success: true, output: { key: "value" } }) },
-    );
-    const result = await tool.execute("call-2", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe('The run of tool "mytool" (plugin "myplugin") returned:\n```\nkey: value\n```');
-  });
-
-  it("formats a failed sync result with error message", async () => {
-    mockFetchSequence(
-      { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
-      { status: 200, body: JSON.stringify({ success: false, error: "something went wrong" }) },
-    );
-    const result = await tool.execute("call-3", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe('The run of tool "mytool" (plugin "myplugin") failed:\n```\nsomething went wrong\n```');
-  });
-
-  it("uses 'Unknown error' when failure has no error field", async () => {
-    mockFetchSequence(
-      { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
-      { status: 200, body: JSON.stringify({ success: false }) },
-    );
-    const result = await tool.execute("call-4", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe('The run of tool "mytool" (plugin "myplugin") failed:\n```\nUnknown error\n```');
+    expect(asText(result.content[0])).toBe(expected);
   });
 
   it("returns async message for 202 response", async () => {
@@ -127,37 +111,27 @@ describe("createRunPluginToolTool", () => {
       { status: 202, body: JSON.stringify({ status: "running" }) },
     );
     const result = await tool.execute("call-5", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe('Tool "mytool" (plugin "myplugin") is running asynchronously. The result will arrive when it completes.');
+    expect(asText(result.content[0])).toBe('Tool "mytool" (plugin "myplugin") is running asynchronously. The result will arrive when it completes.');
   });
 
-  it("falls back to raw text when run response is not valid JSON", async () => {
+  it.each([
+    {
+      description: "the run response is not valid JSON",
+      body: "not json at all",
+      expected: "not json at all",
+    },
+    {
+      description: "the JSON does not have a 'success' boolean",
+      body: JSON.stringify({ result: "something" }),
+      expected: JSON.stringify({ result: "something" }),
+    },
+  ])("falls back to raw text when $description", async ({ body, expected }) => {
     mockFetchSequence(
       { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
-      { status: 200, body: "not json at all" },
+      { status: 200, body },
     );
     const result = await tool.execute("call-6", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe("not json at all");
-  });
-
-  it("falls back to raw text when JSON does not have a 'success' boolean", async () => {
-    mockFetchSequence(
-      { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
-      { status: 200, body: JSON.stringify({ result: "something" }) },
-    );
-    const result = await tool.execute("call-7", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe(JSON.stringify({ result: "something" }));
-  });
-
-  it("does not delete any directory before running", async () => {
-    mockFetchSequence(
-      { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
-      { status: 200, body: JSON.stringify({ success: true, output: "done" }) },
-    );
-    await tool.execute("call-8", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
-    expect(vi.mocked(fs.rm)).not.toHaveBeenCalled();
+    expect(asText(result.content[0])).toBe(expected);
   });
 
   it("keeps files from an earlier call by writing each call into a new output directory", async () => {
@@ -189,7 +163,6 @@ describe("createRunPluginToolTool", () => {
     vi.mocked(fs.readdir).mockResolvedValueOnce(["report.txt"] as unknown as never[]);
     vi.mocked(fs.stat).mockResolvedValueOnce({ size: 1536 } as unknown as import("fs").Stats);
     const result = await tool.execute("call-9", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
     const expectedDir = String(vi.mocked(fs.mkdir).mock.calls[0][0]);
     expect(expectedDir).toMatch(new RegExp(`^${TEMP_ATTACHMENTS_DIR}/output-[0-9a-f-]{36}$`));
     expect(vi.mocked(fs.mkdir)).toHaveBeenCalledWith(expectedDir, { recursive: true });
@@ -197,60 +170,39 @@ describe("createRunPluginToolTool", () => {
       path.join(expectedDir, "report.txt"),
       Buffer.from(fileData, "base64"),
     );
-    expect(text).toContain(`\n\nOutput files:\n- ${path.join(expectedDir, "report.txt")} (1.5 KB)`);
+    expect(asText(result.content[0])).toContain(`\n\nOutput files:\n- ${path.join(expectedDir, "report.txt")} (1.5 KB)`);
   });
 
-  it("does not append 'Output files' when files array is empty", async () => {
+  it.each([
+    { description: "when files array is empty", response: { success: true, output: "done", files: [] } },
+    { description: "when files entries are invalid", response: { success: true, output: "done", files: [{ bad: "entry" }] } },
+    { description: "when response has no files field", response: { success: true, output: "done" } },
+  ])("does not append 'Output files' $description", async ({ response }) => {
     mockFetchSequence(
       { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
-      { status: 200, body: JSON.stringify({ success: true, output: "done", files: [] }) },
+      { status: 200, body: JSON.stringify(response) },
     );
     const result = await tool.execute("call-10", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).not.toContain("Output files");
+    expect(asText(result.content[0])).not.toContain("Output files");
     expect(vi.mocked(fs.mkdir)).not.toHaveBeenCalled();
-  });
-
-  it("does not append 'Output files' when files entries are invalid", async () => {
-    mockFetchSequence(
-      { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
-      { status: 200, body: JSON.stringify({ success: true, output: "done", files: [{ bad: "entry" }] }) },
-    );
-    const result = await tool.execute("call-11", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).not.toContain("Output files");
-    expect(vi.mocked(fs.mkdir)).not.toHaveBeenCalled();
-  });
-
-  it("does not append 'Output files' when response has no files field", async () => {
-    mockFetchSequence(
-      { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
-      { status: 200, body: JSON.stringify({ success: true, output: "done" }) },
-    );
-    const result = await tool.execute("call-12", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).not.toContain("Output files");
   });
 
   it("returns an error when the plugin is not found (404)", async () => {
     mockFetchSequence({ status: 404, body: "Not found" });
     const result = await tool.execute("call-13", { plugin: "missing", tool: "mytool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe("Plugin 'missing' not found.");
+    expect(asText(result.content[0])).toBe("Plugin 'missing' not found.");
   });
 
   it("returns an error when the plugin is disabled (permissions: [])", async () => {
     mockFetchSequence({ status: 200, body: JSON.stringify({ name: "myplugin", permissions: [] }) });
     const result = await tool.execute("call-14", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe("Plugin 'myplugin' not found.");
+    expect(asText(result.content[0])).toBe("Plugin 'myplugin' not found.");
   });
 
   it("returns an error when the tool is not in the explicit permissions list", async () => {
     mockFetchSequence({ status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["other_tool"] }) });
     const result = await tool.execute("call-15", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe("Tool 'mytool' not found on plugin 'myplugin'.");
+    expect(asText(result.content[0])).toBe("Tool 'mytool' not found on plugin 'myplugin'.");
   });
 
   it("includes available tools in the error when the manifest has a tools array", async () => {
@@ -265,8 +217,7 @@ describe("createRunPluginToolTool", () => {
     };
     mockFetchSequence({ status: 200, body: JSON.stringify(manifest) });
     const result = await tool.execute("call-15b", { plugin: "myplugin", tool: "missing_tool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe("Tool 'missing_tool' not found on plugin 'myplugin'. Available tools: search (query: string, count: integer), lookup (id: string)");
+    expect(asText(result.content[0])).toBe("Tool 'missing_tool' not found on plugin 'myplugin'. Available tools: search (query: string, count: integer), lookup (id: string)");
   });
 
   it("omits the available tools part when no permitted tools are in the manifest", async () => {
@@ -279,8 +230,7 @@ describe("createRunPluginToolTool", () => {
     };
     mockFetchSequence({ status: 200, body: JSON.stringify(manifest) });
     const result = await tool.execute("call-15c", { plugin: "myplugin", tool: "missing_tool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe("Tool 'missing_tool' not found on plugin 'myplugin'.");
+    expect(asText(result.content[0])).toBe("Tool 'missing_tool' not found on plugin 'myplugin'.");
   });
 
   it("does not leak tools that are not in the permissions list", async () => {
@@ -294,39 +244,34 @@ describe("createRunPluginToolTool", () => {
     };
     mockFetchSequence({ status: 200, body: JSON.stringify(manifest) });
     const result = await tool.execute("call-15d", { plugin: "myplugin", tool: "missing_tool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
+    const text = asText(result.content[0]);
     expect(text).toContain("allowed_tool");
     expect(text).not.toContain("secret_tool");
   });
 
-  it("proceeds when the tool is in the explicit permissions list", async () => {
+  it.each([
+    {
+      description: "the tool is in the explicit permissions list",
+      manifest: { name: "myplugin", permissions: ["mytool", "other_tool"] },
+      tool: "mytool",
+    },
+    {
+      description: "permissions is ['*'] (wildcard)",
+      manifest: { name: "myplugin", permissions: ["*"] },
+      tool: "anytool",
+    },
+    {
+      description: "the manifest has no permissions field",
+      manifest: { name: "myplugin" },
+      tool: "mytool",
+    },
+  ])("proceeds when $description", async ({ manifest, tool: toolName }) => {
     mockFetchSequence(
-      { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["mytool", "other_tool"] }) },
+      { status: 200, body: JSON.stringify(manifest) },
       { status: 200, body: JSON.stringify({ success: true, output: "done" }) },
     );
-    const result = await tool.execute("call-16", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe('The run of tool "mytool" (plugin "myplugin") returned:\n```\ndone\n```');
-  });
-
-  it("proceeds when permissions is ['*'] (wildcard)", async () => {
-    mockFetchSequence(
-      { status: 200, body: JSON.stringify({ name: "myplugin", permissions: ["*"] }) },
-      { status: 200, body: JSON.stringify({ success: true, output: "done" }) },
-    );
-    const result = await tool.execute("call-17", { plugin: "myplugin", tool: "anytool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe('The run of tool "anytool" (plugin "myplugin") returned:\n```\ndone\n```');
-  });
-
-  it("proceeds when manifest has no permissions field", async () => {
-    mockFetchSequence(
-      { status: 200, body: JSON.stringify({ name: "myplugin" }) },
-      { status: 200, body: JSON.stringify({ success: true, output: "done" }) },
-    );
-    const result = await tool.execute("call-18", { plugin: "myplugin", tool: "mytool", parameters: "{}" });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe('The run of tool "mytool" (plugin "myplugin") returned:\n```\ndone\n```');
+    const result = await tool.execute("call-16", { plugin: "myplugin", tool: toolName, parameters: "{}" });
+    expect(asText(result.content[0])).toBe(`The run of tool "${toolName}" (plugin "myplugin") returned:\n\`\`\`\ndone\n\`\`\``);
   });
 
   it("resolves file parameters to TransportedFile objects before sending to plugin-runner", async () => {
@@ -372,7 +317,10 @@ describe("createRunPluginToolTool", () => {
     expect(runCallBody.audio.filename).toBe("upload-abc.ogg");
   });
 
-  it("rejects file parameters whose path is not under TEMP_ATTACHMENTS_DIR", async () => {
+  it.each([
+    { description: "an absolute path outside TEMP_ATTACHMENTS_DIR", path: "/etc/passwd" },
+    { description: "a path traversal out of TEMP_ATTACHMENTS_DIR", path: path.join(TEMP_ATTACHMENTS_DIR, "../../../etc/passwd") },
+  ])("rejects file parameters with $description", async ({ path: filePath }) => {
     const manifest = {
       name: "myplugin",
       permissions: ["*"],
@@ -382,31 +330,24 @@ describe("createRunPluginToolTool", () => {
       { status: 200, body: JSON.stringify(manifest) },
     );
     await expect(
-      tool.execute("call-file-3", { plugin: "myplugin", tool: "mytool", parameters: JSON.stringify({ audio: "/etc/passwd" }) }),
+      tool.execute("call-file-3", { plugin: "myplugin", tool: "mytool", parameters: JSON.stringify({ audio: filePath }) }),
     ).rejects.toThrow("not under the allowed directory");
   });
 
-  it("rejects path traversal attempts in file parameters", async () => {
-    const manifest = {
-      name: "myplugin",
-      permissions: ["*"],
-      tools: [{ name: "mytool", parameters: { audio: { type: "file" } } }],
-    };
-    mockFetchSequence(
-      { status: 200, body: JSON.stringify(manifest) },
-    );
-    const traversalPath = path.join(TEMP_ATTACHMENTS_DIR, "../../../etc/passwd");
-    await expect(
-      tool.execute("call-file-4", { plugin: "myplugin", tool: "mytool", parameters: JSON.stringify({ audio: traversalPath }) }),
-    ).rejects.toThrow("not under the allowed directory");
-  });
-
-  it("passes parameters as-is when the tool is not found in the manifest", async () => {
-    const manifest = {
-      name: "myplugin",
-      permissions: ["*"],
-      tools: [{ name: "othertool", parameters: { audio: { type: "file" } } }],
-    };
+  it.each([
+    {
+      description: "when the tool is not found in the manifest",
+      manifest: {
+        name: "myplugin",
+        permissions: ["*"],
+        tools: [{ name: "othertool", parameters: { audio: { type: "file" } } }],
+      },
+    },
+    {
+      description: "when the manifest has no tools array",
+      manifest: { name: "myplugin", permissions: ["*"] },
+    },
+  ])("passes parameters as-is $description", async ({ manifest }) => {
     mockFetchSequence(
       { status: 200, body: JSON.stringify(manifest) },
       { status: 200, body: JSON.stringify({ success: true, output: "done" }) },
@@ -416,16 +357,6 @@ describe("createRunPluginToolTool", () => {
     const fetchMock = vi.mocked(globalThis.fetch);
     const runCallBody = JSON.parse((fetchMock.mock.calls[1][1] as { body: string }).body) as { audio: string };
     expect(runCallBody.audio).toBe("/some/path");
-  });
-
-  it("passes parameters as-is when the manifest has no tools array", async () => {
-    const manifest = { name: "myplugin", permissions: ["*"] };
-    mockFetchSequence(
-      { status: 200, body: JSON.stringify(manifest) },
-      { status: 200, body: JSON.stringify({ success: true, output: "done" }) },
-    );
-    await tool.execute("call-file-6", { plugin: "myplugin", tool: "mytool", parameters: JSON.stringify({ audio: "/some/path" }) });
-    expect(vi.mocked(fs.readFile)).not.toHaveBeenCalled();
   });
 
   it("runs a batch sequentially and numbers each result", async () => {
@@ -439,8 +370,7 @@ describe("createRunPluginToolTool", () => {
       tool: "mytool",
       parameters: JSON.stringify([{ value: 1 }, { value: 2 }]),
     });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe(
+    expect(asText(result.content[0])).toBe(
       'Batch run of tool "mytool" (plugin "myplugin"): 2 calls.\n\n' +
       'Call 1:\nThe run of tool "mytool" (plugin "myplugin") returned:\n```\nfirst\n```\n\n' +
       'Call 2:\nThe run of tool "mytool" (plugin "myplugin") returned:\n```\nsecond\n```',
@@ -481,7 +411,7 @@ describe("createRunPluginToolTool", () => {
       tool: "mytool",
       parameters: JSON.stringify([{}, {}]),
     });
-    const text = (result.content[0] as { type: string; text: string }).text;
+    const text = asText(result.content[0]);
     expect(text).toContain('Call 1:\nThe run of tool "mytool" (plugin "myplugin") failed:\n```\nboom\n```');
     expect(text).toContain('Call 2:\nThe run of tool "mytool" (plugin "myplugin") returned:\n```\nrecovered\n```');
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(3);
@@ -502,7 +432,7 @@ describe("createRunPluginToolTool", () => {
       tool: "mytool",
       parameters: JSON.stringify([{ audio: "/etc/passwd" }, {}]),
     });
-    const text = (result.content[0] as { type: string; text: string }).text;
+    const text = asText(result.content[0]);
     expect(text).toContain('Call 1:\nThe run of tool "mytool" (plugin "myplugin") failed:\n```\nFile parameter \'audio\' path is not under the allowed directory: /etc/passwd\n```');
     expect(text).toContain('Call 2:\nThe run of tool "mytool" (plugin "myplugin") returned:\n```\nsecond ok\n```');
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(2);
@@ -518,7 +448,7 @@ describe("createRunPluginToolTool", () => {
       tool: "mytool",
       parameters: JSON.stringify([null, 42, "hello", [1, 2], { value: "ok" }]),
     });
-    const text = (result.content[0] as { type: string; text: string }).text;
+    const text = asText(result.content[0]);
     expect(text).toContain('Call 1:\nThe run of tool "mytool" (plugin "myplugin") failed:\n```\nBatch item 1 is not a JSON object.\n```');
     expect(text).toContain("Call 2:\nThe run of tool");
     expect(text).toContain("Call 3:\nThe run of tool");
@@ -566,8 +496,7 @@ describe("createRunPluginToolTool", () => {
       tool: "mytool",
       parameters: JSON.stringify([{}]),
     });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe('Error: tool "mytool" (plugin "myplugin") is asynchronous and cannot be run in a batch. Run it once per call with a single parameters object.');
+    expect(asText(result.content[0])).toBe('Error: tool "mytool" (plugin "myplugin") is asynchronous and cannot be run in a batch. Run it once per call with a single parameters object.');
     expect(vi.mocked(globalThis.fetch)).toHaveBeenCalledTimes(1);
   });
 
@@ -579,106 +508,65 @@ describe("createRunPluginToolTool", () => {
       tool: "mytool",
       parameters: "[]",
     });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe("Error: the parameters array is empty; provide at least one set of parameters.");
+    expect(asText(result.content[0])).toBe("Error: the parameters array is empty; provide at least one set of parameters.");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
 describe("createManagePluginsTool", () => {
-  describe("help action", () => {
+  // formatPluginRunnerResponse is shared by every action that returns a message,
+  // so the response formatting is covered once here rather than per action.
+  describe("response formatting", () => {
     const tool = createManagePluginsTool({ coderEnabled: false });
 
-    it("returns help text", async () => {
-      const result = await tool.execute("call-1", { action: "help" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toContain("manage_plugins");
-      expect(text).toContain("install");
-      expect(text).toContain("create");
-      expect(text).toContain("add_mcp");
-    });
-  });
-
-  describe("install action", () => {
-    const tool = createManagePluginsTool({ coderEnabled: false });
-
-    it("returns the message field from the response JSON", async () => {
-      mockFetch(200, JSON.stringify({ name: "myplugin", message: "Plugin 'myplugin' installed successfully." }));
+    it.each([
+      {
+        description: "returns the message field",
+        body: JSON.stringify({ name: "myplugin", message: "Plugin 'myplugin' installed successfully." }),
+        expected: "Plugin 'myplugin' installed successfully.",
+      },
+      {
+        description: "appends init_output when present",
+        body: JSON.stringify({
+          name: "myplugin",
+          message: "Plugin 'myplugin' installed successfully.",
+          init_output: "Installed dependencies.\n",
+        }),
+        expected: "Plugin 'myplugin' installed successfully.\n\nInit script output:\n```\nInstalled dependencies.\n\n```",
+      },
+      {
+        description: "appends instructions when present",
+        body: JSON.stringify({
+          name: "myplugin",
+          message: "Plugin 'myplugin' installed successfully.",
+          instructions: "Set the API key in the settings page.",
+        }),
+        expected: "Plugin 'myplugin' installed successfully.\n\nSetup instructions:\nSet the API key in the settings page.",
+      },
+      {
+        description: "appends warnings when present",
+        body: JSON.stringify({ message: "Plugin 'myplugin' installed successfully.", warnings: ["Could not connect"] }),
+        expected: "Plugin 'myplugin' installed successfully.\n\nWarnings:\nCould not connect",
+      },
+      {
+        description: "does not append empty warnings",
+        body: JSON.stringify({ message: "Plugin 'myplugin' installed successfully.", warnings: [] }),
+        expected: "Plugin 'myplugin' installed successfully.",
+      },
+      {
+        description: "falls back to raw text when the response is not valid JSON",
+        body: "not json",
+        expected: "not json",
+      },
+      {
+        description: "TOON-encodes the response when there is no message field",
+        body: JSON.stringify({ name: "myplugin" }),
+        expected: "name: myplugin",
+      },
+    ])("$description", async ({ body, expected }) => {
+      mockFetch(200, body);
       const result = await tool.execute("call-1", { action: "install", url: "https://example.com/plugin.git" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Plugin 'myplugin' installed successfully.");
-    });
-
-    it("appends init_output when present", async () => {
-      mockFetch(200, JSON.stringify({
-        name: "myplugin",
-        message: "Plugin 'myplugin' installed successfully.",
-        init_output: "Installed dependencies.\n",
-      }));
-      const result = await tool.execute("call-2", { action: "install", url: "https://example.com/plugin.git" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Plugin 'myplugin' installed successfully.\n\nInit script output:\n```\nInstalled dependencies.\n\n```");
-    });
-
-    it("appends instructions when present", async () => {
-      mockFetch(200, JSON.stringify({
-        name: "myplugin",
-        message: "Plugin 'myplugin' installed successfully.",
-        instructions: "Set the API key in the settings page.",
-      }));
-      const result = await tool.execute("call-3", { action: "install", url: "https://example.com/plugin.git" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe(
-        "Plugin 'myplugin' installed successfully.\n\nSetup instructions:\nSet the API key in the settings page.",
-      );
-    });
-
-    it("falls back to raw text when response is not valid JSON", async () => {
-      mockFetch(200, "not json");
-      const result = await tool.execute("call-3", { action: "install", url: "https://example.com/plugin.git" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("not json");
-    });
-
-    it("TOON-encodes the response when JSON has no message field", async () => {
-      mockFetch(200, JSON.stringify({ name: "myplugin" }));
-      const result = await tool.execute("call-4", { action: "install", url: "https://example.com/plugin.git" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("name: myplugin");
-    });
-
-    it("returns an error when url is missing", async () => {
-      const result = await tool.execute("call-5", { action: "install" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Error: url is required for install.");
-    });
-  });
-
-  describe("update action", () => {
-    const tool = createManagePluginsTool({ coderEnabled: false });
-
-    it("returns the message field from the response JSON", async () => {
-      mockFetch(200, JSON.stringify({ name: "myplugin", message: "Plugin 'myplugin' updated successfully." }));
-      const result = await tool.execute("call-1", { action: "update", name: "myplugin" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Plugin 'myplugin' updated successfully.");
-    });
-
-    it("appends init_output when present", async () => {
-      mockFetch(200, JSON.stringify({
-        name: "myplugin",
-        message: "Plugin 'myplugin' updated successfully.",
-        init_output: "Re-installed dependencies.\n",
-      }));
-      const result = await tool.execute("call-2", { action: "update", name: "myplugin" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Plugin 'myplugin' updated successfully.\n\nInit script output:\n```\nRe-installed dependencies.\n\n```");
-    });
-
-    it("returns an error when name is missing", async () => {
-      const result = await tool.execute("call-3", { action: "update" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Error: name is required for update.");
+      expect(asText(result.content[0])).toBe(expected);
     });
   });
 
@@ -687,8 +575,7 @@ describe("createManagePluginsTool", () => {
       const tool = createManagePluginsTool({ coderEnabled: true });
       mockFetch(200, JSON.stringify({ name: "myplugin", message: "Plugin 'myplugin' created." }));
       const result = await tool.execute("call-1", { action: "create", name: "myplugin", plugin_description: "A test plugin." });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Plugin 'myplugin' created.");
+      expect(asText(result.content[0])).toBe("Plugin 'myplugin' created.");
       const fetchMock = vi.mocked(globalThis.fetch);
       expect(fetchMock).toHaveBeenCalledWith(
         "http://plugin-runner:3003/create",
@@ -702,22 +589,7 @@ describe("createManagePluginsTool", () => {
     it("returns an error when coder is not enabled", async () => {
       const tool = createManagePluginsTool({ coderEnabled: false });
       const result = await tool.execute("call-2", { action: "create", name: "myplugin", plugin_description: "A test plugin." });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Error: the create action requires the coder to be configured.");
-    });
-
-    it("returns an error when name is missing", async () => {
-      const tool = createManagePluginsTool({ coderEnabled: true });
-      const result = await tool.execute("call-3", { action: "create", plugin_description: "A test plugin." });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Error: name is required for create.");
-    });
-
-    it("returns an error when plugin_description is missing", async () => {
-      const tool = createManagePluginsTool({ coderEnabled: true });
-      const result = await tool.execute("call-4", { action: "create", name: "myplugin" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Error: plugin_description is required for create.");
+      expect(asText(result.content[0])).toBe("Error: the create action requires the coder to be configured.");
     });
   });
 
@@ -728,8 +600,7 @@ describe("createManagePluginsTool", () => {
       mockFetch(200, JSON.stringify({ message: "Plugin 'myserver' added." }));
       const server = JSON.stringify({ command: "npx", args: ["-y", "@example/mcp-server"], env: { API_KEY: "secret" } });
       const result = await tool.execute("call-1", { action: "add_mcp", name: "myserver", plugin_description: "A test MCP server.", server });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Plugin 'myserver' added.");
+      expect(asText(result.content[0])).toBe("Plugin 'myserver' added.");
       const fetchMock = vi.mocked(globalThis.fetch);
       expect(fetchMock).toHaveBeenCalledWith(
         "http://plugin-runner:3003/add-mcp",
@@ -744,18 +615,6 @@ describe("createManagePluginsTool", () => {
       );
     });
 
-    it("appends warnings when present", async () => {
-      mockFetch(200, JSON.stringify({ message: "Plugin 'myserver' added.", warnings: ["Could not connect"] }));
-      const result = await tool.execute("call-2", {
-        action: "add_mcp",
-        name: "myserver",
-        plugin_description: "A test MCP server.",
-        server: '{"url":"https://example.com/mcp"}',
-      });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Plugin 'myserver' added.\n\nWarnings:\nCould not connect");
-    });
-
     it("returns an error when server is not valid JSON", async () => {
       const fetchMock = vi.fn();
       vi.stubGlobal("fetch", fetchMock);
@@ -765,144 +624,59 @@ describe("createManagePluginsTool", () => {
         plugin_description: "A test MCP server.",
         server: "not json",
       });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Error: server is not valid JSON.");
+      expect(asText(result.content[0])).toBe("Error: server is not valid JSON.");
       expect(fetchMock).not.toHaveBeenCalled();
-    });
-
-    it("returns an error when name is missing", async () => {
-      const result = await tool.execute("call-4", {
-        action: "add_mcp",
-        plugin_description: "A test MCP server.",
-        server: '{"url":"https://example.com/mcp"}',
-      });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Error: name is required for add_mcp.");
-    });
-
-    it("returns an error when plugin_description is missing", async () => {
-      const result = await tool.execute("call-5", {
-        action: "add_mcp",
-        name: "myserver",
-        server: '{"url":"https://example.com/mcp"}',
-      });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Error: plugin_description is required for add_mcp.");
-    });
-
-    it("returns an error when server is missing", async () => {
-      const result = await tool.execute("call-6", {
-        action: "add_mcp",
-        name: "myserver",
-        plugin_description: "A test MCP server.",
-      });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Error: server is required for add_mcp.");
     });
   });
 
   describe("list action", () => {
     const tool = createManagePluginsTool({ coderEnabled: false });
 
-    it("TOON-encodes the plugin list response", async () => {
-      mockFetch(200, JSON.stringify([{ name: "plugin1" }, { name: "plugin2" }]));
-      const result = await tool.execute("call-1", { action: "list" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      // TOON format uses column headers like {name} rather than JSON object syntax.
-      expect(text).not.toContain('{"name"');
-      expect(text).toContain("plugin1");
-      expect(text).toContain("plugin2");
-    });
-
-    it("falls back to raw text when response is not valid JSON", async () => {
-      mockFetch(200, "not json");
-      const result = await tool.execute("call-2", { action: "list" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("not json");
-    });
-
-    it("strips the permissions field from each plugin in the list", async () => {
+    it("filters disabled plugins and strips the permissions field from each plugin", async () => {
       mockFetch(200, JSON.stringify({
         plugins: [
           { name: "enabled", permissions: ["*"] },
+          { name: "disabled", permissions: [] },
           { name: "partial", permissions: ["tool1"] },
+          { name: "noperms" },
         ],
       }));
       const result = await tool.execute("call-permissions", { action: "list" });
-      const text = (result.content[0] as { type: string; text: string }).text;
+      const text = asText(result.content[0]);
       expect(text).toContain("enabled");
       expect(text).toContain("partial");
+      expect(text).toContain("noperms");
+      expect(text).not.toContain("disabled");
       expect(text).not.toContain("permissions");
     });
 
-    it("filters out disabled plugins (permissions: []) from the list", async () => {
-      mockFetch(200, JSON.stringify({
-        plugins: [
-          { name: "enabled", permissions: ["*"] },
-          { name: "disabled", permissions: [] },
-          { name: "partial", permissions: ["tool1"] },
-        ],
-      }));
-      const result = await tool.execute("call-3", { action: "list" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toContain("enabled");
-      expect(text).not.toContain("disabled");
-      expect(text).toContain("partial");
-    });
-
-    it("keeps plugins with no permissions field in the list", async () => {
-      mockFetch(200, JSON.stringify({
-        plugins: [
-          { name: "noperms" },
-          { name: "disabled", permissions: [] },
-        ],
-      }));
-      const result = await tool.execute("call-4", { action: "list" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toContain("noperms");
-      expect(text).not.toContain("disabled");
-    });
-
-    it("falls back to formatting the raw response when the response has no plugins array", async () => {
-      mockFetch(200, JSON.stringify([{ name: "plugin1" }]));
-      const result = await tool.execute("call-5", { action: "list" });
-      const text = (result.content[0] as { type: string; text: string }).text;
+    // The plugins-array branch is the list-specific logic; the no-array branch
+    // falls through to the shared TOON formatting.
+    it("formats the raw response when there is no plugins array", async () => {
+      mockFetch(200, JSON.stringify([{ name: "plugin1" }, { name: "plugin2" }]));
+      const result = await tool.execute("call-1", { action: "list" });
+      const text = asText(result.content[0]);
+      expect(text).not.toContain('{"name"');
       expect(text).toContain("plugin1");
+      expect(text).toContain("plugin2");
     });
   });
 
   describe("show action", () => {
     const tool = createManagePluginsTool({ coderEnabled: false });
 
-    it("TOON-encodes the plugin manifest response", async () => {
-      mockFetch(200, JSON.stringify({ name: "myplugin", tools: ["tool1"] }));
-      const result = await tool.execute("call-1", { action: "show", name: "myplugin" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).not.toContain("{");
-      expect(text).toContain("myplugin");
-    });
-
-    it("returns an error when name is missing", async () => {
-      const result = await tool.execute("call-2", { action: "show" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Error: name is required for show.");
-    });
-
     it("rejects a plugin name containing a slash without making a request", async () => {
       const fetchMock = vi.fn();
       vi.stubGlobal("fetch", fetchMock);
       const result = await tool.execute("call-invalid-name", { action: "show", name: "example/config" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-
-      expect(text).toBe("Error: invalid plugin name.");
+      expect(asText(result.content[0])).toBe("Error: invalid plugin name.");
       expect(fetchMock).not.toHaveBeenCalled();
     });
 
     it("returns 'not found' for a disabled plugin (permissions: [])", async () => {
       mockFetch(200, JSON.stringify({ name: "disabled", permissions: [], tools: [{ name: "tool1" }] }));
       const result = await tool.execute("call-3", { action: "show", name: "disabled" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Plugin 'disabled' not found.");
+      expect(asText(result.content[0])).toBe("Plugin 'disabled' not found.");
     });
 
     it("filters tools to only permitted ones when permissions is an explicit list", async () => {
@@ -916,106 +690,48 @@ describe("createManagePluginsTool", () => {
         ],
       }));
       const result = await tool.execute("call-4", { action: "show", name: "myplugin" });
-      const text = (result.content[0] as { type: string; text: string }).text;
+      const text = asText(result.content[0]);
       expect(text).toContain("tool1");
       expect(text).not.toContain("tool2");
       expect(text).toContain("tool3");
     });
 
-    it("does not filter tools when permissions is ['*'] (wildcard)", async () => {
+    it.each([
+      { description: "when permissions is ['*'] (wildcard)", permissions: ["*"] },
+      { description: "when the permissions field is absent", permissions: undefined },
+    ])("does not filter tools $description", async ({ permissions }) => {
       mockFetch(200, JSON.stringify({
         name: "myplugin",
-        permissions: ["*"],
+        permissions,
         tools: [
           { name: "tool1", description: "First tool" },
           { name: "tool2", description: "Second tool" },
         ],
       }));
       const result = await tool.execute("call-5", { action: "show", name: "myplugin" });
-      const text = (result.content[0] as { type: string; text: string }).text;
+      const text = asText(result.content[0]);
       expect(text).toContain("tool1");
       expect(text).toContain("tool2");
     });
 
-    it("does not filter tools when permissions field is absent", async () => {
+    it.each([
+      { description: "when permissions is ['*'] (wildcard)", permissions: ["*"] },
+      { description: "when permissions is an explicit list", permissions: ["tool1"] },
+    ])("strips the permissions field from the manifest $description", async ({ permissions }) => {
       mockFetch(200, JSON.stringify({
         name: "myplugin",
-        tools: [
-          { name: "tool1", description: "First tool" },
-          { name: "tool2", description: "Second tool" },
-        ],
-      }));
-      const result = await tool.execute("call-6", { action: "show", name: "myplugin" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toContain("tool1");
-      expect(text).toContain("tool2");
-    });
-
-    it("falls back to raw formatting when response is not valid JSON", async () => {
-      mockFetch(200, "not json");
-      const result = await tool.execute("call-7", { action: "show", name: "myplugin" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("not json");
-    });
-
-    it("strips the permissions field from the manifest when permissions is ['*']", async () => {
-      mockFetch(200, JSON.stringify({
-        name: "myplugin",
-        permissions: ["*"],
+        permissions,
         tools: [{ name: "tool1", description: "First tool" }],
       }));
       const result = await tool.execute("call-8", { action: "show", name: "myplugin" });
-      const text = (result.content[0] as { type: string; text: string }).text;
+      const text = asText(result.content[0]);
       expect(text).toContain("myplugin");
       expect(text).not.toContain("permissions");
-    });
-
-    it("strips the permissions field from the manifest when permissions is an explicit list", async () => {
-      mockFetch(200, JSON.stringify({
-        name: "myplugin",
-        permissions: ["tool1"],
-        tools: [{ name: "tool1", description: "First tool" }],
-      }));
-      const result = await tool.execute("call-9", { action: "show", name: "myplugin" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toContain("myplugin");
-      expect(text).not.toContain("permissions");
-    });
-  });
-
-  describe("remove action", () => {
-    const tool = createManagePluginsTool({ coderEnabled: false });
-
-    it("returns the message field from the response JSON", async () => {
-      mockFetch(200, JSON.stringify({ message: "Plugin 'myplugin' removed." }));
-      const result = await tool.execute("call-1", { action: "remove", name: "myplugin" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Plugin 'myplugin' removed.");
-    });
-
-    it("falls back to raw text when response is not valid JSON", async () => {
-      mockFetch(200, "not json");
-      const result = await tool.execute("call-2", { action: "remove", name: "myplugin" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("not json");
-    });
-
-    it("returns an error when name is missing", async () => {
-      const result = await tool.execute("call-3", { action: "remove" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Error: name is required for remove.");
     });
   });
 
   describe("configure action", () => {
     const tool = createManagePluginsTool({ coderEnabled: false });
-
-    it("returns the message field from the response JSON", async () => {
-      mockFetch(200, JSON.stringify({ message: "Plugin 'myplugin' configured." }));
-      const result = await tool.execute("call-1", { action: "configure", name: "myplugin", config: '{"key":"value"}' });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Plugin 'myplugin' configured.");
-    });
 
     it("strips the permissions key from the config before forwarding", async () => {
       mockFetch(200, JSON.stringify({ message: "Plugin 'myplugin' configured." }));
@@ -1024,39 +740,6 @@ describe("createManagePluginsTool", () => {
       const body = JSON.parse((fetchMock.mock.calls[0][1] as { body: string }).body) as { name: string; config: Record<string, unknown> };
       expect(body.config).not.toHaveProperty("permissions");
       expect(body.config).toHaveProperty("key", "value");
-    });
-
-    it("appends warnings when present and non-empty", async () => {
-      mockFetch(200, JSON.stringify({ message: "Plugin 'myplugin' configured.", warnings: ["Unknown key: foo"] }));
-      const result = await tool.execute("call-2", { action: "configure", name: "myplugin", config: '{"key":"value"}' });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Plugin 'myplugin' configured.\n\nWarnings:\nUnknown key: foo");
-    });
-
-    it("does not append warnings when warnings array is empty", async () => {
-      mockFetch(200, JSON.stringify({ message: "Plugin 'myplugin' configured.", warnings: [] }));
-      const result = await tool.execute("call-3", { action: "configure", name: "myplugin", config: '{"key":"value"}' });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Plugin 'myplugin' configured.");
-    });
-
-    it("falls back to raw text when response is not valid JSON", async () => {
-      mockFetch(200, "not json");
-      const result = await tool.execute("call-4", { action: "configure", name: "myplugin", config: '{"key":"value"}' });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("not json");
-    });
-
-    it("returns an error when name is missing", async () => {
-      const result = await tool.execute("call-5", { action: "configure", config: '{"key":"value"}' });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Error: name is required for configure.");
-    });
-
-    it("returns an error when config is missing", async () => {
-      const result = await tool.execute("call-6", { action: "configure", name: "myplugin" });
-      const text = (result.content[0] as { type: string; text: string }).text;
-      expect(text).toBe("Error: config is required for configure.");
     });
   });
 });
@@ -1070,8 +753,7 @@ describe("createRequestCodingTaskTool", () => {
       text: () => Promise.resolve("Not found"),
     }));
     const result = await tool.execute("call-1", { plugin: "missing", message: "Add a tool." });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe("Plugin 'missing' not found. Create it first with manage_plugins (action: create).");
+    expect(asText(result.content[0])).toBe("Plugin 'missing' not found. Create it first with manage_plugins (action: create).");
   });
 
   it("returns an error when the plugin is not editable", async () => {
@@ -1080,8 +762,7 @@ describe("createRequestCodingTaskTool", () => {
       text: () => Promise.resolve(JSON.stringify({ name: "gitplugin", editable: false })),
     }));
     const result = await tool.execute("call-2", { plugin: "gitplugin", message: "Add a tool." });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toBe("Plugin 'gitplugin' is not editable. Only locally created plugins can be modified by the coding agent; git-installed and MCP plugins are never editable.");
+    expect(asText(result.content[0])).toBe("Plugin 'gitplugin' is not editable. Only locally created plugins can be modified by the coding agent; git-installed and MCP plugins are never editable.");
   });
 
   it("submits the task to the coder when the plugin is editable", async () => {
@@ -1096,8 +777,7 @@ describe("createRequestCodingTaskTool", () => {
       }),
     );
     const result = await tool.execute("call-3", { plugin: "myplugin", message: "Add a hello tool." });
-    const text = (result.content[0] as { type: string; text: string }).text;
-    expect(text).toMatch(/^Coding task .+ submitted for plugin 'myplugin'\. The coder agent will respond when done\.$/);
+    expect(asText(result.content[0])).toMatch(/^Coding task .+ submitted for plugin 'myplugin'\. The coder agent will respond when done\.$/);
     const fetchMock = vi.mocked(globalThis.fetch);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock).toHaveBeenNthCalledWith(

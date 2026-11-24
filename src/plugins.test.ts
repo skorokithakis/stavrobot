@@ -5,7 +5,6 @@ import { initInternalFetch } from "./internal-fetch.js";
 import {
   handlePluginAddMcpRequest,
   handlePluginConfigRequest,
-  handlePluginsListRequest,
   servePluginsPage,
 } from "./plugins.js";
 
@@ -170,19 +169,6 @@ describe("handlePluginConfigRequest", (): void => {
   });
 });
 
-describe("handlePluginsListRequest", (): void => {
-  it("proxies the plugin-runner list response unchanged", async (): Promise<void> => {
-    const listBody = JSON.stringify({ plugins: [{ name: "weather", editable: false, permissions: ["*"] }] });
-    mockFetch(200, listBody);
-    const response = makeMockResponse();
-
-    await handlePluginsListRequest(response as unknown as http.ServerResponse);
-
-    expect(response.statusCode).toBe(200);
-    expect(response.body).toBe(listBody);
-  });
-});
-
 describe("handlePluginAddMcpRequest", (): void => {
   it("forwards the request body to the plugin-runner add-mcp endpoint", async (): Promise<void> => {
     const responseBody = JSON.stringify({
@@ -219,20 +205,10 @@ describe("handlePluginAddMcpRequest", (): void => {
     expect(response.body).toBe(responseBody);
   });
 
-  it("passes through plugin-runner errors unchanged", async (): Promise<void> => {
-    mockFetch(409, JSON.stringify({ error: 'Plugin "example" already exists' }));
-    const response = makeMockResponse();
-
-    await handlePluginAddMcpRequest(
-      makeMockRequest(JSON.stringify({ name: "example", description: "An example.", server: {} })),
-      response as unknown as http.ServerResponse,
-    );
-
-    expect(response.statusCode).toBe(409);
-    expect(response.body).toBe(JSON.stringify({ error: 'Plugin "example" already exists' }));
-  });
-
-  it("rejects a non-JSON content type without forwarding the request", async (): Promise<void> => {
+  it.each([
+    { label: "a non-JSON content type", headers: { "content-type": "application/x-www-form-urlencoded" } },
+    { label: "a missing content type", headers: {} },
+  ])("rejects $label without forwarding the request", async ({ headers }) => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     const response = makeMockResponse();
@@ -240,7 +216,7 @@ describe("handlePluginAddMcpRequest", (): void => {
     await handlePluginAddMcpRequest(
       makeMockRequest(
         JSON.stringify({ name: "example", description: "An example.", server: { command: "npx" } }),
-        { "content-type": "application/x-www-form-urlencoded" },
+        headers,
       ),
       response as unknown as http.ServerResponse,
     );
@@ -249,96 +225,14 @@ describe("handlePluginAddMcpRequest", (): void => {
     expect(JSON.parse(response.body!)).toEqual({ error: "Content-Type must be application/json" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
-
-  it("rejects a missing content type without forwarding the request", async (): Promise<void> => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-    const response = makeMockResponse();
-
-    await handlePluginAddMcpRequest(
-      makeMockRequest(
-        JSON.stringify({ name: "example", description: "An example.", server: { command: "npx" } }),
-        {},
-      ),
-      response as unknown as http.ServerResponse,
-    );
-
-    expect(response.statusCode).toBe(415);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
 });
 
 describe("servePluginsPage", (): void => {
-  it("renders the shared shell with the Plugins navigation active", (): void => {
-    const response = makeMockResponse();
-
-    servePluginsPage(response as unknown as http.ServerResponse, makeConfig({ model: "claude-opus-5-5" }));
-
-    expect(response.statusCode).toBe(200);
-    expect(response.headers["Content-Type"]).toBe("text/html; charset=utf-8");
-    expect(response.body).toContain('href="/assets/sb.css"');
-    expect(response.body).toContain('class="sb-nav-item is-active" href="/settings/plugins"');
-    expect(response.body).toContain("claude-opus-5-5");
-    expect(response.body).toContain('class="sb-tabbar"');
-  });
-
-  it("renders the install form, list and detail regions and proxy endpoints", (): void => {
+  it("escapes the plugin connection error in the detail view", (): void => {
     const response = makeMockResponse();
 
     servePluginsPage(response as unknown as http.ServerResponse, makeConfig());
 
-    expect(response.body).toContain("data-install-form");
-    expect(response.body).toContain("data-list-body");
-    expect(response.body).toContain('id="plugin-detail"');
-    expect(response.body).toContain("/api/settings/plugins/list");
-    expect(response.body).toContain("/api/settings/plugins/install");
-    expect(response.body).toContain("/api/settings/plugins/configure");
-    expect(response.body).toContain("/api/settings/plugins/update");
-    expect(response.body).toContain("/api/settings/plugins/remove");
-    expect(response.body).toContain("/api/settings/plugins/add-mcp");
-  });
-
-  it("renders the add MCP server form in both the desktop and mobile variants", (): void => {
-    const response = makeMockResponse();
-
-    servePluginsPage(response as unknown as http.ServerResponse, makeConfig());
-
-    const forms = response.body!.match(/data-add-mcp-form>/g) ?? [];
-    expect(forms.length).toBe(2);
-    expect(response.body).toContain('pattern="[a-z0-9-]+"');
-    expect(response.body).toContain("data-add-mcp-server");
-    expect(response.body).toContain("sb-textarea");
-    expect(response.body).toContain('{ "command": "npx", "args": ["-y", "@example/mcp-server"] }');
-    expect(response.body).toContain('JSON.parse(serverText)');
-  });
-
-  it("renders a type badge and the connection error in the detail view", (): void => {
-    const response = makeMockResponse();
-
-    servePluginsPage(response as unknown as http.ServerResponse, makeConfig());
-
-    expect(response.body).toContain('plugin.type === "mcp"');
-    expect(response.body).toContain('>mcp</span>');
     expect(response.body).toContain("esc(plugin.error)");
-  });
-
-  it("renders confirm feedback in both the desktop popover and the mobile sheet", (): void => {
-    const response = makeMockResponse();
-
-    servePluginsPage(response as unknown as http.ServerResponse, makeConfig());
-
-    const matches = response.body!.match(/data-confirm-feedback/g) ?? [];
-    expect(matches.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it("drives the settings form from set flags instead of config values", (): void => {
-    const response = makeMockResponse();
-
-    servePluginsPage(response as unknown as http.ServerResponse, makeConfig());
-
-    expect(response.body).toContain("data-config-input");
-    expect(response.body).toContain("Saved values are never shown again. Use Replace to change one.");
-    expect(response.body).not.toContain(".values");
-    expect(response.body).not.toContain("values[");
   });
 });

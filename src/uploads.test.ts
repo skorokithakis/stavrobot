@@ -90,35 +90,38 @@ function makeMultipartRequest(
 }
 
 describe("saveAttachment", () => {
-  it("writes the buffer to disk and returns the correct path and filename", async () => {
-    const data = Buffer.from("test file contents");
-    const { storedPath, storedFilename } = await saveAttachment(data, "example.txt", "text/plain");
+  it.each([
+    {
+      label: "an extension",
+      data: Buffer.from("test file contents"),
+      filename: "example.txt",
+      mimeType: "text/plain",
+      storedFilenamePattern: /^upload-.+\.txt$/,
+    },
+    {
+      label: "the original extension",
+      data: Buffer.from("image data"),
+      filename: "photo.png",
+      mimeType: "image/png",
+      storedFilenamePattern: /^upload-.+\.png$/,
+    },
+    {
+      label: "a filename with no extension",
+      data: Buffer.from("no extension"),
+      filename: "noext",
+      mimeType: "application/octet-stream",
+      storedFilenamePattern: /^upload-[^.]+$/,
+    },
+  ])("writes the buffer to disk and preserves $label", async ({ data, filename, mimeType, storedFilenamePattern }) => {
+    const { storedPath, storedFilename } = await saveAttachment(data, filename, mimeType);
 
-    expect(storedFilename).toMatch(/^upload-.+\.txt$/);
+    expect(storedFilename).toMatch(storedFilenamePattern);
     expect(storedPath).toContain(storedFilename);
 
     const written = await fs.promises.readFile(storedPath);
     expect(written).toEqual(data);
 
     // Clean up the file created during the test.
-    await fs.promises.unlink(storedPath);
-  });
-
-  it("preserves the file extension from the original filename", async () => {
-    const data = Buffer.from("image data");
-    const { storedFilename, storedPath } = await saveAttachment(data, "photo.png", "image/png");
-
-    expect(storedFilename).toMatch(/^upload-.+\.png$/);
-
-    await fs.promises.unlink(storedPath);
-  });
-
-  it("handles filenames with no extension", async () => {
-    const data = Buffer.from("no extension");
-    const { storedFilename, storedPath } = await saveAttachment(data, "noext", "application/octet-stream");
-
-    expect(storedFilename).toMatch(/^upload-[^.]+$/);
-
     await fs.promises.unlink(storedPath);
   });
 });

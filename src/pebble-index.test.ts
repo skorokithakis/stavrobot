@@ -135,32 +135,33 @@ describe("handlePebbleIndexWebhookRequest", () => {
     });
   });
 
-  it("returns 400 when no transcription or audio is provided", async () => {
-    const response = await submit(baseFields);
+  it.each([
+    {
+      label: "no transcription or audio is provided",
+      parts: baseFields,
+      error: "Missing transcription or audio",
+    },
+    {
+      label: "client is missing",
+      parts: [
+        { name: "recordedAt", value: recordedAt },
+        { name: "transcription", value: "Take out the trash." },
+      ],
+      error: "Missing client",
+    },
+    {
+      label: "recordedAt is missing",
+      parts: [
+        { name: "client", value: "ring" },
+        { name: "transcription", value: "Take out the trash." },
+      ],
+      error: "Missing recordedAt",
+    },
+  ])("returns 400 when $label", async ({ parts, error }) => {
+    const response = await submit(parts);
 
     expect(response.statusCode).toBe(400);
-    expect(enqueueMessage).not.toHaveBeenCalled();
-  });
-
-  it("returns 400 when client is missing", async () => {
-    const response = await submit([
-      { name: "recordedAt", value: recordedAt },
-      { name: "transcription", value: "Take out the trash." },
-    ]);
-
-    expect(response.statusCode).toBe(400);
-    expect(response.body).toBe(JSON.stringify({ error: "Missing client" }));
-    expect(enqueueMessage).not.toHaveBeenCalled();
-  });
-
-  it("returns 400 when recordedAt is missing", async () => {
-    const response = await submit([
-      { name: "client", value: "ring" },
-      { name: "transcription", value: "Take out the trash." },
-    ]);
-
-    expect(response.statusCode).toBe(400);
-    expect(response.body).toBe(JSON.stringify({ error: "Missing recordedAt" }));
+    expect(response.body).toBe(JSON.stringify({ error }));
     expect(enqueueMessage).not.toHaveBeenCalled();
   });
 });

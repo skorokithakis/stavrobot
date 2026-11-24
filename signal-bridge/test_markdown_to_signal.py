@@ -19,14 +19,17 @@ if not hasattr(mistune, "create_markdown"):
 from markdown_to_signal import convert_markdown  # noqa: E402
 
 
-def test_bracketed_email_is_plain_text() -> None:
+@pytest.mark.parametrize(
+    "markdown, expected",
+    [
+        ("<user@example.com>", ("<user@example.com>", [])),
+        ("Name <user@example.com>", ("Name <user@example.com>", [])),
+    ],
+    ids=["bare", "after-text"],
+)
+def test_bracketed_email_is_plain_text(markdown: str, expected: tuple[str, list[str]]) -> None:
     """A bracketed email survives verbatim instead of becoming a mailto link."""
-    assert convert_markdown("<user@example.com>") == ("<user@example.com>", [])
-
-
-def test_bracketed_email_after_text_is_plain_text() -> None:
-    """A bracketed email keeps its surrounding text intact."""
-    assert convert_markdown("Name <user@example.com>") == ("Name <user@example.com>", [])
+    assert convert_markdown(markdown) == expected
 
 
 def test_mailto_link_keeps_url() -> None:
@@ -42,24 +45,27 @@ def test_url_autolink_has_no_brackets() -> None:
     assert convert_markdown("<https://example.com>") == ("https://example.com", [])
 
 
-def test_inline_html_is_plain_text() -> None:
+@pytest.mark.parametrize(
+    "markdown, expected",
+    [
+        ("Name <foo>", ("Name <foo>", [])),
+        ("a <br> b", ("a <br> b", [])),
+    ],
+    ids=["bare", "between-text"],
+)
+def test_inline_html_is_plain_text(markdown: str, expected: tuple[str, list[str]]) -> None:
     """Unknown inline HTML tags are passed through verbatim."""
-    assert convert_markdown("Name <foo>") == ("Name <foo>", [])
+    assert convert_markdown(markdown) == expected
 
 
-def test_inline_html_between_text_is_plain_text() -> None:
-    """Inline HTML stays in place between the surrounding text."""
-    assert convert_markdown("a <br> b") == ("a <br> b", [])
-
-
-def test_block_html_is_plain_text() -> None:
+@pytest.mark.parametrize(
+    "markdown, expected",
+    [
+        ("<div>hi</div>\n\nnext", ("<div>hi</div>\n\nnext", [])),
+        ("- <div>hi</div>\n- **next**", ("- <div>hi</div>\n- next", ["18:4:BOLD"])),
+    ],
+    ids=["block", "list-item"],
+)
+def test_block_html_is_plain_text(markdown: str, expected: tuple[str, list[str]]) -> None:
     """Block HTML is passed through with paragraph-style blank line separation."""
-    assert convert_markdown("<div>hi</div>\n\nnext") == ("<div>hi</div>\n\nnext", [])
-
-
-def test_block_html_list_item_keeps_marker() -> None:
-    """A list item starting with block HTML keeps its marker and surrounding layout."""
-    assert convert_markdown("- <div>hi</div>\n- **next**") == (
-        "- <div>hi</div>\n- next",
-        ["18:4:BOLD"],
-    )
+    assert convert_markdown(markdown) == expected

@@ -10,121 +10,90 @@ import {
 import type { CallToolResult, Tool } from "@modelcontextprotocol/client";
 
 describe("validateMcpServerSpec", () => {
-  it("accepts a minimal stdio spec", () => {
-    expect(validateMcpServerSpec({ command: "npx" })).toBeNull();
+  const acceptedSpecs: Array<[string, unknown]> = [
+    ["a minimal stdio spec", { command: "npx" }],
+    [
+      "a stdio spec with args and env",
+      { command: "npx", args: ["-y", "@example/mcp-server"], env: { API_KEY: "secret" } },
+    ],
+    [
+      "a Claude Desktop stdio spec with a type key",
+      { type: "stdio", command: "npx", args: ["-y", "@example/mcp-server"] },
+    ],
+    ["a minimal streamable HTTP spec", { url: "https://example.com/mcp" }],
+    ["a streamable HTTP spec with a type key", { type: "http", url: "https://example.com/mcp" }],
+    [
+      "a streamable HTTP spec with headers",
+      { url: "https://example.com/mcp", headers: { Authorization: "Bearer token" } },
+    ],
+    ["an env key that is a valid variable name", { command: "npx", env: { _OK_1: "x" } }],
+    [
+      "a header name that is an HTTP token",
+      { url: "https://example.com/mcp", headers: { "X-Custom.Header_1~": "x" } },
+    ],
+  ];
+
+  it.each(acceptedSpecs)("accepts %s", (_description, spec) => {
+    expect(validateMcpServerSpec(spec)).toBeNull();
   });
 
-  it("accepts a stdio spec with args and env", () => {
-    expect(
-      validateMcpServerSpec({
-        command: "npx",
-        args: ["-y", "@example/mcp-server"],
-        env: { API_KEY: "secret" },
-      })
-    ).toBeNull();
-  });
+  const rejectedSpecs: Array<[string, unknown, string | null]> = [
+    ["a type key with any other value", { type: "sse", url: "https://example.com/mcp" }, "'type' must be"],
+    ["a non-string type key", { type: 42, command: "npx" }, "'type' must be"],
+    ["null", null, null],
+    ["a string", "npx", null],
+    ["a number", 42, null],
+    ["an empty array", [], null],
+    ["an array of strings", ["npx"], null],
+    ["a spec with both command and url", { command: "npx", url: "https://example.com/mcp" }, "not both"],
+    ["a spec with neither command nor url", { args: [] }, "'command' field"],
+    ["unknown fields", { command: "npx", cwd: "/tmp" }, "Unknown server spec fields: cwd"],
+    ["a command key that is undefined", { url: "https://example.com/mcp", command: undefined }, null],
+    ["an empty command", { command: "" }, null],
+    ["a non-string command", { command: 42 }, null],
+    ["a non-string args element", { command: "npx", args: [1] }, null],
+    ["a non-array args value", { command: "npx", args: "oops" }, null],
+    ["a non-string env value", { command: "npx", env: { A: 1 } }, null],
+    ["a non-object env value", { command: "npx", env: ["A"] }, null],
+    [
+      "an env key starting with a digit",
+      { command: "npx", env: { "1BAD": "x" } },
+      "not a valid environment variable name",
+    ],
+    [
+      "an env key containing a dash",
+      { command: "npx", env: { "BAD-KEY": "x" } },
+      "not a valid environment variable name",
+    ],
+    [
+      "an env key containing a space",
+      { command: "npx", env: { "A B": "x" } },
+      "not a valid environment variable name",
+    ],
+    ["a url that is not a URL", { url: "not a url" }, "valid URL"],
+    ["a non-HTTP url", { url: "ftp://example.com/mcp" }, "http"],
+    ["a non-string url", { url: 42 }, null],
+    ["a non-string header value", { url: "https://example.com/mcp", headers: { A: 1 } }, null],
+    ["a non-object headers value", { url: "https://example.com/mcp", headers: "A" }, null],
+    [
+      "a header name containing a space",
+      { url: "https://example.com/mcp", headers: { "Bad Header": "x" } },
+      "header name",
+    ],
+    [
+      "a header name containing a colon",
+      { url: "https://example.com/mcp", headers: { "Bad:Name": "x" } },
+      "header name",
+    ],
+  ];
 
-  it("accepts a Claude Desktop stdio spec with a type key", () => {
-    expect(
-      validateMcpServerSpec({
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@example/mcp-server"],
-      })
-    ).toBeNull();
-  });
-
-  it("accepts a minimal streamable HTTP spec", () => {
-    expect(validateMcpServerSpec({ url: "https://example.com/mcp" })).toBeNull();
-  });
-
-  it("accepts a streamable HTTP spec with a type key", () => {
-    expect(validateMcpServerSpec({ type: "http", url: "https://example.com/mcp" })).toBeNull();
-  });
-
-  it("rejects a type key with any other value", () => {
-    expect(validateMcpServerSpec({ type: "sse", url: "https://example.com/mcp" })).toContain(
-      "'type' must be"
-    );
-    expect(validateMcpServerSpec({ type: 42, command: "npx" })).toContain("'type' must be");
-  });
-
-  it("accepts a streamable HTTP spec with headers", () => {
-    expect(
-      validateMcpServerSpec({
-        url: "https://example.com/mcp",
-        headers: { Authorization: "Bearer token" },
-      })
-    ).toBeNull();
-  });
-
-  it("rejects non-objects", () => {
-    for (const value of [null, "npx", 42, [], ["npx"]]) {
-      expect(validateMcpServerSpec(value)).not.toBeNull();
+  it.each(rejectedSpecs)("rejects %s", (_description, spec, expectedMessage) => {
+    const message = validateMcpServerSpec(spec);
+    if (expectedMessage === null) {
+      expect(message).not.toBeNull();
+    } else {
+      expect(message).toContain(expectedMessage);
     }
-  });
-
-  it("rejects a spec with both command and url", () => {
-    expect(
-      validateMcpServerSpec({ command: "npx", url: "https://example.com/mcp" })
-    ).toContain("not both");
-  });
-
-  it("rejects a spec with neither command nor url", () => {
-    expect(validateMcpServerSpec({ args: [] })).toContain("'command' field");
-  });
-
-  it("rejects unknown fields", () => {
-    expect(validateMcpServerSpec({ command: "npx", cwd: "/tmp" })).toContain("Unknown server spec fields: cwd");
-    expect(validateMcpServerSpec({ url: "https://example.com/mcp", command: undefined })).not.toBeNull();
-  });
-
-  it("rejects an empty or non-string command", () => {
-    expect(validateMcpServerSpec({ command: "" })).not.toBeNull();
-    expect(validateMcpServerSpec({ command: 42 })).not.toBeNull();
-  });
-
-  it("rejects malformed args and env", () => {
-    expect(validateMcpServerSpec({ command: "npx", args: [1] })).not.toBeNull();
-    expect(validateMcpServerSpec({ command: "npx", args: "oops" })).not.toBeNull();
-    expect(validateMcpServerSpec({ command: "npx", env: { A: 1 } })).not.toBeNull();
-    expect(validateMcpServerSpec({ command: "npx", env: ["A"] })).not.toBeNull();
-  });
-
-  it("rejects env keys that are not valid variable names", () => {
-    expect(validateMcpServerSpec({ command: "npx", env: { "1BAD": "x" } })).toContain(
-      "not a valid environment variable name"
-    );
-    expect(validateMcpServerSpec({ command: "npx", env: { "BAD-KEY": "x" } })).toContain(
-      "not a valid environment variable name"
-    );
-    expect(validateMcpServerSpec({ command: "npx", env: { "A B": "x" } })).toContain(
-      "not a valid environment variable name"
-    );
-    expect(validateMcpServerSpec({ command: "npx", env: { _OK_1: "x" } })).toBeNull();
-  });
-
-  it("rejects invalid or non-HTTP urls", () => {
-    expect(validateMcpServerSpec({ url: "not a url" })).toContain("valid URL");
-    expect(validateMcpServerSpec({ url: "ftp://example.com/mcp" })).toContain("http");
-    expect(validateMcpServerSpec({ url: 42 })).not.toBeNull();
-  });
-
-  it("rejects malformed headers", () => {
-    expect(validateMcpServerSpec({ url: "https://example.com/mcp", headers: { A: 1 } })).not.toBeNull();
-    expect(validateMcpServerSpec({ url: "https://example.com/mcp", headers: "A" })).not.toBeNull();
-  });
-
-  it("rejects header names that are not HTTP tokens", () => {
-    expect(
-      validateMcpServerSpec({ url: "https://example.com/mcp", headers: { "Bad Header": "x" } })
-    ).toContain("header name");
-    expect(
-      validateMcpServerSpec({ url: "https://example.com/mcp", headers: { "Bad:Name": "x" } })
-    ).toContain("header name");
-    expect(
-      validateMcpServerSpec({ url: "https://example.com/mcp", headers: { "X-Custom.Header_1~": "x" } })
-    ).toBeNull();
   });
 
   it("rejects header values containing CR or LF without echoing them", () => {
@@ -157,22 +126,18 @@ describe("validateMcpServerSpec", () => {
 });
 
 describe("parseMcpServerSpec", () => {
-  it("parses the object form", () => {
-    expect(parseMcpServerSpec({ command: "npx" })).toEqual({ command: "npx" });
+  it.each<[string, unknown, unknown]>([
+    ["the object form", { command: "npx" }, { command: "npx" }],
+    ["a string containing JSON", '{"url":"https://example.com/mcp"}', { url: "https://example.com/mcp" }],
+  ])("parses %s", (_description, input, expected) => {
+    expect(parseMcpServerSpec(input)).toEqual(expected);
   });
 
-  it("parses a string containing JSON", () => {
-    expect(parseMcpServerSpec('{"url":"https://example.com/mcp"}')).toEqual({
-      url: "https://example.com/mcp",
-    });
-  });
-
-  it("throws for an invalid spec", () => {
-    expect(() => parseMcpServerSpec({})).toThrow("'command' field");
-  });
-
-  it("throws a fixed message for a string that is not JSON", () => {
-    expect(() => parseMcpServerSpec("npx")).toThrow("'server' is not valid JSON");
+  it.each<[string, unknown, string]>([
+    ["an invalid spec", {}, "'command' field"],
+    ["a string that is not JSON", "npx", "'server' is not valid JSON"],
+  ])("throws for %s", (_description, input, expectedMessage) => {
+    expect(() => parseMcpServerSpec(input)).toThrow(expectedMessage);
   });
 
   it("does not echo the input in the JSON parse error", () => {

@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, type MockedFunction, beforeEach } from "vitest";
 import type { Agent, AgentMessage, AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import type { JsonObject } from "@earendil-works/pi-ai";
 import { complete } from "@earendil-works/pi-ai/compat";
 import type { Pool } from "pg";
-import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool, createManageCronTool, injectAutoSearchBlock, pendingAutoSearchBlocks, handlePrompt, createAgent, escalatingSummarize, selectCompactionCutIndex, isTurnBoundary, triggerCompactionIfNeeded, formatUserMessage, CHARS_PER_TOKEN, COMPACTION_THRESHOLD_FRACTION, LEVEL3_MAX_OUTPUT_FRACTION } from "./agent/index.js";
+import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool, injectAutoSearchBlock, pendingAutoSearchBlocks, handlePrompt, createAgent, escalatingSummarize, selectCompactionCutIndex, isTurnBoundary, triggerCompactionIfNeeded, formatUserMessage, CHARS_PER_TOKEN, COMPACTION_THRESHOLD_FRACTION, LEVEL3_MAX_OUTPUT_FRACTION } from "./agent/index.js";
 import { getApiKey } from "./auth.js";
 import { loadMessages, loadAllMemories, loadAllScratchpadTitles, getMainAgentId, saveMessage, loadAgent, loadLatestCompaction, saveCompaction, isOwnerIdentity } from "./database.js";
 import { runSearch } from "./search.js";
@@ -277,100 +278,47 @@ function toolResultMessage(toolName: string, text: string): AgentMessage {
 }
 
 describe("serializeMessagesForSummary", () => {
-  it("serializes a plain user message", () => {
-    const messages: AgentMessage[] = [
-      { role: "user", content: "Hello there", timestamp: 0 },
-    ];
-    expect(serializeMessagesForSummary(messages)).toBe("User: Hello there");
-  });
+  interface ToolCallArgumentCase {
+    label: string;
+    toolName: string;
+    arguments: JsonObject;
+    expected: string;
+  }
 
-  it("serializes an assistant text-only message", () => {
-    const messages: AgentMessage[] = [
-      assistantMessage([{ type: "text", text: "Hi!" }]),
-    ];
-    expect(serializeMessagesForSummary(messages)).toBe("Assistant: Hi!");
-  });
+  const toolCallArgumentCases: ToolCallArgumentCase[] = [
+    {
+      label: "string arguments",
+      toolName: "send_signal_message",
+      arguments: { recipient: "+1234567890", message: "Hello!" },
+      expected: `Assistant called send_signal_message(recipient="+1234567890", message="Hello!")`,
+    },
+    {
+      label: "number and boolean arguments",
+      toolName: "some_tool",
+      arguments: { count: 42, enabled: true, disabled: false },
+      expected: "Assistant called some_tool(count=42, enabled=true, disabled=false)",
+    },
+    {
+      label: "a null argument",
+      toolName: "some_tool",
+      arguments: { value: null },
+      expected: "Assistant called some_tool(value=null)",
+    },
+    {
+      label: "an object argument",
+      toolName: "execute_sql",
+      arguments: { query: "SELECT 1", options: { timeout: 5000 } },
+      expected: `Assistant called execute_sql(query="SELECT 1", options={"timeout":5000})`,
+    },
+  ];
 
-  it("serializes a tool call with string arguments", () => {
+  it.each(toolCallArgumentCases)("serializes a tool call with $label", ({ toolName, arguments: toolArguments, expected }) => {
     const messages: AgentMessage[] = [
       assistantMessage([
-        {
-          type: "toolCall",
-          id: "tc1",
-          name: "send_signal_message",
-          arguments: { recipient: "+1234567890", message: "Hello!" },
-        },
+        { type: "toolCall", id: "tc1", name: toolName, arguments: toolArguments },
       ]),
     ];
-    expect(serializeMessagesForSummary(messages)).toBe(
-      `Assistant called send_signal_message(recipient="+1234567890", message="Hello!")`,
-    );
-  });
-
-  it("serializes a tool call with number and boolean arguments without quotes", () => {
-    const messages: AgentMessage[] = [
-      assistantMessage([
-        {
-          type: "toolCall",
-          id: "tc2",
-          name: "some_tool",
-          arguments: { count: 42, enabled: true, disabled: false },
-        },
-      ]),
-    ];
-    expect(serializeMessagesForSummary(messages)).toBe(
-      "Assistant called some_tool(count=42, enabled=true, disabled=false)",
-    );
-  });
-
-  it("serializes a tool call with null argument without quotes", () => {
-    const messages: AgentMessage[] = [
-      assistantMessage([
-        {
-          type: "toolCall",
-          id: "tc3",
-          name: "some_tool",
-          arguments: { value: null },
-        },
-      ]),
-    ];
-    expect(serializeMessagesForSummary(messages)).toBe(
-      "Assistant called some_tool(value=null)",
-    );
-  });
-
-  it("serializes a tool call with an object argument using JSON.stringify", () => {
-    const messages: AgentMessage[] = [
-      assistantMessage([
-        {
-          type: "toolCall",
-          id: "tc4",
-          name: "execute_sql",
-          arguments: { query: "SELECT 1", options: { timeout: 5000 } },
-        },
-      ]),
-    ];
-    expect(serializeMessagesForSummary(messages)).toBe(
-      `Assistant called execute_sql(query="SELECT 1", options={"timeout":5000})`,
-    );
-  });
-
-  it("emits tool call lines after the assistant text line when both are present", () => {
-    const messages: AgentMessage[] = [
-      assistantMessage([
-        { type: "text", text: "Sending now." },
-        {
-          type: "toolCall",
-          id: "tc5",
-          name: "send_signal_message",
-          arguments: { recipient: "+1", message: "Hi" },
-        },
-      ]),
-    ];
-    const result = serializeMessagesForSummary(messages);
-    expect(result).toBe(
-      `Assistant: Sending now.\nAssistant called send_signal_message(recipient="+1", message="Hi")`,
-    );
+    expect(serializeMessagesForSummary(messages)).toBe(expected);
   });
 
   it("emits one line per tool call when multiple tool calls are present", () => {
@@ -393,15 +341,6 @@ describe("serializeMessagesForSummary", () => {
     const result = serializeMessagesForSummary(messages);
     expect(result).toBe(
       `Assistant called tool_a(x="foo")\nAssistant called tool_b(y=1)`,
-    );
-  });
-
-  it("serializes a tool result message", () => {
-    const messages: AgentMessage[] = [
-      toolResultMessage("execute_sql", "1 row returned"),
-    ];
-    expect(serializeMessagesForSummary(messages)).toBe(
-      "Tool result (execute_sql): 1 row returned",
     );
   });
 
@@ -456,16 +395,14 @@ describe("filterToolsForSubagent", () => {
     expect(result.map((t) => t.name)).toEqual(["execute_sql"]);
   });
 
-  it("excludes send_agent_message even when allowedTools lists it", () => {
+  it.each([
+    { label: "allowedTools lists it", allowedTools: ["execute_sql", "send_agent_message"], expected: ["execute_sql"] },
+    { label: "it is the only allowed tool", allowedTools: ["send_agent_message"], expected: [] },
+    { label: "allowedTools is empty", allowedTools: [], expected: [] },
+  ])("excludes send_agent_message when $label", ({ allowedTools, expected }) => {
     const tools = [makeTool("execute_sql"), makeTool("send_agent_message")];
-    const result = filterToolsForSubagent(tools, ["execute_sql", "send_agent_message"], []);
-    expect(result.map((t) => t.name)).toEqual(["execute_sql"]);
-  });
-
-  it("excludes send_agent_message when it is the only allowed tool", () => {
-    const tools = [makeTool("execute_sql"), makeTool("send_agent_message")];
-    const result = filterToolsForSubagent(tools, ["send_agent_message"], []);
-    expect(result).toHaveLength(0);
+    const result = filterToolsForSubagent(tools, allowedTools, []);
+    expect(result.map((t) => t.name)).toEqual(expected);
   });
 
   it("includes a tool as-is when a bare name is given", async () => {
@@ -518,24 +455,14 @@ describe("filterToolsForSubagent", () => {
     expect(included).toBe(tool);
   });
 
-  it("rejects calls with no action param when tool is action-scoped", async () => {
+  it.each([
+    { label: "no action param", params: { query: "SELECT 1" } },
+    { label: "action: undefined", params: { action: undefined } },
+  ])("rejects calls with $label when tool is action-scoped", async ({ params }) => {
     const tool = makeTool("some_tool");
     const result = filterToolsForSubagent([tool], ["some_tool.list"], []);
     const wrapped = result.find((t) => t.name === "some_tool");
-    // No action field in params: should be rejected, not delegated.
-    const response = await wrapped!.execute("id1", { query: "SELECT 1" }) as AgentToolResult<{ message: string }>;
-    expect(response.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("requires an action parameter") });
-    expect(response.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("some_tool") });
-    expect(response.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("list") });
-    expect(tool.execute).not.toHaveBeenCalled();
-  });
-
-  it("rejects calls with action: undefined when tool is action-scoped", async () => {
-    const tool = makeTool("some_tool");
-    const result = filterToolsForSubagent([tool], ["some_tool.list"], []);
-    const wrapped = result.find((t) => t.name === "some_tool");
-    // Explicit action: undefined should also be rejected.
-    const response = await wrapped!.execute("id1", { action: undefined }) as AgentToolResult<{ message: string }>;
+    const response = await wrapped!.execute("id1", params) as AgentToolResult<{ message: string }>;
     expect(response.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("requires an action parameter") });
     expect(response.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("some_tool") });
     expect(response.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("list") });
@@ -544,12 +471,6 @@ describe("filterToolsForSubagent", () => {
 
   it("returns an empty list when allowed list is empty", () => {
     const tools = [makeTool("execute_sql"), makeTool("manage_cron")];
-    const result = filterToolsForSubagent(tools, [], []);
-    expect(result).toHaveLength(0);
-  });
-
-  it("excludes send_agent_message when allowed list is empty", () => {
-    const tools = [makeTool("execute_sql"), makeTool("send_agent_message")];
     const result = filterToolsForSubagent(tools, [], []);
     expect(result).toHaveLength(0);
   });
@@ -568,15 +489,6 @@ describe("filterToolsForSubagent", () => {
     expect(result[0]).toBe(manageKnowledge);
   });
 
-  it("error message lists allowed actions sorted alphabetically", async () => {
-    const tool = makeTool("manage_interlocutors");
-    const result = filterToolsForSubagent([tool], ["manage_interlocutors.update", "manage_interlocutors.list"], []);
-    const wrapped = result.find((t) => t.name === "manage_interlocutors");
-    const response = await wrapped!.execute("id1", { action: "delete" }) as AgentToolResult<{ message: string }>;
-    const text = (response.content[0] as { type: string; text: string }).text;
-    expect(text).toContain("list, update");
-  });
-
   it("wrapped tool description includes restriction notice with sorted actions", () => {
     const tool = makeTool("manage_interlocutors");
     const result = filterToolsForSubagent([tool], ["manage_interlocutors.update", "manage_interlocutors.list"], []);
@@ -584,24 +496,14 @@ describe("filterToolsForSubagent", () => {
     expect(wrapped!.description).toBe("Tool manage_interlocutors (Restricted to actions: list, update.)");
   });
 
-  it("unwrapped tool (bare name entry) has its original description unchanged", () => {
-    const tool = makeTool("manage_interlocutors");
-    const result = filterToolsForSubagent([tool], ["manage_interlocutors"], []);
-    const included = result.find((t) => t.name === "manage_interlocutors");
-    expect(included!.description).toBe("Tool manage_interlocutors");
-  });
-
   // run_plugin_tool enforcement via allowedPlugins
 
-  it("excludes run_plugin_tool when allowedPlugins is empty", () => {
+  it.each([
+    { label: "allowedTools is empty", allowedTools: [] },
+    { label: "it appears in allowedTools", allowedTools: ["run_plugin_tool"] },
+  ])("excludes run_plugin_tool when allowedPlugins is empty and $label", ({ allowedTools }) => {
     const tools = [makeTool("run_plugin_tool"), makeTool("send_agent_message")];
-    const result = filterToolsForSubagent(tools, [], []);
-    expect(result.map((t) => t.name)).not.toContain("run_plugin_tool");
-  });
-
-  it("excludes run_plugin_tool even when it appears in allowedTools (allowedPlugins is empty)", () => {
-    const tools = [makeTool("run_plugin_tool"), makeTool("send_agent_message")];
-    const result = filterToolsForSubagent(tools, ["run_plugin_tool"], []);
+    const result = filterToolsForSubagent(tools, allowedTools, []);
     expect(result.map((t) => t.name)).not.toContain("run_plugin_tool");
   });
 
@@ -692,40 +594,6 @@ describe("filterToolsForSubagent", () => {
 });
 
 describe("formatPluginListSection", () => {
-  it("formats a list of plugins without tool details", () => {
-    const plugins = [
-      { name: "hackernews", description: "Hacker News integration" },
-      { name: "weather", description: "Weather forecasts" },
-    ];
-    const result = formatPluginListSection(plugins);
-    expect(result).toBe(
-      "Available plugins:\n- hackernews: Hacker News integration\n- weather: Weather forecasts",
-    );
-  });
-
-  it("includes tool names when toolDetails is provided", () => {
-    const plugins = [{ name: "hackernews", description: "Hacker News integration" }];
-    const toolDetails = new Map([["hackernews", ["get_front_page", "get_comments"]]]);
-    const result = formatPluginListSection(plugins, toolDetails);
-    expect(result).toBe(
-      "Available plugins:\n- hackernews: Hacker News integration\n  Tools: get_front_page, get_comments",
-    );
-  });
-
-  it("omits the Tools line when the plugin has no tools in toolDetails", () => {
-    const plugins = [{ name: "hackernews", description: "Hacker News integration" }];
-    const toolDetails = new Map([["hackernews", [] as string[]]]);
-    const result = formatPluginListSection(plugins, toolDetails);
-    expect(result).toBe("Available plugins:\n- hackernews: Hacker News integration");
-  });
-
-  it("omits the Tools line when the plugin is absent from toolDetails", () => {
-    const plugins = [{ name: "hackernews", description: "Hacker News integration" }];
-    const toolDetails = new Map<string, string[]>();
-    const result = formatPluginListSection(plugins, toolDetails);
-    expect(result).toBe("Available plugins:\n- hackernews: Hacker News integration");
-  });
-
   it("formats multiple plugins with mixed tool detail availability", () => {
     const plugins = [
       { name: "hackernews", description: "Hacker News integration" },
@@ -740,25 +608,28 @@ describe("formatPluginListSection", () => {
       "Available plugins:\n- hackernews: Hacker News integration\n  Tools: get_front_page, get_comments\n- weather: Weather forecasts",
     );
   });
+
+  it.each([
+    { label: "no tool details are supplied", toolDetails: undefined },
+    { label: "the plugin is absent from toolDetails", toolDetails: new Map<string, string[]>() },
+  ])("omits the Tools line when $label", ({ toolDetails }) => {
+    const plugins = [{ name: "hackernews", description: "Hacker News integration" }];
+    const result = formatPluginListSection(plugins, toolDetails);
+    expect(result).toBe("Available plugins:\n- hackernews: Hacker News integration");
+  });
 });
 
 describe("truncateContext", () => {
   // Each character is 1/3 token, so 3 chars = 1 token.
 
-  it("returns messages unchanged when total tokens are within budget", () => {
+  it.each([
+    { label: "total tokens are within budget", content: "Hello", budget: 10 },
+    { label: "no truncation is needed", content: "Hi", budget: 100 },
+  ])("returns the same array reference when $label", ({ content, budget }) => {
     const messages: AgentMessage[] = [
-      { role: "user", content: "Hello", timestamp: 0 },
+      { role: "user", content, timestamp: 0 },
     ];
-    // "Hello" = 5 chars = 1.25 tokens; budget of 10 is plenty.
-    const result = truncateContext(messages, 10);
-    expect(result).toBe(messages);
-  });
-
-  it("returns the same array reference when no truncation is needed", () => {
-    const messages: AgentMessage[] = [
-      { role: "user", content: "Hi", timestamp: 0 },
-    ];
-    const result = truncateContext(messages, 100);
+    const result = truncateContext(messages, budget);
     expect(result).toBe(messages);
   });
 
@@ -775,19 +646,34 @@ describe("truncateContext", () => {
     expect(content.length).toBeLessThan(longText.length);
   });
 
-  it("truncates a text block in a tool result message", () => {
-    // 400 chars = ~133 tokens; budget = 10 tokens.
-    const longText = "x".repeat(400);
-    const messages: AgentMessage[] = [
-      {
+  it.each([
+    {
+      label: "a tool result message",
+      message: {
         role: "toolResult",
         toolCallId: "tc1",
         toolName: "execute_sql",
-        content: [{ type: "text", text: longText }],
+        content: [{ type: "text", text: "x".repeat(400) }],
         isError: false,
         timestamp: 0,
       } as unknown as AgentMessage,
-    ];
+    },
+    {
+      label: "an assistant message",
+      message: assistantMessage([{ type: "text", text: "a".repeat(400) }]),
+    },
+    {
+      label: "a user message with array content",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "b".repeat(400) }],
+        timestamp: 0,
+      } as unknown as AgentMessage,
+    },
+  ])("truncates a text block in $label", ({ message }) => {
+    // 400 chars = ~133 tokens; budget = 10 tokens.
+    const longText = (message.content as Array<{ type: string; text: string }>)[0].text;
+    const messages: AgentMessage[] = [message];
     const result = truncateContext(messages, 10);
     expect(result).not.toBe(messages);
     const block = (result[0] as { content: Array<{ type: string; text: string }> }).content[0];
@@ -876,32 +762,6 @@ describe("truncateContext", () => {
     expect(block.data).toBe("base64data");
   });
 
-  it("handles an assistant message with a text block", () => {
-    const longText = "a".repeat(400);
-    const messages: AgentMessage[] = [
-      assistantMessage([{ type: "text", text: longText }]),
-    ];
-    const result = truncateContext(messages, 10);
-    const block = (result[0] as { content: Array<{ type: string; text: string }> }).content[0];
-    expect(block.text).toContain("[truncated]");
-    expect(block.text.length).toBeLessThan(longText.length);
-  });
-
-  it("handles a user message with array content containing a text block", () => {
-    const longText = "b".repeat(400);
-    const messages: AgentMessage[] = [
-      {
-        role: "user",
-        content: [{ type: "text", text: longText }],
-        timestamp: 0,
-      } as unknown as AgentMessage,
-    ];
-    const result = truncateContext(messages, 10);
-    const block = (result[0] as { content: Array<{ type: string; text: string }> }).content[0];
-    expect(block.text).toContain("[truncated]");
-    expect(block.text.length).toBeLessThan(longText.length);
-  });
-
   it("does not grow the context when a text block is shorter than the truncation suffix", () => {
     // A 4-char block is ~1.3 tokens. The truncation suffix "\n[truncated]" is 12 chars.
     // Without the guard, truncating would replace 4 chars with 12, making things worse.
@@ -959,106 +819,90 @@ describe("createManageKnowledgeTool — agent scoping", () => {
     expect(resultText(result)).toContain("not found");
   });
 
-  it("returns an error when store is not scratchpad", async () => {
-    const result = await makeTool().execute("tc1", { action: "read", store: "memory", id: 1 });
+  it.each([
+    {
+      label: "memory",
+      mockName: "upsertMemory" as const,
+      mockResult: { id: 11, rowCount: 1 },
+      params: { action: "upsert", store: "memory", content: "A fact." },
+      expectedDbArgs: [pool, AGENT_ID, undefined, "A fact."],
+    },
+    {
+      label: "scratchpad entry",
+      mockName: "upsertScratchpad" as const,
+      mockResult: { id: 12, rowCount: 1 },
+      params: { action: "upsert", store: "scratchpad", title: "Note", body: "Body." },
+      expectedDbArgs: [pool, AGENT_ID, undefined, "Note", "Body."],
+    },
+  ])("creates a $label owned by the current agent", async ({ mockName, mockResult, params, expectedDbArgs }) => {
+    const upsert = await getMock(mockName);
+    upsert.mockResolvedValueOnce(mockResult);
 
-    expect(resultText(result)).toContain("only supported for the scratchpad store");
+    await makeTool().execute("tc1", params);
+
+    expect(upsert).toHaveBeenCalledWith(...expectedDbArgs);
   });
 
-  it("returns an error when id is missing", async () => {
-    const result = await makeTool().execute("tc1", { action: "read", store: "scratchpad" });
+  it.each([
+    {
+      label: "updating another agent's memory",
+      mockName: "upsertMemory" as const,
+      mockResult: { id: 7, rowCount: 0 },
+      params: { action: "upsert", store: "memory", id: 7, content: "Changed." },
+      expectedDbArgs: [pool, AGENT_ID, 7, "Changed."],
+      expectedText: "memory 7 not found",
+    },
+    {
+      label: "deleting another agent's memory",
+      mockName: "deleteMemory" as const,
+      mockResult: 0,
+      params: { action: "delete", store: "memory", id: 7 },
+      expectedDbArgs: [pool, AGENT_ID, 7],
+      expectedText: "memory 7 not found",
+    },
+    {
+      label: "updating another agent's scratchpad entry",
+      mockName: "upsertScratchpad" as const,
+      mockResult: { id: 9, rowCount: 0 },
+      params: { action: "upsert", store: "scratchpad", id: 9, title: "Note", body: "Body." },
+      expectedDbArgs: [pool, AGENT_ID, 9, "Note", "Body."],
+      expectedText: "scratchpad entry 9 not found",
+    },
+    {
+      label: "deleting another agent's scratchpad entry",
+      mockName: "deleteScratchpad" as const,
+      mockResult: 0,
+      params: { action: "delete", store: "scratchpad", id: 9 },
+      expectedDbArgs: [pool, AGENT_ID, 9],
+      expectedText: "scratchpad entry 9 not found",
+    },
+  ])("returns an error when $label", async ({ mockName, mockResult, params, expectedDbArgs, expectedText }) => {
+    const dbCall = await getMock(mockName);
+    dbCall.mockResolvedValueOnce(mockResult);
 
-    expect(resultText(result)).toContain("id is required");
-  });
+    const result = await makeTool().execute("tc1", params);
 
-  it("creates a memory owned by the current agent", async () => {
-    const upsertMemory = await getMock("upsertMemory");
-    upsertMemory.mockResolvedValueOnce({ id: 11, rowCount: 1 });
-
-    await makeTool().execute("tc1", { action: "upsert", store: "memory", content: "A fact." });
-
-    expect(upsertMemory).toHaveBeenCalledWith(pool, AGENT_ID, undefined, "A fact.");
-  });
-
-  it("returns an error when updating another agent's memory", async () => {
-    const upsertMemory = await getMock("upsertMemory");
-    // The DB layer scopes the UPDATE by agent_id, so another agent's row is a miss.
-    upsertMemory.mockResolvedValueOnce({ id: 7, rowCount: 0 });
-
-    const result = await makeTool().execute("tc1", { action: "upsert", store: "memory", id: 7, content: "Changed." });
-
-    expect(upsertMemory).toHaveBeenCalledWith(pool, AGENT_ID, 7, "Changed.");
-    expect(resultText(result)).toContain("memory 7 not found");
-  });
-
-  it("returns an error when deleting another agent's memory", async () => {
-    const deleteMemory = await getMock("deleteMemory");
-    deleteMemory.mockResolvedValueOnce(0);
-
-    const result = await makeTool().execute("tc1", { action: "delete", store: "memory", id: 7 });
-
-    expect(deleteMemory).toHaveBeenCalledWith(pool, AGENT_ID, 7);
-    expect(resultText(result)).toContain("memory 7 not found");
-  });
-
-  it("creates a scratchpad entry owned by the current agent", async () => {
-    const upsertScratchpad = await getMock("upsertScratchpad");
-    upsertScratchpad.mockResolvedValueOnce({ id: 12, rowCount: 1 });
-
-    await makeTool().execute("tc1", { action: "upsert", store: "scratchpad", title: "Note", body: "Body." });
-
-    expect(upsertScratchpad).toHaveBeenCalledWith(pool, AGENT_ID, undefined, "Note", "Body.");
-  });
-
-  it("returns an error when updating another agent's scratchpad entry", async () => {
-    const upsertScratchpad = await getMock("upsertScratchpad");
-    upsertScratchpad.mockResolvedValueOnce({ id: 9, rowCount: 0 });
-
-    const result = await makeTool().execute("tc1", { action: "upsert", store: "scratchpad", id: 9, title: "Note", body: "Body." });
-
-    expect(upsertScratchpad).toHaveBeenCalledWith(pool, AGENT_ID, 9, "Note", "Body.");
-    expect(resultText(result)).toContain("scratchpad entry 9 not found");
-  });
-
-  it("returns an error when deleting another agent's scratchpad entry", async () => {
-    const deleteScratchpad = await getMock("deleteScratchpad");
-    deleteScratchpad.mockResolvedValueOnce(0);
-
-    const result = await makeTool().execute("tc1", { action: "delete", store: "scratchpad", id: 9 });
-
-    expect(deleteScratchpad).toHaveBeenCalledWith(pool, AGENT_ID, 9);
-    expect(resultText(result)).toContain("scratchpad entry 9 not found");
-  });
-});
-
-describe("createManageCronTool — update action", () => {
-  it("rejects an update with no fields to change", async () => {
-    const db = await import("./database.js");
-    const updateCronEntry = db.updateCronEntry as unknown as MockedFunction<() => Promise<void>>;
-    updateCronEntry.mockClear();
-
-    const tool = createManageCronTool({} as Pool);
-    const result = await tool.execute("tc1", { action: "update", id: 3 });
-
-    expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("at least one of note, schedule, or fire_at") });
-    expect(updateCronEntry).not.toHaveBeenCalled();
+    expect(dbCall).toHaveBeenCalledWith(...expectedDbArgs);
+    expect(resultText(result)).toContain(expectedText);
   });
 });
 
 describe("injectAutoSearchBlock", () => {
-  it("returns messages unchanged when searchBlock is undefined", () => {
-    const messages: AgentMessage[] = [
-      { role: "user", content: "Hello", timestamp: 0 },
-    ];
-    const result = injectAutoSearchBlock(messages, undefined);
-    expect(result).toBe(messages);
-  });
+  const unchangedCases: Array<{ label: string; messages: AgentMessage[]; searchBlock: string | undefined }> = [
+    {
+      label: "searchBlock is undefined",
+      messages: [{ role: "user", content: "Hello", timestamp: 0 }],
+      searchBlock: undefined,
+    },
+    {
+      label: "there are no user messages",
+      messages: [assistantMessage([{ type: "text", text: "Hi!" }])],
+      searchBlock: "search results",
+    },
+  ];
 
-  it("returns messages unchanged when there are no user messages", () => {
-    const messages: AgentMessage[] = [
-      assistantMessage([{ type: "text", text: "Hi!" }]),
-    ];
-    const result = injectAutoSearchBlock(messages, "search results");
+  it.each(unchangedCases)("returns messages unchanged when $label", ({ messages, searchBlock }) => {
+    const result = injectAutoSearchBlock(messages, searchBlock);
     expect(result).toBe(messages);
   });
 
@@ -1112,30 +956,29 @@ describe("injectAutoSearchBlock", () => {
     expect(content[1]).toMatchObject({ type: "text", text: "search results" });
   });
 
-  it("does not mutate the original messages or their content arrays", () => {
-    const originalContent = [{ type: "text" as const, text: "Hello" }];
-    const originalMessage = {
-      role: "user" as const,
-      content: originalContent,
-      timestamp: 0,
-    } as unknown as AgentMessage;
-    const messages: AgentMessage[] = [originalMessage];
+  it.each([
+    {
+      label: "array content",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "Hello" }],
+        timestamp: 0,
+      } as unknown as AgentMessage,
+    },
+    {
+      label: "string content",
+      message: { role: "user", content: "Hello", timestamp: 0 } as unknown as AgentMessage,
+    },
+  ])("does not mutate the original messages or their content ($label)", ({ message }) => {
+    const messages: AgentMessage[] = [message];
+    const originalContent = message.content;
+    const originalContentSnapshot = JSON.stringify(message.content);
 
     injectAutoSearchBlock(messages, "search results");
 
-    expect(messages[0]).toBe(originalMessage);
-    expect((originalMessage as { content: typeof originalContent }).content).toBe(originalContent);
-    expect(originalContent[0].text).toBe("Hello");
-  });
-
-  it("does not mutate the original messages array when content is a string", () => {
-    const originalMessage = { role: "user" as const, content: "Hello", timestamp: 0 };
-    const messages: AgentMessage[] = [originalMessage];
-
-    injectAutoSearchBlock(messages, "search results");
-
-    expect(messages[0]).toBe(originalMessage);
-    expect(originalMessage.content).toBe("Hello");
+    expect(messages[0]).toBe(message);
+    expect(message.content).toBe(originalContent);
+    expect(JSON.stringify(message.content)).toBe(originalContentSnapshot);
   });
 });
 
@@ -1324,8 +1167,12 @@ describe("escalatingSummarize", () => {
     expect(level2Prompt).toContain("tokens maximum");
   });
 
-  it("falls back to level 3 truncation when both LLM levels fail to shorten", async () => {
-    const input = "A".repeat(200);
+  it.each([
+    { inputLength: 200 },
+    { inputLength: 3000 },
+    { inputLength: 50 },
+  ])("falls back to level 3 truncation strictly shorter than a $inputLength-char input", async ({ inputLength }) => {
+    const input = "A".repeat(inputLength);
     const bloated = "B".repeat(input.length + 10);
     mockComplete
       .mockReturnValueOnce(makeCompleteResponse(bloated))
@@ -1336,35 +1183,6 @@ describe("escalatingSummarize", () => {
     expect(mockComplete).toHaveBeenCalledTimes(2);
     expect(result).toContain("[truncated due to compaction failure]");
     // Level 3 must produce a result strictly shorter than the input.
-    expect(result.length).toBeLessThan(input.length);
-  });
-
-  it("level 3 result is strictly shorter than the input for a long input", async () => {
-    const input = "X".repeat(3000);
-    const bloated = "Y".repeat(input.length + 1);
-    mockComplete
-      .mockReturnValueOnce(makeCompleteResponse(bloated))
-      .mockReturnValueOnce(makeCompleteResponse(bloated));
-
-    const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey, fakeCompactionThreshold);
-
-    expect(result).toContain("[truncated due to compaction failure]");
-    expect(result.length).toBeLessThan(input.length);
-  });
-
-  it("level 3 result is strictly shorter than a short input (50 chars) when both LLM levels fail", async () => {
-    // With a 50-char input, the old code would produce 50 + 38 = 88 chars (longer than input).
-    // The fix must ensure the result is always strictly shorter than the input.
-    const input = "A".repeat(50);
-    const bloated = "B".repeat(input.length + 10);
-    mockComplete
-      .mockReturnValueOnce(makeCompleteResponse(bloated))
-      .mockReturnValueOnce(makeCompleteResponse(bloated));
-
-    const result = await escalatingSummarize(input, fakeConfig, fakeModel, fakeApiKey, fakeCompactionThreshold);
-
-    expect(mockComplete).toHaveBeenCalledTimes(2);
-    expect(result).toContain("[truncated due to compaction failure]");
     expect(result.length).toBeLessThan(input.length);
   });
 
@@ -1545,25 +1363,6 @@ describe("selectCompactionCutIndex", () => {
       toolResultMessage("execute_sql", "a".repeat(150)),  // [5]
       userMsg(150),             // [6] user after toolResult (NOT a boundary)
       assistantMsg(150),        // [7]
-    ];
-    const result = selectCompactionCutIndex(messages, 300);
-    expect(result).toBe(2);
-  });
-
-  it("skips a steered user message in the backward scan fallback", () => {
-    // When the forward scan finds no turn-boundary user message, the backward scan
-    // must also skip steered (mid-turn) user messages and land on [2].
-    // threshold=300, keepBudget=150. The large toolResult at [5] forces the
-    // backward walk to set cutIndex=6, and neither scan finds a boundary after it.
-    const assistantWithToolCall = assistantMessage([{ type: "toolCall", id: "tc1", name: "execute_sql", arguments: {} }]);
-    const messages: AgentMessage[] = [
-      userMsg(150),             // [0] real turn boundary
-      assistantMsg(150),        // [1] text-only
-      userMsg(150),             // [2] real turn boundary ← expected cut point
-      assistantWithToolCall,    // [3] has toolCall
-      userMsg(150),             // [4] steered mid-turn (NOT a boundary)
-      toolResultMessage("execute_sql", "a".repeat(450)),  // [5] large
-      assistantMsg(150),        // [6]
     ];
     const result = selectCompactionCutIndex(messages, 300);
     expect(result).toBe(2);
@@ -2047,35 +1846,17 @@ describe("handlePrompt — nudge for silent chat-triggered subagents", () => {
     expect(fakeAgent.state.tools).toBe(fullTools);
   });
 
-  it("does not nudge an agent-triggered subagent turn", async () => {
+  it.each([
+    { label: "an agent-triggered subagent turn", source: "agent", routing: subagentRouting },
+    { label: "an email-triggered subagent turn", source: "email", routing: subagentRouting },
+    { label: "a main agent turn", source: "signal", routing: mainAgentRouting },
+  ])("does not nudge $label", async ({ source, routing }) => {
     setupCommonMocks();
     const agent = await createAgent(minimalConfig, makePool());
     const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
     fakeAgent.promptEvents = [[assistantEvent([{ type: "text", text: "Report." }])]];
 
-    await handlePrompt(agent, makePool(), "hello", minimalConfig, subagentRouting, "agent");
-
-    expect(fakeAgent.promptMessages).toHaveLength(1);
-  });
-
-  it("does not nudge an email-triggered subagent turn", async () => {
-    setupCommonMocks();
-    const agent = await createAgent(minimalConfig, makePool());
-    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
-    fakeAgent.promptEvents = [[assistantEvent([{ type: "text", text: "Read the email." }])]];
-
-    await handlePrompt(agent, makePool(), "hello", minimalConfig, subagentRouting, "email");
-
-    expect(fakeAgent.promptMessages).toHaveLength(1);
-  });
-
-  it("does not nudge a main agent turn", async () => {
-    setupCommonMocks();
-    const agent = await createAgent(minimalConfig, makePool());
-    const fakeAgent = agent as unknown as InstanceType<typeof FakeAgent>;
-    fakeAgent.promptEvents = [[assistantEvent([{ type: "text", text: "Hello." }])]];
-
-    await handlePrompt(agent, makePool(), "hello", minimalConfig, mainAgentRouting, "signal");
+    await handlePrompt(agent, makePool(), "hello", minimalConfig, routing, source);
 
     expect(fakeAgent.promptMessages).toHaveLength(1);
   });
@@ -2370,65 +2151,53 @@ describe("handlePrompt — subagent tool restoration", () => {
 });
 
 describe("isTurnBoundary", () => {
-  it("returns true for the first message when it is a user message", () => {
-    const messages: AgentMessage[] = [
-      userMsg(10),
-      assistantMsg(10),
-    ];
-    expect(isTurnBoundary(messages, 0)).toBe(true);
-  });
+  const assistantWithToolCall = assistantMessage([{ type: "toolCall", id: "tc1", name: "execute_sql", arguments: {} }]);
 
-  it("returns true for a user message after a system message", () => {
-    const messages: AgentMessage[] = [
-      { role: "system", content: "prompt", timestamp: 0 },
-      userMsg(10),
-      assistantMsg(10),
-    ];
-    expect(isTurnBoundary(messages, 1)).toBe(true);
-  });
-
-  it("returns false for a non-user message", () => {
-    const messages: AgentMessage[] = [
-      userMsg(10),
-      assistantMsg(10),
-    ];
-    expect(isTurnBoundary(messages, 1)).toBe(false);
-  });
-
-  it("returns true for a user message after a text-only assistant message", () => {
-    const messages: AgentMessage[] = [
-      userMsg(10),
-      assistantMsg(10),
-      userMsg(10),
-    ];
-    expect(isTurnBoundary(messages, 2)).toBe(true);
-  });
-
-  it("returns false for a user message after an assistant message with a toolCall block", () => {
-    const assistantWithToolCall = assistantMessage([{ type: "toolCall", id: "tc1", name: "execute_sql", arguments: {} }]);
-    const messages: AgentMessage[] = [
-      userMsg(10),
-      assistantWithToolCall,
-      userMsg(10),
-    ];
-    expect(isTurnBoundary(messages, 2)).toBe(false);
-  });
-
-  it("returns false for a user message after a toolResult message", () => {
-    const messages: AgentMessage[] = [
-      userMsg(10),
-      toolResultMessage("execute_sql", "result"),
-      userMsg(10),
-    ];
-    expect(isTurnBoundary(messages, 2)).toBe(false);
-  });
-
-  it("returns true for consecutive user messages", () => {
-    const messages: AgentMessage[] = [
-      userMsg(10),
-      userMsg(10),
-    ];
-    expect(isTurnBoundary(messages, 1)).toBe(true);
+  it.each([
+    {
+      label: "the first message is a user message",
+      messages: [userMsg(10), assistantMsg(10)],
+      index: 0,
+      expected: true,
+    },
+    {
+      label: "a user message follows a system message",
+      messages: [{ role: "system", content: "prompt", timestamp: 0 } as unknown as AgentMessage, userMsg(10), assistantMsg(10)],
+      index: 1,
+      expected: true,
+    },
+    {
+      label: "the message is not a user message",
+      messages: [userMsg(10), assistantMsg(10)],
+      index: 1,
+      expected: false,
+    },
+    {
+      label: "a user message follows a text-only assistant message",
+      messages: [userMsg(10), assistantMsg(10), userMsg(10)],
+      index: 2,
+      expected: true,
+    },
+    {
+      label: "a user message follows an assistant message with a toolCall block",
+      messages: [userMsg(10), assistantWithToolCall, userMsg(10)],
+      index: 2,
+      expected: false,
+    },
+    {
+      label: "a user message follows a toolResult message",
+      messages: [userMsg(10), toolResultMessage("execute_sql", "result"), userMsg(10)],
+      index: 2,
+      expected: false,
+    },
+    {
+      label: "two user messages are consecutive",
+      messages: [userMsg(10), userMsg(10)],
+      index: 1,
+      expected: true,
+    },
+  ])("returns $expected when $label", ({ messages, index, expected }) => {
+    expect(isTurnBoundary(messages, index)).toBe(expected);
   });
 });
 
@@ -2453,17 +2222,11 @@ describe("formatUserMessage", () => {
     expect(formatted).toContain("Sender: Group chat\nParticipant: Alice (42)\nText: hi group");
   });
 
-  it("appends the owner marker when the participant id is an owner identity", () => {
-    mockIsOwnerIdentity.mockReturnValue(true);
+  it.each([true, false])("appends the owner marker only for an owner participant (isOwner: %s)", (isOwner) => {
+    mockIsOwnerIdentity.mockReturnValue(isOwner);
     const formatted = formatUserMessage("hi group", "telegram", "Group chat", { id: "42", name: "Alice" });
-    expect(formatted).toContain("Participant: Alice (42) [owner]");
+    expect(formatted).toContain(isOwner ? "Participant: Alice (42) [owner]" : "Participant: Alice (42)\n");
+    expect(formatted.includes("[owner]")).toBe(isOwner);
     expect(mockIsOwnerIdentity).toHaveBeenCalledWith("telegram", "42");
-  });
-
-  it("does not append the owner marker for non-owner participants", () => {
-    mockIsOwnerIdentity.mockReturnValue(false);
-    const formatted = formatUserMessage("hi group", "telegram", "Group chat", { id: "42", name: "Alice" });
-    expect(formatted).toContain("Participant: Alice (42)\n");
-    expect(formatted).not.toContain("[owner]");
   });
 });

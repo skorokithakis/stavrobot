@@ -91,45 +91,43 @@ describe("processQueue non-retryable 400 error handling", () => {
     expect(mockHandlePrompt).toHaveBeenCalledTimes(1);
   });
 
-  it("sends the error message to the Signal channel on a 400 error", async () => {
+  it.each([
+    {
+      channel: "Signal",
+      source: "signal",
+      sender: "+1234567890",
+      config: stubConfig,
+      sendMock: mockSendSignalMessage,
+      expectedArgs: ["+1234567890", "Something went wrong: orphaned tool_result"],
+    },
+    {
+      channel: "Telegram",
+      source: "telegram",
+      sender: "987654321",
+      config: { ...stubConfig, telegram: { botToken: "bot-token" } } as unknown as Config,
+      sendMock: mockSendTelegramMessage,
+      expectedArgs: ["bot-token", "987654321", "Something went wrong: orphaned tool_result"],
+    },
+    {
+      channel: "WhatsApp",
+      source: "whatsapp",
+      sender: "+1234567890",
+      config: stubConfig,
+      sendMock: mockSendWhatsappTextMessage,
+      expectedArgs: ["+1234567890", "Something went wrong: orphaned tool_result"],
+    },
+  ])("sends the error message to the $channel channel on a 400 error", async ({ source, sender, config, sendMock, expectedArgs }) => {
+    initializeQueue(stubAgent, stubPool, config);
     // Use owner identity so the message bypasses the allowlist gate and reaches handlePrompt.
     mockIsOwnerIdentity.mockReturnValue(true);
     mockHandlePrompt.mockRejectedValueOnce(
       new Error('Agent error: "400 {"type":"error","error":{"type":"invalid_request_error","message":"orphaned tool_result"}}"'),
     );
 
-    await enqueueMessage("hello", "signal", "+1234567890");
+    await enqueueMessage("hello", source, sender);
 
-    expect(mockSendSignalMessage).toHaveBeenCalledOnce();
-    expect(mockSendSignalMessage).toHaveBeenCalledWith("+1234567890", "Something went wrong: orphaned tool_result");
-  });
-
-  it("sends the error message to the Telegram channel on a 400 error", async () => {
-    const configWithTelegram = { ...stubConfig, telegram: { botToken: "bot-token" } } as unknown as Config;
-    initializeQueue(stubAgent, stubPool, configWithTelegram);
-    // Use owner identity so the message bypasses the allowlist gate and reaches handlePrompt.
-    mockIsOwnerIdentity.mockReturnValue(true);
-    mockHandlePrompt.mockRejectedValueOnce(
-      new Error('Agent error: "400 {"type":"error","error":{"type":"invalid_request_error","message":"orphaned tool_result"}}"'),
-    );
-
-    await enqueueMessage("hello", "telegram", "987654321");
-
-    expect(mockSendTelegramMessage).toHaveBeenCalledOnce();
-    expect(mockSendTelegramMessage).toHaveBeenCalledWith("bot-token", "987654321", "Something went wrong: orphaned tool_result");
-  });
-
-  it("sends the error message to the WhatsApp channel on a 400 error", async () => {
-    // Use owner identity so the message bypasses the allowlist gate and reaches handlePrompt.
-    mockIsOwnerIdentity.mockReturnValue(true);
-    mockHandlePrompt.mockRejectedValueOnce(
-      new Error('Agent error: "400 {"type":"error","error":{"type":"invalid_request_error","message":"orphaned tool_result"}}"'),
-    );
-
-    await enqueueMessage("hello", "whatsapp", "+1234567890");
-
-    expect(mockSendWhatsappTextMessage).toHaveBeenCalledOnce();
-    expect(mockSendWhatsappTextMessage).toHaveBeenCalledWith("+1234567890", "Something went wrong: orphaned tool_result");
+    expect(sendMock).toHaveBeenCalledOnce();
+    expect(sendMock).toHaveBeenCalledWith(...expectedArgs);
   });
 
   it("retries when the error does not contain '400 {'", async () => {
@@ -223,14 +221,28 @@ describe("processQueue non-retryable 400 error handling", () => {
     expect(mockInvalidateCredentials).toHaveBeenCalledWith(stubConfig);
   });
 
-  it("resolves (does not reject) after exhausting retries and sends error to source channel", async () => {
+  it.each([
+    {
+      channel: "signal",
+      source: "signal" as string | undefined,
+      sender: "+1234567890" as string | undefined,
+      sendMock: mockSendSignalMessage,
+      expectedArgs: ["+1234567890", "Something went wrong: network timeout"],
+    },
+    {
+      channel: "WhatsApp",
+      source: "whatsapp",
+      sender: "+1234567890",
+      sendMock: mockSendWhatsappTextMessage,
+      expectedArgs: ["+1234567890", "Something went wrong: network timeout"],
+    },
+  ])("resolves (does not reject) after exhausting retries and sends error to $channel channel", async ({ source, sender, sendMock, expectedArgs }) => {
     // Use owner identity so the message bypasses the allowlist gate and reaches handlePrompt.
     mockIsOwnerIdentity.mockReturnValue(true);
     mockHandlePrompt.mockRejectedValue(new Error("network timeout"));
-    mockSendSignalMessage.mockResolvedValue("ok");
 
     vi.useFakeTimers();
-    const resultPromise = enqueueMessage("hello", "signal", "+1234567890");
+    const resultPromise = enqueueMessage("hello", source, sender);
     await vi.runAllTimersAsync();
     vi.useRealTimers();
 
@@ -238,104 +250,55 @@ describe("processQueue non-retryable 400 error handling", () => {
     const result = await resultPromise;
     expect(result).toBe("Something went wrong: network timeout");
     expect(mockHandlePrompt).toHaveBeenCalledTimes(MAX_RETRIES + 1);
-    expect(mockSendSignalMessage).toHaveBeenCalledOnce();
-    expect(mockSendSignalMessage).toHaveBeenCalledWith("+1234567890", "Something went wrong: network timeout");
-  });
-
-  it("resolves (does not reject) after exhausting retries and sends error to WhatsApp channel", async () => {
-    // Use owner identity so the message bypasses the allowlist gate and reaches handlePrompt.
-    mockIsOwnerIdentity.mockReturnValue(true);
-    mockHandlePrompt.mockRejectedValue(new Error("network timeout"));
-    mockSendWhatsappTextMessage.mockResolvedValue(undefined);
-
-    vi.useFakeTimers();
-    const resultPromise = enqueueMessage("hello", "whatsapp", "+1234567890");
-    await vi.runAllTimersAsync();
-    vi.useRealTimers();
-
-    // Must resolve, not reject — no unhandled rejection.
-    const result = await resultPromise;
-    expect(result).toBe("Something went wrong: network timeout");
-    expect(mockHandlePrompt).toHaveBeenCalledTimes(MAX_RETRIES + 1);
-    expect(mockSendWhatsappTextMessage).toHaveBeenCalledOnce();
-    expect(mockSendWhatsappTextMessage).toHaveBeenCalledWith("+1234567890", "Something went wrong: network timeout");
+    expect(sendMock).toHaveBeenCalledOnce();
+    expect(sendMock).toHaveBeenCalledWith(...expectedArgs);
   });
 });
 
 describe("parseProviderErrorMessage", () => {
-  it("extracts the message field from a 400 provider error JSON", () => {
-    const raw = 'Agent error: "400 {"type":"error","error":{"type":"invalid_request_error","message":"orphaned tool_result"}}"';
-    expect(parseProviderErrorMessage(raw)).toBe("orphaned tool_result");
+  it.each([
+    [
+      'Agent error: "400 {"type":"error","error":{"type":"invalid_request_error","message":"orphaned tool_result"}}"',
+      "orphaned tool_result",
+    ],
+    [
+      'Agent error: "429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account\'s rate limit."}}"',
+      "This request would exceed your account's rate limit.",
+    ],
+  ])("extracts the message field from a provider error JSON (%#)", (raw, expected) => {
+    expect(parseProviderErrorMessage(raw)).toBe(expected);
   });
 
-  it("extracts the message field from a 429 provider error JSON", () => {
-    const raw = 'Agent error: "429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account\'s rate limit."}}"';
-    expect(parseProviderErrorMessage(raw)).toBe("This request would exceed your account's rate limit.");
-  });
-
-  it("falls back to the raw error string when JSON is malformed", () => {
-    const raw = "Agent error: not json at all";
-    expect(parseProviderErrorMessage(raw)).toBe(raw);
-  });
-
-  it("falls back to the raw error string when the error object has no message field", () => {
-    const raw = 'Agent error: "400 {"type":"error","error":{"type":"invalid_request_error"}}"';
+  it.each([
+    ["Agent error: not json at all"],
+    ['Agent error: "400 {"type":"error","error":{"type":"invalid_request_error"}}"'],
+  ])("falls back to the raw error string (%#)", (raw) => {
     expect(parseProviderErrorMessage(raw)).toBe(raw);
   });
 });
 
 describe("message routing", () => {
-  it("routes CLI messages (no source) to the owner conversation", async () => {
-    await enqueueMessage("hello");
+  it.each([
+    { label: "CLI messages (no source)", message: "hello", source: undefined, attachments: undefined, senderLabel: "owner" },
+    { label: "cron messages", message: "reminder", source: "cron", attachments: undefined, senderLabel: "cron" },
+    { label: "coder messages", message: "task done", source: "coder", attachments: undefined, senderLabel: "coder" },
+    {
+      label: "upload messages",
+      message: undefined,
+      source: "upload",
+      attachments: [{ storedPath: "/tmp/upload-abc.jpg", originalFilename: "photo.jpg", mimeType: "image/jpeg", size: 1024 }],
+      senderLabel: "upload",
+    },
+    { label: "plugin:* messages", message: "result", source: "plugin:myplugin", attachments: undefined, senderLabel: "plugin:myplugin" },
+  ])("routes $label to the owner conversation", async ({ message, source, attachments, senderLabel }) => {
+    await enqueueMessage(message, source, undefined, attachments);
 
     expect(mockHandlePrompt).toHaveBeenCalledOnce();
     const routingArg = mockHandlePrompt.mock.calls[0][4] as RoutingResult;
     expect(routingArg.isMainAgent).toBe(true);
     expect(routingArg.agentId).toBe(1);
-    expect(routingArg.senderLabel).toBe("owner");
-    // resolveInterlocutor should not be called for CLI messages.
-    expect(mockResolveInterlocutor).not.toHaveBeenCalled();
-  });
-
-  it("routes cron messages to the owner conversation", async () => {
-    await enqueueMessage("reminder", "cron", undefined);
-
-    expect(mockHandlePrompt).toHaveBeenCalledOnce();
-    const routingArg = mockHandlePrompt.mock.calls[0][4] as RoutingResult;
-    expect(routingArg.isMainAgent).toBe(true);
-    expect(routingArg.senderLabel).toBe("cron");
-    expect(mockResolveInterlocutor).not.toHaveBeenCalled();
-  });
-
-  it("routes coder messages to the owner conversation", async () => {
-    await enqueueMessage("task done", "coder", undefined);
-
-    expect(mockHandlePrompt).toHaveBeenCalledOnce();
-    const routingArg = mockHandlePrompt.mock.calls[0][4] as RoutingResult;
-    expect(routingArg.isMainAgent).toBe(true);
-    expect(routingArg.senderLabel).toBe("coder");
-    expect(mockResolveInterlocutor).not.toHaveBeenCalled();
-  });
-
-  it("routes upload messages to the owner conversation", async () => {
-    const attachment = { storedPath: "/tmp/upload-abc.jpg", originalFilename: "photo.jpg", mimeType: "image/jpeg", size: 1024 };
-    await enqueueMessage(undefined, "upload", undefined, [attachment]);
-
-    expect(mockHandlePrompt).toHaveBeenCalledOnce();
-    const routingArg = mockHandlePrompt.mock.calls[0][4] as RoutingResult;
-    expect(routingArg.isMainAgent).toBe(true);
-    expect(routingArg.agentId).toBe(1);
-    expect(routingArg.senderLabel).toBe("upload");
-    expect(mockResolveInterlocutor).not.toHaveBeenCalled();
-  });
-
-  it("routes plugin:* messages to the owner conversation", async () => {
-    await enqueueMessage("result", "plugin:myplugin", undefined);
-
-    expect(mockHandlePrompt).toHaveBeenCalledOnce();
-    const routingArg = mockHandlePrompt.mock.calls[0][4] as RoutingResult;
-    expect(routingArg.isMainAgent).toBe(true);
-    expect(routingArg.senderLabel).toBe("plugin:myplugin");
+    expect(routingArg.senderLabel).toBe(senderLabel);
+    // resolveInterlocutor should not be called for internal sources.
     expect(mockResolveInterlocutor).not.toHaveBeenCalled();
   });
 

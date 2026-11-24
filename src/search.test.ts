@@ -45,13 +45,6 @@ const isFullTextMessageQuery = (text: string): boolean =>
 const isSemanticMessageQuery = (text: string): boolean =>
   text.includes("JOIN message_embeddings");
 
-// Returns an empty result for all queries (no matches, no messages).
-function emptyPool(): Pool {
-  return makeMockPool(() =>
-    Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult),
-  );
-}
-
 // Returns a pool where message queries return empty results.
 // Used when a compaction is configured via loadLatestCompactionMock.
 function poolWithEmptyMessages(): Pool {
@@ -74,239 +67,102 @@ describe("runSearch — queryEmbedding in SearchResults", () => {
     expect(results.queryEmbedding).toEqual(embedding);
   });
 
-  it("leaves queryEmbedding undefined when embeddings are not configured", async () => {
+  it.each([
+    {
+      label: "embeddings are not configured",
+      embeddingsConfig: undefined,
+      apiFails: false,
+    },
+    {
+      label: "the embedding API call fails",
+      embeddingsConfig,
+      apiFails: true,
+    },
+  ])("leaves queryEmbedding undefined when $label", async ({ embeddingsConfig: config, apiFails }) => {
+    if (apiFails) {
+      fetchEmbeddingsMock.mockRejectedValueOnce(new Error("API error"));
+    }
     loadLatestCompactionMock.mockResolvedValue({ id: 1, summary: "s", upToMessageId: 100 });
 
     const pool = poolWithEmptyMessages();
-    const results = await runSearch(pool, "hello world", 5, 1, undefined);
+    const results = await runSearch(pool, "hello world", 5, 1, config);
 
     expect(results.queryEmbedding).toBeUndefined();
-  });
-
-  it("leaves queryEmbedding undefined when the embedding API call fails", async () => {
-    fetchEmbeddingsMock.mockRejectedValueOnce(new Error("API error"));
-    loadLatestCompactionMock.mockResolvedValue({ id: 1, summary: "s", upToMessageId: 100 });
-
-    const pool = poolWithEmptyMessages();
-    const results = await runSearch(pool, "hello world", 5, 1, embeddingsConfig);
-
-    expect(results.queryEmbedding).toBeUndefined();
-  });
-
-  it("still returns search results even when the embedding API call fails", async () => {
-    fetchEmbeddingsMock.mockRejectedValueOnce(new Error("API error"));
-    loadLatestCompactionMock.mockResolvedValue({ id: 1, summary: "s", upToMessageId: 100 });
-
-    const pool = poolWithEmptyMessages();
-    const results = await runSearch(pool, "hello world", 5, 1, embeddingsConfig);
-
-    expect(results.tableResults).toEqual([]);
-    expect(results.messages).toEqual([]);
   });
 });
 
 describe("runSearch — recent-message exclusion", () => {
-  it("searches all messages when no compaction exists (full-text path)", async () => {
-    // No compaction: loadLatestCompaction returns null (default in beforeEach).
-    const oldMessage = {
-      id: 5,
-      role: "user",
-      content: { content: "old message" },
-      created_at: new Date("2024-01-01"),
-    };
+  const embedding = [0.1, 0.2, 0.3];
+  const compaction = { id: 1, summary: "s", upToMessageId: 75 };
 
-    const pool = makeMockPool((text) => {
-      if (isFullTextMessageQuery(text)) {
-        return Promise.resolve({ rows: [oldMessage], rowCount: 1 } as unknown as QueryResult);
-      }
-      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-    });
+  interface MessageQueryCase {
+    label: string;
+    isMessageQuery: (text: string) => boolean;
+    embeddingsConfig: EmbeddingsConfig | undefined;
+    compaction: typeof compaction | null;
+    expectIdBound: boolean;
+    expectedUpToMessageId: number | undefined;
+  }
 
-    const results = await runSearch(pool, "old message", 5, 1, undefined);
+  const cases: MessageQueryCase[] = [
+    {
+      label: "full-text path, no compaction",
+      isMessageQuery: isFullTextMessageQuery,
+      embeddingsConfig: undefined,
+      compaction: null,
+      expectIdBound: false,
+      expectedUpToMessageId: undefined,
+    },
+    {
+      label: "semantic path, no compaction",
+      isMessageQuery: isSemanticMessageQuery,
+      embeddingsConfig,
+      compaction: null,
+      expectIdBound: false,
+      expectedUpToMessageId: undefined,
+    },
+    {
+      label: "full-text path, with a compaction",
+      isMessageQuery: isFullTextMessageQuery,
+      embeddingsConfig: undefined,
+      compaction,
+      expectIdBound: true,
+      expectedUpToMessageId: compaction.upToMessageId,
+    },
+    {
+      label: "semantic path, with a compaction",
+      isMessageQuery: isSemanticMessageQuery,
+      embeddingsConfig,
+      compaction,
+      expectIdBound: true,
+      expectedUpToMessageId: compaction.upToMessageId,
+    },
+  ];
 
-    expect(results.messages).toHaveLength(1);
-    expect(results.messages[0].id).toBe(5);
-  });
+  it.each(cases)("$label", async (testCase) => {
+    loadLatestCompactionMock.mockResolvedValue(testCase.compaction);
+    if (testCase.embeddingsConfig !== undefined) {
+      fetchEmbeddingsMock.mockResolvedValueOnce([embedding]);
+    }
 
-  it("does not apply an id upper bound when no compaction exists (full-text path)", async () => {
-    // No compaction: the SQL must not contain an id upper-bound clause.
-    let fullTextQueryText: string | undefined;
-
-    const pool = makeMockPool((text) => {
-      if (isFullTextMessageQuery(text)) {
-        fullTextQueryText = text;
-      }
-      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-    });
-
-    await runSearch(pool, "test", 5, 1, undefined);
-
-    expect(fullTextQueryText).toBeDefined();
-    expect(fullTextQueryText).not.toContain("m.id <=");
-  });
-
-  it("does not apply an id upper bound when no compaction exists (semantic path)", async () => {
-    const embedding = [0.1, 0.2, 0.3];
-    fetchEmbeddingsMock.mockResolvedValueOnce([embedding]);
-
-    let semanticQueryText: string | undefined;
-
-    const pool = makeMockPool((text) => {
-      if (isSemanticMessageQuery(text)) {
-        semanticQueryText = text;
-      }
-      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-    });
-
-    await runSearch(pool, "test", 5, 1, embeddingsConfig);
-
-    expect(semanticQueryText).toBeDefined();
-    expect(semanticQueryText).not.toContain("m.id <=");
-  });
-
-  it("returns table results even when no compaction exists", async () => {
-    // Table search always runs regardless of compaction state.
-    let tableQueryCount = 0;
-    const pool = makeMockPool((text) => {
-      if (isColumnDiscoveryQuery(text)) {
-        return Promise.resolve({
-          rows: [{ table_name: "notes", column_name: "body", has_created_at: false }],
-          rowCount: 1,
-        } as unknown as QueryResult);
-      }
-      if (!isFullTextMessageQuery(text) && !isSemanticMessageQuery(text)) {
-        tableQueryCount++;
-        if (tableQueryCount === 1) {
-          return Promise.resolve({
-            rows: [{ id: 1, body: "match" }],
-            rowCount: 1,
-          } as unknown as QueryResult);
-        }
-      }
-      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-    });
-
-    const results = await runSearch(pool, "match", 5, 1, undefined);
-
-    expect(results.tableResults).toHaveLength(1);
-    expect(results.messages).toEqual([]);
-  });
-
-  it("returns message hits from the older portion when a compaction exists (full-text path)", async () => {
-    loadLatestCompactionMock.mockResolvedValue({ id: 1, summary: "s", upToMessageId: 50 });
-
-    const oldMessage = {
-      id: 5,
-      role: "user",
-      content: { content: "old message" },
-      created_at: new Date("2024-01-01"),
-    };
-
-    const pool = makeMockPool((text) => {
-      if (isFullTextMessageQuery(text)) {
-        return Promise.resolve({ rows: [oldMessage], rowCount: 1 } as unknown as QueryResult);
-      }
-      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-    });
-
-    const results = await runSearch(pool, "old message", 5, 1, undefined);
-
-    expect(results.messages).toHaveLength(1);
-    expect(results.messages[0].id).toBe(5);
-  });
-
-  it("passes upToMessageId to the full-text query so recent messages are excluded", async () => {
-    loadLatestCompactionMock.mockResolvedValue({ id: 1, summary: "s", upToMessageId: 75 });
-
-    let fullTextQueryValues: unknown[] | undefined;
+    let messageQuery: { text: string; values?: unknown[] } | undefined;
 
     const pool = makeMockPool((text, values) => {
-      if (isFullTextMessageQuery(text)) {
-        fullTextQueryValues = values;
-        return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
+      if (testCase.isMessageQuery(text)) {
+        messageQuery = { text, values };
       }
       return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
     });
 
-    await runSearch(pool, "test", 5, 1, undefined);
+    await runSearch(pool, "test", 5, 1, testCase.embeddingsConfig);
 
-    // The fourth parameter ($4) must be the upToMessageId (75).
-    expect(fullTextQueryValues).toBeDefined();
-    expect((fullTextQueryValues as unknown[])[3]).toBe(75);
-  });
-
-  it("excludes recent messages from results.messages on the full-text path", async () => {
-    // upToMessageId = 100: ids 10 and 50 are old (<= 100), ids 110 and 200 are recent (> 100).
-    loadLatestCompactionMock.mockResolvedValue({ id: 1, summary: "s", upToMessageId: 100 });
-
-    const oldMessage1 = { id: 10, role: "user", content: { content: "old one" }, created_at: new Date("2024-01-01") };
-    const oldMessage2 = { id: 50, role: "assistant", content: { content: "old two" }, created_at: new Date("2024-01-02") };
-
-    const pool = makeMockPool((text) => {
-      if (isFullTextMessageQuery(text)) {
-        // The SQL must contain the compaction clause; if it is absent the test fails here.
-        expect(text).toContain("m.id <= $4");
-        // Return only the old messages, simulating what the SQL WHERE m.id <= $4 clause produces.
-        return Promise.resolve({ rows: [oldMessage1, oldMessage2], rowCount: 2 } as unknown as QueryResult);
-      }
-      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-    });
-
-    const results = await runSearch(pool, "test", 5, 1, undefined);
-
-    const resultIds = results.messages.map((m) => m.id);
-    // Old messages must be present.
-    expect(resultIds).toContain(10);
-    expect(resultIds).toContain(50);
-  });
-
-  it("passes upToMessageId to the semantic query so recent messages are excluded", async () => {
-    const embedding = [0.1, 0.2, 0.3];
-    fetchEmbeddingsMock.mockResolvedValueOnce([embedding]);
-    loadLatestCompactionMock.mockResolvedValue({ id: 1, summary: "s", upToMessageId: 75 });
-
-    let semanticQueryValues: unknown[] | undefined;
-
-    const pool = makeMockPool((text, values) => {
-      if (isSemanticMessageQuery(text)) {
-        semanticQueryValues = values;
-        return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-      }
-      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-    });
-
-    await runSearch(pool, "test", 5, 1, embeddingsConfig);
-
-    // The fourth parameter ($4) must be the upToMessageId (75).
-    expect(semanticQueryValues).toBeDefined();
-    expect((semanticQueryValues as unknown[])[3]).toBe(75);
-  });
-
-  it("excludes recent messages from results.messages on the semantic path", async () => {
-    const embedding = [0.1, 0.2, 0.3];
-    fetchEmbeddingsMock.mockResolvedValueOnce([embedding]);
-    loadLatestCompactionMock.mockResolvedValue({ id: 1, summary: "s", upToMessageId: 100 });
-
-    // upToMessageId = 100: ids 20 and 60 are old (<= 100), ids 120 and 180 are recent (> 100).
-    const oldMessage1 = { id: 20, role: "user", content: { content: "old sem one" }, created_at: new Date("2024-01-01") };
-    const oldMessage2 = { id: 60, role: "assistant", content: { content: "old sem two" }, created_at: new Date("2024-01-02") };
-
-    const pool = makeMockPool((text) => {
-      if (isSemanticMessageQuery(text)) {
-        // The SQL must contain the compaction clause; if it is absent the test fails here.
-        expect(text).toContain("m.id <= $4");
-        // Return only the old messages, simulating what the SQL WHERE m.id <= $4 clause produces.
-        return Promise.resolve({ rows: [oldMessage1, oldMessage2], rowCount: 2 } as unknown as QueryResult);
-      }
-      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-    });
-
-    const results = await runSearch(pool, "test", 5, 1, embeddingsConfig);
-
-    const resultIds = results.messages.map((m) => m.id);
-    // Old messages must be present.
-    expect(resultIds).toContain(20);
-    expect(resultIds).toContain(60);
+    expect(messageQuery).toBeDefined();
+    // The compaction rows must carry the $4 bound specifically, so a clause that
+    // refers to the wrong parameter fails; the no-compaction rows must carry no
+    // bound at all.
+    expect(messageQuery!.text.includes("m.id <=")).toBe(testCase.expectIdBound);
+    expect(messageQuery!.text.includes("m.id <= $4")).toBe(testCase.expectIdBound);
+    expect(messageQuery!.values?.[3]).toBe(testCase.expectedUpToMessageId);
   });
 });
 

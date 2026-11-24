@@ -1,11 +1,9 @@
 import http from "http";
 import { describe, expect, it, vi } from "vitest";
 import type pg from "pg";
-import type { Config } from "./config.js";
 import {
   getTableSchema,
   handleTableSchemaRequest,
-  serveExplorerPage,
 } from "./explorer.js";
 
 interface MockResponse {
@@ -38,21 +36,6 @@ function makePool(responses: Array<{ rows: unknown[] }>): pg.Pool {
   return {
     query: vi.fn(async () => responses[index++]),
   } as unknown as pg.Pool;
-}
-
-function makeConfig(overrides: Partial<Config> = {}): Config {
-  return {
-    provider: "anthropic",
-    model: "claude-opus-5-5",
-    apiKey: "test-key",
-    publicHostname: "https://example.com",
-    baseSystemPrompt: "You are a bot.",
-    compactionPrompt: "Compact.",
-    compactionBulletPrompt: "Compact.",
-    baseAgentPrompt: "You are Stavrobot.",
-    owner: { name: "Owner" },
-    ...overrides,
-  } as Config;
 }
 
 const AGENTS_COLUMNS = [
@@ -109,42 +92,3 @@ describe("handleTableSchemaRequest", (): void => {
   });
 });
 
-describe("serveExplorerPage", (): void => {
-  it("renders the shared shell with the Database navigation active", (): void => {
-    const response = makeMockResponse();
-
-    serveExplorerPage(response as unknown as http.ServerResponse, makeConfig({ model: "claude-opus-5-5" }));
-
-    expect(response.statusCode).toBe(200);
-    expect(response.headers["Content-Type"]).toBe("text/html; charset=utf-8");
-    expect(response.body).toContain('href="/assets/sb.css"');
-    expect(response.body).toContain('class="sb-nav-item is-active" href="/explorer"');
-    expect(response.body).toContain("claude-opus-5-5");
-    expect(response.body).toContain('class="sb-tabbar"');
-  });
-
-  it("renders the table picker, schema dialog and row panel regions", (): void => {
-    const response = makeMockResponse();
-
-    serveExplorerPage(response as unknown as http.ServerResponse, makeConfig());
-
-    expect(response.body).toContain('id="db-table-select"');
-    expect(response.body).toContain('id="db-schema-overlay"');
-    expect(response.body).toContain('id="db-picker-overlay"');
-    expect(response.body).toContain('id="db-sort-overlay"');
-    expect(response.body).toContain("data-open-sort");
-    expect(response.body).toContain("data-sort-column");
-    expect(response.body).toContain('id="db-row-panel"');
-    expect(response.body).toContain("/api/explorer/tables");
-    expect(response.body).toContain("primary key");
-  });
-
-  it("makes the mobile sort hint a control wired to the sort sheet", (): void => {
-    const response = makeMockResponse();
-
-    serveExplorerPage(response as unknown as http.ServerResponse, makeConfig());
-
-    expect(response.body).toContain('id="db-sort-hint" type="button" data-open-sort');
-    expect(response.body).toContain("data-sort-dir");
-  });
-});

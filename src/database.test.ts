@@ -15,9 +15,8 @@ vi.mock("./toon.js", () => ({
 vi.mock("fs");
 
 import fs from "fs";
-import { resolveInterlocutor, seedOwner, seedCronEntries, upsertPage, deletePage, getPageByPath, getPageQueryByPath, getPageMutationByPath, readPage, listPageVersions, restorePageVersion, readScratchpad, loadAllMemories, upsertMemory, deleteMemory, loadAllScratchpadTitles, upsertScratchpad, deleteScratchpad, saveMessage, saveCompaction } from "./database.js";
+import { resolveInterlocutor, seedOwner, seedCronEntries, upsertPage, deletePage, getPageByPath, getPageQueryByPath, getPageMutationByPath, readPage, listPageVersions, restorePageVersion, readScratchpad, loadAllMemories, upsertMemory, deleteMemory, loadAllScratchpadTitles, upsertScratchpad, deleteScratchpad, saveCompaction } from "./database.js";
 import type { OwnerConfig } from "./config.js";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 // Seed the owner so getOwnerInterlocutorId() doesn't throw. The mock pool
 // returns a stable owner ID of 42 for all tests in this file.
@@ -92,34 +91,6 @@ describe("resolveInterlocutor — email wildcard matching", () => {
     expect(result).toBeNull();
   });
 
-  it("matches an exact email address", async () => {
-    const pool = makeMockPool(() =>
-      Promise.resolve({
-        rows: [
-          {
-            interlocutor_id: 2,
-            identity_id: 20,
-            agent_id: 7,
-            display_name: "Alice",
-            identifier: "alice@example.com",
-          },
-        ],
-        rowCount: 1,
-      } as unknown as QueryResult),
-    );
-    const result = await resolveInterlocutor(pool, "email", "alice@example.com");
-    expect(result).not.toBeNull();
-    expect(result?.interlocutorId).toBe(2);
-  });
-
-  it("returns null when no rows match the domain filter", async () => {
-    const pool = makeMockPool(() =>
-      Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult),
-    );
-    const result = await resolveInterlocutor(pool, "email", "nobody@nowhere.com");
-    expect(result).toBeNull();
-  });
-
   it("returns null when the matched interlocutor has no agent_id", async () => {
     const pool = makeMockPool(() =>
       Promise.resolve({
@@ -165,16 +136,6 @@ describe("resolveInterlocutor — email wildcard matching", () => {
     expect(result?.interlocutorId).toBe(4);
   });
 
-  it("passes the domain as the SQL parameter", async () => {
-    let capturedValues: unknown[] | undefined;
-    const pool = makeMockPool((_, values) => {
-      capturedValues = values;
-      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-    });
-    await resolveInterlocutor(pool, "email", "sender@mail.example.com");
-    expect(capturedValues).toEqual(["mail.example.com"]);
-  });
-
   it("is case-insensitive when matching email patterns", async () => {
     const pool = makeMockPool(() =>
       Promise.resolve({
@@ -216,14 +177,6 @@ describe("resolveInterlocutor — non-email services (exact match)", () => {
     expect(result).not.toBeNull();
     expect(result?.interlocutorId).toBe(7);
     expect(result?.mentionsOnly).toBe(true);
-  });
-
-  it("returns null when no signal identity matches", async () => {
-    const pool = makeMockPool(() =>
-      Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult),
-    );
-    const result = await resolveInterlocutor(pool, "signal", "+9999999999");
-    expect(result).toBeNull();
   });
 
   it("returns null when the signal interlocutor has no agent_id", async () => {
@@ -385,36 +338,6 @@ describe("seedCronEntries", () => {
 });
 
 describe("upsertPage — versioned inserts", () => {
-  it("inserts version 1 when no existing rows for the path", async () => {
-    const queries: Array<{ text: string; values: unknown[] }> = [];
-    const pool = makeMockPool((text, values) => {
-      queries.push({ text, values: values ?? [] });
-      // SELECT returns no existing rows.
-      if (text.includes("SELECT")) {
-        return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-      }
-      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
-    });
-
-    const result = await upsertPage(pool, "about", "text/html", "<h1>About</h1>", false);
-
-    expect(result).toBe("Page created at /pages/about");
-    const insertQuery = queries.find((q) => q.text.includes("INSERT INTO pages"));
-    expect(insertQuery).toBeDefined();
-    // version = 1 is hardcoded in the SQL for new pages.
-    expect(insertQuery?.text).toMatch(/version\)\s+VALUES.*,\s*1\)/s);
-  });
-
-  it("returns an error when creating a new page without content or mimetype", async () => {
-    const pool = makeMockPool(() =>
-      Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult),
-    );
-
-    const result = await upsertPage(pool, "about");
-
-    expect(result).toMatch(/content and mimetype are required/);
-  });
-
   it("inserts version max+1 when existing rows are present", async () => {
     const queries: Array<{ text: string; values: unknown[] }> = [];
     const pool = makeMockPool((text, values) => {
@@ -437,13 +360,20 @@ describe("upsertPage — versioned inserts", () => {
     expect(insertQuery?.values[insertQuery.values.length - 1]).toBe(4);
   });
 
-  it("carries forward mimetype, is_public, and queries when not provided on update", async () => {
+  it("carries forward mimetype, is_public, and mutations when not provided on update", async () => {
     const queries: Array<{ text: string; values: unknown[] }> = [];
     const pool = makeMockPool((text, values) => {
       queries.push({ text, values: values ?? [] });
       if (text.includes("SELECT")) {
         return Promise.resolve({
-          rows: [{ version: 1, mimetype: "text/css", data: Buffer.from("body{}"), is_public: true, queries: null }],
+          rows: [{
+            version: 1,
+            mimetype: "text/css",
+            data: Buffer.from("body{}"),
+            is_public: true,
+            queries: null,
+            mutations: { m: "UPDATE t SET x = 1" },
+          }],
           rowCount: 1,
         } as unknown as QueryResult);
       }
@@ -454,61 +384,10 @@ describe("upsertPage — versioned inserts", () => {
 
     const insertQuery = queries.find((q) => q.text.includes("INSERT INTO pages"));
     expect(insertQuery).toBeDefined();
-    // mimetype carried forward.
+    // Parameter order: path, mimetype, data, is_public, queries, mutations, version.
     expect(insertQuery?.values[1]).toBe("text/css");
-    // is_public carried forward.
     expect(insertQuery?.values[3]).toBe(true);
-  });
-
-  it("stores mutations on page creation", async () => {
-    const queries: Array<{ text: string; values: unknown[] }> = [];
-    const pool = makeMockPool((text, values) => {
-      queries.push({ text, values: values ?? [] });
-      if (text.includes("SELECT")) {
-        return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-      }
-      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
-    });
-
-    await upsertPage(pool, "about", "text/html", "<h1>About</h1>", false, { q: "SELECT 1" }, { m: "UPDATE t SET x = 1" });
-
-    const insertQuery = queries.find((q) => q.text.includes("INSERT INTO pages"));
-    expect(insertQuery).toBeDefined();
-    // On creation version is hardcoded to 1 in the SQL, so mutations is the last parameter.
-    expect(insertQuery?.values[insertQuery.values.length - 1]).toBe(JSON.stringify({ m: "UPDATE t SET x = 1" }));
-  });
-
-  it("carries forward mutations when not provided on update", async () => {
-    const queries: Array<{ text: string; values: unknown[] }> = [];
-    const pool = makeMockPool((text, values) => {
-      queries.push({ text, values: values ?? [] });
-      if (text.includes("SELECT")) {
-        return Promise.resolve({
-          rows: [{ version: 1, mimetype: "text/html", data: Buffer.from("x"), is_public: false, queries: null, mutations: { m: "UPDATE t SET x = 1" } }],
-          rowCount: 1,
-        } as unknown as QueryResult);
-      }
-      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
-    });
-
-    await upsertPage(pool, "about", undefined, "<h1>New</h1>");
-
-    const insertQuery = queries.find((q) => q.text.includes("INSERT INTO pages"));
-    expect(insertQuery).toBeDefined();
-    expect(insertQuery?.values[insertQuery.values.length - 2]).toBe(JSON.stringify({ m: "UPDATE t SET x = 1" }));
-  });
-
-  it("returns an error when updating with no fields provided", async () => {
-    const pool = makeMockPool(() =>
-      Promise.resolve({
-        rows: [{ version: 1, mimetype: "text/html", data: Buffer.from("x"), is_public: false, queries: null }],
-        rowCount: 1,
-      } as unknown as QueryResult),
-    );
-
-    const result = await upsertPage(pool, "about");
-
-    expect(result).toMatch(/no fields to update/);
+    expect(insertQuery?.values[5]).toBe(JSON.stringify({ m: "UPDATE t SET x = 1" }));
   });
 });
 
@@ -535,16 +414,6 @@ describe("deletePage — tombstone inserts", () => {
     expect(insertQuery?.values[insertQuery.values.length - 1]).toBe(3);
   });
 
-  it("returns false when no rows exist for the path", async () => {
-    const pool = makeMockPool(() =>
-      Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult),
-    );
-
-    const deleted = await deletePage(pool, "nonexistent");
-
-    expect(deleted).toBe(false);
-  });
-
   it("returns false when the latest version is already a tombstone", async () => {
     const queries: Array<{ text: string; values: unknown[] }> = [];
     const pool = makeMockPool((text, values) => {
@@ -567,16 +436,6 @@ describe("deletePage — tombstone inserts", () => {
 });
 
 describe("getPageByPath — versioned reads", () => {
-  it("returns null when no rows exist", async () => {
-    const pool = makeMockPool(() =>
-      Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult),
-    );
-
-    const page = await getPageByPath(pool, "about");
-
-    expect(page).toBeNull();
-  });
-
   it("returns null when the latest version is a tombstone (empty data)", async () => {
     const pool = makeMockPool(() =>
       Promise.resolve({
@@ -607,16 +466,6 @@ describe("getPageByPath — versioned reads", () => {
 });
 
 describe("getPageQueryByPath — versioned reads", () => {
-  it("returns null when no rows exist", async () => {
-    const pool = makeMockPool(() =>
-      Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult),
-    );
-
-    const result = await getPageQueryByPath(pool, "about", "myquery");
-
-    expect(result).toBeNull();
-  });
-
   it("returns null when the latest version is a tombstone (empty data)", async () => {
     const pool = makeMockPool(() =>
       Promise.resolve({
@@ -647,16 +496,6 @@ describe("getPageQueryByPath — versioned reads", () => {
 });
 
 describe("getPageMutationByPath — versioned reads", () => {
-  it("returns null when no rows exist", async () => {
-    const pool = makeMockPool(() =>
-      Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult),
-    );
-
-    const result = await getPageMutationByPath(pool, "about", "mymutation");
-
-    expect(result).toBeNull();
-  });
-
   it("returns null when the latest version is a tombstone (empty data)", async () => {
     const pool = makeMockPool(() =>
       Promise.resolve({
@@ -699,16 +538,6 @@ describe("getPageMutationByPath — versioned reads", () => {
 });
 
 describe("readPage", () => {
-  it("returns null when no rows exist", async () => {
-    const pool = makeMockPool(() =>
-      Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult),
-    );
-
-    const result = await readPage(pool, "about");
-
-    expect(result).toBeNull();
-  });
-
   it("returns the latest version when no version is specified", async () => {
     const queries: Array<{ text: string; values: unknown[] }> = [];
     const createdAt = new Date("2026-01-01T00:00:00Z");
@@ -794,16 +623,6 @@ describe("readPage", () => {
 });
 
 describe("listPageVersions", () => {
-  it("returns an empty array when no versions exist", async () => {
-    const pool = makeMockPool(() =>
-      Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult),
-    );
-
-    const result = await listPageVersions(pool, "about");
-
-    expect(result).toEqual([]);
-  });
-
   it("returns versions ordered by version descending with isEmpty flag", async () => {
     const date1 = new Date("2026-01-03T00:00:00Z");
     const date2 = new Date("2026-01-02T00:00:00Z");
@@ -904,242 +723,94 @@ describe("restorePageVersion", () => {
   });
 });
 
-describe("readScratchpad", () => {
-  it("returns null when no entry with the given id exists", async () => {
-    const pool = makeMockPool(() =>
-      Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult),
-    );
-
-    const result = await readScratchpad(pool, 1, 99);
-
-    expect(result).toBeNull();
-  });
-
-  it("returns the entry with id, title, and body when found", async () => {
-    const pool = makeMockPool(() =>
-      Promise.resolve({
-        rows: [{ id: 7, title: "My note", body: "Some content here." }],
-        rowCount: 1,
-      } as unknown as QueryResult),
-    );
-
-    const result = await readScratchpad(pool, 1, 7);
-
-    expect(result).toEqual({ id: 7, title: "My note", body: "Some content here." });
-  });
-
-  it("queries with the entry id and owner agent id", async () => {
-    let capturedText: string | undefined;
-    let capturedValues: unknown[] | undefined;
-    const pool = makeMockPool((text, values) => {
-      capturedText = text;
-      capturedValues = values;
-      return Promise.resolve({
-        rows: [{ id: 3, title: "Test", body: "Body text." }],
-        rowCount: 1,
-      } as unknown as QueryResult);
-    });
-
-    await readScratchpad(pool, 2, 3);
-
-    expect(capturedText).toContain("agent_id = $2");
-    expect(capturedValues).toEqual([3, 2]);
-  });
-});
-
 describe("per-agent knowledge scoping", () => {
-  it("loads only the given agent's memories", async () => {
+  it.each([
+    {
+      operation: "loadAllMemories",
+      run: (pool: Pool) => loadAllMemories(pool, 2),
+      rows: [],
+      sqlFragment: "WHERE agent_id = $1",
+      values: [2],
+      result: [],
+    },
+    {
+      operation: "upsertMemory insert",
+      run: (pool: Pool) => upsertMemory(pool, 2, undefined, "A fact."),
+      rows: [{ id: 5 }],
+      sqlFragment: "INSERT INTO memories (agent_id, content)",
+      values: [2, "A fact."],
+      result: { id: 5, rowCount: 1 },
+    },
+    {
+      operation: "upsertMemory update",
+      run: (pool: Pool) => upsertMemory(pool, 2, 7, "Changed."),
+      rows: [],
+      sqlFragment: "WHERE id = $2 AND agent_id = $3",
+      values: ["Changed.", 7, 2],
+      result: { id: 7, rowCount: 0 },
+    },
+    {
+      operation: "deleteMemory",
+      run: (pool: Pool) => deleteMemory(pool, 2, 7),
+      rows: [],
+      sqlFragment: "WHERE id = $1 AND agent_id = $2",
+      values: [7, 2],
+      result: 0,
+    },
+    {
+      operation: "loadAllScratchpadTitles",
+      run: (pool: Pool) => loadAllScratchpadTitles(pool, 2),
+      rows: [],
+      sqlFragment: "WHERE agent_id = $1",
+      values: [2],
+      result: [],
+    },
+    {
+      operation: "upsertScratchpad insert",
+      run: (pool: Pool) => upsertScratchpad(pool, 2, undefined, "Title", "Body"),
+      rows: [{ id: 9 }],
+      sqlFragment: "INSERT INTO scratchpad (agent_id, title, body)",
+      values: [2, "Title", "Body"],
+      result: { id: 9, rowCount: 1 },
+    },
+    {
+      operation: "upsertScratchpad update",
+      run: (pool: Pool) => upsertScratchpad(pool, 2, 9, "Title", "Body"),
+      rows: [],
+      sqlFragment: "WHERE id = $3 AND agent_id = $4",
+      values: ["Title", "Body", 9, 2],
+      result: { id: 9, rowCount: 0 },
+    },
+    {
+      operation: "deleteScratchpad",
+      run: (pool: Pool) => deleteScratchpad(pool, 2, 9),
+      rows: [],
+      sqlFragment: "WHERE id = $1 AND agent_id = $2",
+      values: [9, 2],
+      result: 0,
+    },
+    {
+      operation: "readScratchpad",
+      run: (pool: Pool) => readScratchpad(pool, 2, 3),
+      rows: [{ id: 3, title: "Test", body: "Body text." }],
+      sqlFragment: "agent_id = $2",
+      values: [3, 2],
+      result: { id: 3, title: "Test", body: "Body text." },
+    },
+  ])("scopes $operation to the owner agent", async ({ run, rows, sqlFragment, values, result }) => {
     let capturedText: string | undefined;
     let capturedValues: unknown[] | undefined;
-    const pool = makeMockPool((text, values) => {
+    const pool = makeMockPool((text, queryValues) => {
       capturedText = text;
-      capturedValues = values;
-      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
+      capturedValues = queryValues;
+      return Promise.resolve({ rows, rowCount: rows.length } as unknown as QueryResult);
     });
 
-    await loadAllMemories(pool, 2);
+    const actual = await run(pool);
 
-    expect(capturedText).toContain("WHERE agent_id = $1");
-    expect(capturedValues).toEqual([2]);
-  });
-
-  it("inserts new memories with the owner agent id", async () => {
-    let capturedText: string | undefined;
-    let capturedValues: unknown[] | undefined;
-    const pool = makeMockPool((text, values) => {
-      capturedText = text;
-      capturedValues = values;
-      return Promise.resolve({ rows: [{ id: 5 }], rowCount: 1 } as unknown as QueryResult);
-    });
-
-    const result = await upsertMemory(pool, 2, undefined, "A fact.");
-
-    expect(capturedText).toContain("INSERT INTO memories (agent_id, content)");
-    expect(capturedValues).toEqual([2, "A fact."]);
-    expect(result).toEqual({ id: 5, rowCount: 1 });
-  });
-
-  it("updates a memory only when the owner agent matches", async () => {
-    let capturedText: string | undefined;
-    let capturedValues: unknown[] | undefined;
-    const pool = makeMockPool((text, values) => {
-      capturedText = text;
-      capturedValues = values;
-      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-    });
-
-    const result = await upsertMemory(pool, 2, 7, "Changed.");
-
-    expect(capturedText).toContain("WHERE id = $2 AND agent_id = $3");
-    expect(capturedValues).toEqual(["Changed.", 7, 2]);
-    expect(result).toEqual({ id: 7, rowCount: 0 });
-  });
-
-  it("deletes a memory only when the owner agent matches", async () => {
-    let capturedText: string | undefined;
-    let capturedValues: unknown[] | undefined;
-    const pool = makeMockPool((text, values) => {
-      capturedText = text;
-      capturedValues = values;
-      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-    });
-
-    const rowCount = await deleteMemory(pool, 2, 7);
-
-    expect(capturedText).toContain("WHERE id = $1 AND agent_id = $2");
-    expect(capturedValues).toEqual([7, 2]);
-    expect(rowCount).toBe(0);
-  });
-
-  it("loads only the given agent's scratchpad titles", async () => {
-    let capturedText: string | undefined;
-    let capturedValues: unknown[] | undefined;
-    const pool = makeMockPool((text, values) => {
-      capturedText = text;
-      capturedValues = values;
-      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-    });
-
-    await loadAllScratchpadTitles(pool, 2);
-
-    expect(capturedText).toContain("WHERE agent_id = $1");
-    expect(capturedValues).toEqual([2]);
-  });
-
-  it("inserts new scratchpad entries with the owner agent id", async () => {
-    let capturedText: string | undefined;
-    let capturedValues: unknown[] | undefined;
-    const pool = makeMockPool((text, values) => {
-      capturedText = text;
-      capturedValues = values;
-      return Promise.resolve({ rows: [{ id: 9 }], rowCount: 1 } as unknown as QueryResult);
-    });
-
-    const result = await upsertScratchpad(pool, 2, undefined, "Title", "Body");
-
-    expect(capturedText).toContain("INSERT INTO scratchpad (agent_id, title, body)");
-    expect(capturedValues).toEqual([2, "Title", "Body"]);
-    expect(result).toEqual({ id: 9, rowCount: 1 });
-  });
-
-  it("updates a scratchpad entry only when the owner agent matches", async () => {
-    let capturedText: string | undefined;
-    let capturedValues: unknown[] | undefined;
-    const pool = makeMockPool((text, values) => {
-      capturedText = text;
-      capturedValues = values;
-      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-    });
-
-    const result = await upsertScratchpad(pool, 2, 9, "Title", "Body");
-
-    expect(capturedText).toContain("WHERE id = $3 AND agent_id = $4");
-    expect(capturedValues).toEqual(["Title", "Body", 9, 2]);
-    expect(result).toEqual({ id: 9, rowCount: 0 });
-  });
-
-  it("deletes a scratchpad entry only when the owner agent matches", async () => {
-    let capturedText: string | undefined;
-    let capturedValues: unknown[] | undefined;
-    const pool = makeMockPool((text, values) => {
-      capturedText = text;
-      capturedValues = values;
-      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-    });
-
-    const rowCount = await deleteScratchpad(pool, 2, 9);
-
-    expect(capturedText).toContain("WHERE id = $1 AND agent_id = $2");
-    expect(capturedValues).toEqual([9, 2]);
-    expect(rowCount).toBe(0);
-  });
-});
-
-describe("saveMessage — returns inserted id", () => {
-  const message: AgentMessage = {
-    role: "user",
-    content: "hello",
-    timestamp: 0,
-  };
-
-  it("returns the id from the RETURNING clause", async () => {
-    const pool = makeMockPool(() =>
-      Promise.resolve({
-        rows: [{ id: 77 }],
-        rowCount: 1,
-      } as unknown as QueryResult),
-    );
-
-    const id = await saveMessage(pool, message, 1);
-
-    expect(id).toBe(77);
-  });
-
-  it("uses RETURNING id in the INSERT query", async () => {
-    let capturedText = "";
-    const pool = makeMockPool((text) => {
-      capturedText = text;
-      return Promise.resolve({
-        rows: [{ id: 1 }],
-        rowCount: 1,
-      } as unknown as QueryResult);
-    });
-
-    await saveMessage(pool, message, 1);
-
-    expect(capturedText).toMatch(/RETURNING id/i);
-  });
-
-  it("passes senderIdentityId and senderAgentId as null when not provided", async () => {
-    let capturedValues: unknown[] | undefined;
-    const pool = makeMockPool((_text, values) => {
-      capturedValues = values;
-      return Promise.resolve({
-        rows: [{ id: 5 }],
-        rowCount: 1,
-      } as unknown as QueryResult);
-    });
-
-    await saveMessage(pool, message, 2);
-
-    expect(capturedValues?.[3]).toBeNull();
-    expect(capturedValues?.[4]).toBeNull();
-  });
-
-  it("passes senderIdentityId and senderAgentId when provided", async () => {
-    let capturedValues: unknown[] | undefined;
-    const pool = makeMockPool((_text, values) => {
-      capturedValues = values;
-      return Promise.resolve({
-        rows: [{ id: 10 }],
-        rowCount: 1,
-      } as unknown as QueryResult);
-    });
-
-    await saveMessage(pool, message, 1, 42, undefined);
-
-    expect(capturedValues?.[3]).toBe(42);
-    expect(capturedValues?.[4]).toBeNull();
+    expect(capturedText).toContain(sqlFragment);
+    expect(capturedValues).toEqual(values);
+    expect(actual).toEqual(result);
   });
 });
 

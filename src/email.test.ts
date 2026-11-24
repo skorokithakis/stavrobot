@@ -79,20 +79,13 @@ beforeEach(() => {
 });
 
 describe("handleEmailWebhookRequest", () => {
-  it("returns 401 when Authorization header is missing", () => {
-    const request = makeMockRequest("{}");
-    const response = makeMockResponse();
-    const config = makeConfig();
+  const unauthorizedRequests: Array<{ label: string; headers: Record<string, string> }> = [
+    { label: "Authorization header is missing", headers: {} },
+    { label: "Authorization header has wrong token", headers: { authorization: "Bearer wrong-token" } },
+  ];
 
-    handleEmailWebhookRequest(request, response as unknown as http.ServerResponse, config);
-
-    expect(response.statusCode).toBe(401);
-    const parsed = JSON.parse(response.body!);
-    expect(parsed.error).toBe("Unauthorized");
-  });
-
-  it("returns 401 when Authorization header has wrong token", () => {
-    const request = makeMockRequest("{}", { authorization: "Bearer wrong-token" });
+  it.each(unauthorizedRequests)("returns 401 when $label", ({ headers }) => {
+    const request = makeMockRequest("{}", headers);
     const response = makeMockResponse();
     const config = makeConfig();
 

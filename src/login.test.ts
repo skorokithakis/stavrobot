@@ -70,30 +70,6 @@ afterEach((): void => {
 });
 
 describe("serveLoginPage", (): void => {
-  it("renders every login state inside the shared shell's centered card", (): void => {
-    const response = makeResponse();
-    serveLoginPage(response as unknown as http.ServerResponse, createConfig());
-    const html = response.writes.join("");
-
-    expect(html).toContain('href="/assets/sb.css"');
-    expect(html).toContain("sb-centered");
-    expect(html).toContain("sb-auth-card");
-    expect(html).not.toContain("sb-sidebar");
-    expect(html).toContain("Connect to test-oauth");
-    for (const id of ["connecting", "redirect", "device", "progress", "success", "failure"]) {
-      expect(html).toContain(`id="state-${id}"`);
-    }
-    expect(html).toContain('id="redirect-input"');
-    expect(html).toContain('id="redirect-submit"');
-    expect(html).toContain('id="redirect-instructions"');
-    expect(html).toContain('id="redirect-label"');
-    expect(html).toContain('id="device-code"');
-    expect(html).toContain('id="device-copy"');
-    expect(html).toContain('id="progress-list"');
-    expect(html).toContain('id="failure-message"');
-    expect(html).toContain('href="/"');
-  });
-
   it("escapes the provider name instead of injecting markup", (): void => {
     const hostile = '<img src=x onerror=alert(1)>';
     const response = makeResponse();

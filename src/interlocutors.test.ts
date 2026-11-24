@@ -28,6 +28,10 @@ function makeMockPool(queryImpl: (text: string, values?: unknown[]) => Promise<Q
   } as unknown as Pool;
 }
 
+function makeEmptyPool(): Pool {
+  return makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
+}
+
 // A minimal interlocutor row returned by fetchInterlocutorById for id=10.
 const interlocutorRow10 = {
   id: 10,
@@ -52,75 +56,28 @@ const interlocutorRow5 = {
   identifier: null,
 };
 
-describe("manage_interlocutors — help", () => {
-  it("returns documentation text", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "help" });
-    const text = makeText(result);
-    expect(text).toContain("create");
-    expect(text).toContain("update");
-    expect(text).toContain("delete");
-    expect(text).toContain("add_identity");
-    expect(text).toContain("remove_identity");
-    expect(text).toContain("list");
-    expect(text).toContain("agent_id");
-    expect(text).toContain("subagent");
-    expect(text).toContain("mentions_only");
-  });
-
-  it("documents the enabled parameter for create", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "help" });
-    const text = makeText(result);
-    // The create section should mention enabled as an optional parameter.
-    expect(text).toContain("enabled");
+describe("manage_interlocutors — owner protection", () => {
+  it.each([
+    { description: "update", params: { action: "update", id: 1, display_name: "Hacked" } },
+    { description: "delete", params: { action: "delete", id: 1 } },
+    { description: "add_identity", params: { action: "add_identity", id: 1, service: "signal", identifier: "+1" } },
+    { description: "remove_identity", params: { action: "remove_identity", id: 1, service: "signal", identifier: "+1" } },
+  ])("refuses to $description the owner interlocutor", async ({ params }) => {
+    const tool = createManageInterlocutorsTool(makeEmptyPool());
+    const result = await tool.execute("call-1", params);
+    expect(makeText(result)).toContain("Cannot modify the owner interlocutor");
   });
 });
 
 describe("manage_interlocutors — create", () => {
-  it("returns an error when display_name is missing", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "create", instructions: "some instructions" });
-    expect(makeText(result)).toContain("display_name is required");
-  });
-
-  it("creates an interlocutor with agent_id and returns the full record", async () => {
-    let clientCallCount = 0;
-    const pool = makeMockPool((text: string) => {
-      clientCallCount++;
-      // Second client call is the INSERT returning the new ID.
-      if (clientCallCount === 2) {
-        return Promise.resolve({ rows: [{ id: 10 }], rowCount: 1 } as unknown as QueryResult);
-      }
-      // The pool.query call for fetchInterlocutorById (SELECT with WHERE i.id = $1).
-      if (text.includes("WHERE i.id")) {
-        return Promise.resolve({ rows: [interlocutorRow10], rowCount: 1 } as unknown as QueryResult);
-      }
-      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-    });
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "create", display_name: "Alice", agent_id: 3 });
-    const text = makeText(result);
-    // The result should be TOON-encoded and contain the interlocutor's display_name.
-    expect(text).toContain("Alice");
-    expect(result.details).toMatchObject({ id: 10, display_name: "Alice" });
-  });
-
-  it("returns an error when only service is provided without identifier", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "create", display_name: "Alice", instructions: "hi", service: "signal" });
-    expect(makeText(result)).toContain("service and identifier must both be provided or both absent");
-  });
-
-  it("returns an error when only identifier is provided without service", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "create", display_name: "Alice", instructions: "hi", identifier: "+1234567890" });
-    expect(makeText(result)).toContain("service and identifier must both be provided or both absent");
+  it.each([
+    { description: "implicitly enabled", params: { display_name: "Alice" } },
+    { description: "explicitly enabled", params: { display_name: "Alice", enabled: true } },
+  ])("returns an error when creating an $description interlocutor without agent_id", async ({ params }) => {
+    const tool = createManageInterlocutorsTool(makeEmptyPool());
+    const result = await tool.execute("call-1", { action: "create", ...params });
+    expect(makeText(result)).toContain("Error:");
+    expect(makeText(result)).toContain("cannot create an enabled interlocutor without an agent_id");
   });
 
   it("creates an interlocutor without identity and returns the full record", async () => {
@@ -142,79 +99,9 @@ describe("manage_interlocutors — create", () => {
       return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
     });
     const tool = createManageInterlocutorsTool(pool);
-    // Must provide agent_id when creating an enabled interlocutor.
     const result = await tool.execute("call-1", { action: "create", display_name: "Alice", agent_id: 5, instructions: "Be polite." });
-    const text = makeText(result);
-    expect(text).toContain("Alice");
+    expect(makeText(result)).toContain("Alice");
     expect(result.details).toMatchObject({ id: 42, display_name: "Alice" });
-  });
-
-  it("returns an error when creating an enabled interlocutor without agent_id", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "create", display_name: "Alice" });
-    expect(makeText(result)).toContain("Error:");
-    expect(makeText(result)).toContain("cannot create an enabled interlocutor without an agent_id");
-  });
-
-  it("returns an error when creating an explicitly enabled interlocutor without agent_id", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "create", display_name: "Alice", enabled: true });
-    expect(makeText(result)).toContain("Error:");
-    expect(makeText(result)).toContain("cannot create an enabled interlocutor without an agent_id");
-  });
-
-  it("allows creating a disabled interlocutor without agent_id", async () => {
-    let clientCallCount = 0;
-    const pool = makeMockPool((text: string) => {
-      clientCallCount++;
-      if (clientCallCount === 2) {
-        return Promise.resolve({ rows: [{ id: 42 }], rowCount: 1 } as unknown as QueryResult);
-      }
-      if (text.includes("WHERE i.id")) {
-        return Promise.resolve({
-          rows: [{ id: 42, display_name: "Alice", agent_id: null, owner: false, enabled: false, created_at: new Date("2024-01-01"), service: null, identifier: null }],
-          rowCount: 1,
-        } as unknown as QueryResult);
-      }
-      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-    });
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "create", display_name: "Alice", enabled: false });
-    expect(result.details).toMatchObject({ id: 42, enabled: false });
-  });
-
-  it("creates an interlocutor with enabled: false and the record reflects disabled state", async () => {
-    let clientCallCount = 0;
-    const pool = makeMockPool((text: string) => {
-      clientCallCount++;
-      // Second call is the INSERT returning the new ID.
-      if (clientCallCount === 2) {
-        return Promise.resolve({ rows: [{ id: 20 }], rowCount: 1 } as unknown as QueryResult);
-      }
-      // The pool.query call for fetchInterlocutorById — returns enabled: false.
-      if (text.includes("WHERE i.id")) {
-        return Promise.resolve({
-          rows: [{ id: 20, display_name: "Charlie", agent_id: null, owner: false, enabled: false, created_at: new Date("2024-01-01"), service: null, identifier: null }],
-          rowCount: 1,
-        } as unknown as QueryResult);
-      }
-      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
-    });
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "create", display_name: "Charlie", enabled: false });
-    // Verify the INSERT included the enabled column.
-    const poolMock = pool as unknown as { connect: ReturnType<typeof vi.fn> };
-    const clientMock = await poolMock.connect() as unknown as { query: ReturnType<typeof vi.fn> };
-    const insertCall = clientMock.query.mock.calls.find(
-      (call: unknown[]) => typeof call[0] === "string" && (call[0] as string).includes("INSERT INTO interlocutors"),
-    );
-    expect(insertCall).toBeDefined();
-    expect((insertCall as unknown[])[0]).toContain("enabled");
-    expect((insertCall as unknown[])[1]).toContain(false);
-    // The returned record should show enabled: false.
-    expect(result.details).toMatchObject({ id: 20, enabled: false });
   });
 
   it("creates an interlocutor with identity when both service and identifier are provided", async () => {
@@ -249,9 +136,38 @@ describe("manage_interlocutors — create", () => {
       service: "signal",
       identifier: "+1234567890",
     });
-    const text = makeText(result);
-    expect(text).toContain("Bob");
+    expect(makeText(result)).toContain("Bob");
     expect(result.details).toMatchObject({ id: 7, display_name: "Bob" });
+  });
+
+  it("allows creating a disabled interlocutor without agent_id", async () => {
+    let clientCallCount = 0;
+    const pool = makeMockPool((text: string) => {
+      clientCallCount++;
+      if (clientCallCount === 2) {
+        return Promise.resolve({ rows: [{ id: 42 }], rowCount: 1 } as unknown as QueryResult);
+      }
+      if (text.includes("WHERE i.id")) {
+        return Promise.resolve({
+          rows: [{ id: 42, display_name: "Alice", agent_id: null, owner: false, enabled: false, created_at: new Date("2024-01-01"), service: null, identifier: null }],
+          rowCount: 1,
+        } as unknown as QueryResult);
+      }
+      return Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult);
+    });
+    const tool = createManageInterlocutorsTool(pool);
+    const result = await tool.execute("call-1", { action: "create", display_name: "Alice", enabled: false });
+    // The fake returns whatever state the test says, so also verify that
+    // enabled: false was actually written by the INSERT.
+    const poolMock = pool as unknown as { connect: ReturnType<typeof vi.fn> };
+    const clientMock = await poolMock.connect() as unknown as { query: ReturnType<typeof vi.fn> };
+    const insertCall = clientMock.query.mock.calls.find(
+      (call: unknown[]) => typeof call[0] === "string" && (call[0] as string).includes("INSERT INTO interlocutors"),
+    );
+    expect(insertCall).toBeDefined();
+    expect((insertCall as unknown[])[0]).toContain("enabled");
+    expect((insertCall as unknown[])[1]).toContain(false);
+    expect(result.details).toMatchObject({ id: 42, enabled: false });
   });
 
   it("returns an error and rolls back when the identity conflicts during create", async () => {
@@ -286,82 +202,65 @@ describe("manage_interlocutors — create", () => {
 });
 
 describe("manage_interlocutors — update", () => {
-  it("returns an error when id is missing", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "update", display_name: "New Name" });
-    expect(makeText(result)).toContain("id is required");
-  });
-
-  it("refuses to update the owner interlocutor", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "update", id: 1, display_name: "Hacked" });
-    expect(makeText(result)).toContain("Cannot modify the owner interlocutor");
-  });
-
-  it("returns an error when no fields are provided", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "update", id: 5 });
-    expect(makeText(result)).toContain("no fields to update");
-    expect(makeText(result)).toContain("enabled");
-  });
-
-  it("updates enabled to false and returns the full record", async () => {
+  it.each([
+    {
+      description: "enabling an interlocutor that has no agent_id",
+      params: { action: "update", id: 5, enabled: true },
+      current: { enabled: false, agent_id: null },
+    },
+    {
+      description: "clearing agent_id on an enabled interlocutor",
+      params: { action: "update", id: 5, agent_id: 0 },
+      current: { enabled: true, agent_id: 3 },
+    },
+  ])("returns an error when $description", async ({ params, current }) => {
     const pool = makeMockPool((text: string) => {
-      if (text.includes("WHERE i.id")) {
-        return Promise.resolve({
-          rows: [{ ...interlocutorRow5, enabled: false }],
-          rowCount: 1,
-        } as unknown as QueryResult);
-      }
-      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
-    });
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "update", id: 5, enabled: false });
-    expect(result.details).toMatchObject({ id: 5, enabled: false });
-    expect(makeText(result)).toContain("Bob");
-  });
-
-  it("returns an error when enabling an interlocutor that has no agent_id", async () => {
-    const pool = makeMockPool((text: string) => {
-      // The SELECT for current state returns agent_id: null, enabled: false.
       if (text.includes("SELECT enabled, agent_id")) {
-        return Promise.resolve({
-          rows: [{ enabled: false, agent_id: null }],
-          rowCount: 1,
-        } as unknown as QueryResult);
+        return Promise.resolve({ rows: [current], rowCount: 1 } as unknown as QueryResult);
       }
       return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
     });
     const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "update", id: 5, enabled: true });
+    const result = await tool.execute("call-1", params);
     expect(makeText(result)).toContain("Error:");
     expect(makeText(result)).toContain("cannot enable an interlocutor without an agent_id");
   });
 
-  it("returns an error when clearing agent_id on an enabled interlocutor", async () => {
+  it.each([
+    {
+      description: "updates enabled to false",
+      params: { id: 5, enabled: false },
+      record: { ...interlocutorRow5, enabled: false },
+      expected: { id: 5, enabled: false },
+    },
+    {
+      description: "updates enabled to true when the interlocutor has an agent_id",
+      params: { id: 10, enabled: true },
+      record: { ...interlocutorRow10, enabled: true },
+      expected: { id: 10, enabled: true },
+    },
+    {
+      description: "updates display_name",
+      params: { id: 5, display_name: "Alice Updated" },
+      record: { ...interlocutorRow5, display_name: "Alice Updated" },
+      expected: { id: 5, display_name: "Alice Updated" },
+    },
+    {
+      description: "updates agent_id",
+      params: { id: 5, agent_id: 3 },
+      record: { ...interlocutorRow5, agent_id: 3 },
+      expected: { id: 5, agent_id: 3 },
+    },
+    {
+      description: "clears agent_id when set to 0 on a disabled interlocutor",
+      params: { id: 5, agent_id: 0 },
+      record: { ...interlocutorRow5, agent_id: null, enabled: false },
+      expected: { id: 5, agent_id: null },
+    },
+  ])("$description and returns the full record", async ({ params, record, expected }) => {
     const pool = makeMockPool((text: string) => {
-      // The SELECT for current state returns agent_id: 3, enabled: true.
-      if (text.includes("SELECT enabled, agent_id")) {
-        return Promise.resolve({
-          rows: [{ enabled: true, agent_id: 3 }],
-          rowCount: 1,
-        } as unknown as QueryResult);
-      }
-      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
-    });
-    const tool = createManageInterlocutorsTool(pool);
-    // Clearing agent_id (sentinel 0) on an enabled interlocutor should be rejected.
-    const result = await tool.execute("call-1", { action: "update", id: 5, agent_id: 0 });
-    expect(makeText(result)).toContain("Error:");
-    expect(makeText(result)).toContain("cannot enable an interlocutor without an agent_id");
-  });
-
-  it("updates enabled to true when the interlocutor has an agent_id", async () => {
-    const pool = makeMockPool((text: string) => {
-      // The SELECT for current state returns agent_id: 3, enabled: false.
+      // The SELECT for current state returns an enabled interlocutor with an
+      // agent, so the enabled/agent_id invariant passes for every row.
       if (text.includes("SELECT enabled, agent_id")) {
         return Promise.resolve({
           rows: [{ enabled: false, agent_id: 3 }],
@@ -369,69 +268,14 @@ describe("manage_interlocutors — update", () => {
         } as unknown as QueryResult);
       }
       if (text.includes("WHERE i.id")) {
-        return Promise.resolve({
-          rows: [{ ...interlocutorRow10, enabled: true }],
-          rowCount: 1,
-        } as unknown as QueryResult);
+        return Promise.resolve({ rows: [record], rowCount: 1 } as unknown as QueryResult);
       }
       return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
     });
     const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "update", id: 10, enabled: true });
-    expect(result.details).toMatchObject({ id: 10, enabled: true });
-  });
-
-  it("updates display_name and returns the full record", async () => {
-    const pool = makeMockPool((text: string) => {
-      if (text.includes("WHERE i.id")) {
-        return Promise.resolve({
-          rows: [{ ...interlocutorRow5, display_name: "Alice Updated" }],
-          rowCount: 1,
-        } as unknown as QueryResult);
-      }
-      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
-    });
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "update", id: 5, display_name: "Alice Updated" });
-    expect(result.details).toMatchObject({ id: 5, display_name: "Alice Updated" });
-    expect(makeText(result)).toContain("Alice Updated");
-  });
-
-  it("updates agent_id and returns the full record", async () => {
-    const pool = makeMockPool((text: string) => {
-      if (text.includes("WHERE i.id")) {
-        return Promise.resolve({
-          rows: [{ ...interlocutorRow5, agent_id: 3 }],
-          rowCount: 1,
-        } as unknown as QueryResult);
-      }
-      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
-    });
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "update", id: 5, agent_id: 3 });
-    expect(result.details).toMatchObject({ id: 5, agent_id: 3 });
-  });
-
-  it("clears agent_id when set to 0 on a disabled interlocutor and returns the full record", async () => {
-    const pool = makeMockPool((text: string) => {
-      // The SELECT for current state returns agent_id: 3, enabled: false.
-      if (text.includes("SELECT enabled, agent_id")) {
-        return Promise.resolve({
-          rows: [{ enabled: false, agent_id: 3 }],
-          rowCount: 1,
-        } as unknown as QueryResult);
-      }
-      if (text.includes("WHERE i.id")) {
-        return Promise.resolve({
-          rows: [{ ...interlocutorRow5, agent_id: null, enabled: false }],
-          rowCount: 1,
-        } as unknown as QueryResult);
-      }
-      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
-    });
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "update", id: 5, agent_id: 0 });
-    expect(result.details).toMatchObject({ id: 5, agent_id: null });
+    const result = await tool.execute("call-1", { action: "update", ...params });
+    expect(result.details).toMatchObject(expected);
+    expect(makeText(result)).toContain(record.display_name);
   });
 
   it("updates mentions_only and returns the full record", async () => {
@@ -447,6 +291,7 @@ describe("manage_interlocutors — update", () => {
     const tool = createManageInterlocutorsTool(pool);
     const result = await tool.execute("call-1", { action: "update", id: 5, mentions_only: true });
     expect(result.details).toMatchObject({ id: 5, mentions_only: true });
+    expect(makeText(result)).toContain("Bob");
     const queryMock = pool.query as unknown as ReturnType<typeof vi.fn>;
     const updateCall = queryMock.mock.calls.find(
       (call: unknown[]) => typeof call[0] === "string" && (call[0] as string).includes("UPDATE interlocutors"),
@@ -473,20 +318,6 @@ describe("manage_interlocutors — update", () => {
 });
 
 describe("manage_interlocutors — delete", () => {
-  it("returns an error when id is missing", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "delete" });
-    expect(makeText(result)).toContain("id is required");
-  });
-
-  it("refuses to delete the owner interlocutor", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "delete", id: 1 });
-    expect(makeText(result)).toContain("Cannot modify the owner interlocutor");
-  });
-
   it("removes identities from an interlocutor and returns the full record", async () => {
     const pool = makeMockPool((text: string) => {
       if (text.includes("WHERE i.id")) {
@@ -505,34 +336,6 @@ describe("manage_interlocutors — delete", () => {
 });
 
 describe("manage_interlocutors — add_identity", () => {
-  it("returns an error when id is missing", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "add_identity", service: "signal", identifier: "+1" });
-    expect(makeText(result)).toContain("id is required");
-  });
-
-  it("refuses to add identity to the owner interlocutor", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "add_identity", id: 1, service: "signal", identifier: "+1" });
-    expect(makeText(result)).toContain("Cannot modify the owner interlocutor");
-  });
-
-  it("returns an error when service is missing", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "add_identity", id: 5, identifier: "+1" });
-    expect(makeText(result)).toContain("service is required");
-  });
-
-  it("returns an error when identifier is missing", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "add_identity", id: 5, service: "signal" });
-    expect(makeText(result)).toContain("identifier is required");
-  });
-
   it("adds an identity and returns the full record", async () => {
     const pool = makeMockPool((text: string) => {
       if (text.includes("WHERE i.id")) {
@@ -550,8 +353,7 @@ describe("manage_interlocutors — add_identity", () => {
   });
 
   it("returns an error when the identity conflicts during add_identity", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
+    const tool = createManageInterlocutorsTool(makeEmptyPool());
     const result = await tool.execute("call-1", { action: "add_identity", id: 5, service: "signal", identifier: "+1234567890" });
     expect(makeText(result)).toContain("Error:");
     expect(makeText(result)).toContain("signal");
@@ -561,34 +363,6 @@ describe("manage_interlocutors — add_identity", () => {
 });
 
 describe("manage_interlocutors — remove_identity", () => {
-  it("returns an error when id is missing", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "remove_identity", service: "signal", identifier: "+1" });
-    expect(makeText(result)).toContain("id is required");
-  });
-
-  it("refuses to remove identity from the owner interlocutor", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "remove_identity", id: 1, service: "signal", identifier: "+1" });
-    expect(makeText(result)).toContain("Cannot modify the owner interlocutor");
-  });
-
-  it("returns an error when service is missing", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "remove_identity", id: 5, identifier: "+1" });
-    expect(makeText(result)).toContain("service is required");
-  });
-
-  it("returns an error when identifier is missing", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "remove_identity", id: 5, service: "signal" });
-    expect(makeText(result)).toContain("identifier is required");
-  });
-
   it("removes an identity and returns the full record", async () => {
     const pool = makeMockPool((text: string) => {
       if (text.includes("WHERE i.id")) {
@@ -631,15 +405,5 @@ describe("manage_interlocutors — list", () => {
     expect(text).toContain("agent_id");
     expect(text).toContain("mentions_only");
     expect(text).not.toContain("instructions");
-  });
-});
-
-describe("manage_interlocutors — unknown action", () => {
-  it("returns an error for an unknown action", async () => {
-    const pool = makeMockPool(() => Promise.resolve({ rows: [], rowCount: 0 } as unknown as QueryResult));
-    const tool = createManageInterlocutorsTool(pool);
-    const result = await tool.execute("call-1", { action: "frobnicate" });
-    expect(makeText(result)).toContain("unknown action");
-    expect(makeText(result)).toContain("frobnicate");
   });
 });

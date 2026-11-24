@@ -51,8 +51,7 @@ describe("manage_files - search", () => {
   it("returns 'no matches found' when pattern does not match", async () => {
     testFilePath = await writeTestFile(testFilename, "hello world\nfoo bar\n");
     const result = await tool.execute("call-2", { action: "search", filename: testFilename, pattern: "zzznomatch" });
-    const text = asText(result.content[0]);
-    expect(text).toMatch(/no matches found/i);
+    expect(asText(result.content[0])).toMatch(/no matches found/i);
   });
 
   it("supports regex mode", async () => {
@@ -67,8 +66,7 @@ describe("manage_files - search", () => {
   it("returns a tool error for an invalid regex", async () => {
     testFilePath = await writeTestFile(testFilename, "some content\n");
     const result = await tool.execute("call-4", { action: "search", filename: testFilename, pattern: "[invalid", regex: true });
-    const text = asText(result.content[0]);
-    expect(text).toMatch(/invalid regular expression/i);
+    expect(asText(result.content[0])).toMatch(/invalid regular expression/i);
   });
 
   it("caps results at 100 and appends truncation notice", async () => {
@@ -79,24 +77,6 @@ describe("manage_files - search", () => {
     const lineCount = text.split("\n").filter((l) => /^\d+:/.test(l)).length;
     expect(lineCount).toBe(100);
     expect(text).toContain("showing 100 of 150 matches");
-  });
-
-  it("returns an error when filename is missing", async () => {
-    testFilePath = path.join(FILES_DIR, testFilename);
-    const result = await tool.execute("call-6", { action: "search", pattern: "hello" });
-    expect(asText(result.content[0])).toMatch(/filename is required/i);
-  });
-
-  it("returns an error when pattern is missing", async () => {
-    testFilePath = await writeTestFile(testFilename, "content\n");
-    const result = await tool.execute("call-7", { action: "search", filename: testFilename });
-    expect(asText(result.content[0])).toMatch(/pattern is required/i);
-  });
-
-  it("rejects paths outside TEMP_ATTACHMENTS_DIR", async () => {
-    testFilePath = path.join(FILES_DIR, testFilename);
-    const result = await tool.execute("call-8", { action: "search", filename: "/etc/passwd", pattern: "root" });
-    expect(asText(result.content[0])).toMatch(/path must be under/i);
   });
 });
 
@@ -125,13 +105,6 @@ describe("manage_files - read_lines", () => {
     expect(text).toContain("lines 2-4 of");
   });
 
-  it("returns an error when 'from' is below 1", async () => {
-    testFilePath = await writeTestFile(testFilename, "line1\nline2\nline3\n");
-    const result = await tool.execute("call-2", { action: "read_lines", filename: testFilename, from: -5, to: 2 });
-    const text = asText(result.content[0]);
-    expect(text).toMatch(/from must be an integer >= 1/i);
-  });
-
   it("clamps 'to' to the last line when beyond EOF", async () => {
     testFilePath = await writeTestFile(testFilename, "line1\nline2\nline3\n");
     const result = await tool.execute("call-3", { action: "read_lines", filename: testFilename, from: 2, to: 999 });
@@ -143,44 +116,16 @@ describe("manage_files - read_lines", () => {
   it("returns empty with total count when 'from' is beyond EOF", async () => {
     testFilePath = await writeTestFile(testFilename, "line1\nline2\n");
     const result = await tool.execute("call-4", { action: "read_lines", filename: testFilename, from: 100, to: 200 });
-    const text = asText(result.content[0]);
-    expect(text).toContain("100-200");
+    expect(asText(result.content[0])).toContain("100-200");
   });
 
-  it("returns an error when filename is missing", async () => {
-    testFilePath = path.join(FILES_DIR, testFilename);
-    const result = await tool.execute("call-5", { action: "read_lines", from: 1, to: 5 });
-    expect(asText(result.content[0])).toMatch(/filename is required/i);
-  });
-
-  it("returns an error when from is missing", async () => {
-    testFilePath = await writeTestFile(testFilename, "content\n");
-    const result = await tool.execute("call-6", { action: "read_lines", filename: testFilename, to: 5 });
-    expect(asText(result.content[0])).toMatch(/from is required/i);
-  });
-
-  it("returns an error when to is missing", async () => {
-    testFilePath = await writeTestFile(testFilename, "content\n");
-    const result = await tool.execute("call-7", { action: "read_lines", filename: testFilename, from: 1 });
-    expect(asText(result.content[0])).toMatch(/to is required/i);
-  });
-
-  it("returns an error when from is less than 1", async () => {
-    testFilePath = await writeTestFile(testFilename, "line1\nline2\n");
-    const result = await tool.execute("call-8", { action: "read_lines", filename: testFilename, from: 0, to: 2 });
-    expect(asText(result.content[0])).toMatch(/from must be an integer >= 1/i);
-  });
-
-  it("returns an error when from is a non-integer", async () => {
-    testFilePath = await writeTestFile(testFilename, "line1\nline2\n");
-    const result = await tool.execute("call-9", { action: "read_lines", filename: testFilename, from: 1.5, to: 2 });
-    expect(asText(result.content[0])).toMatch(/from must be an integer >= 1/i);
-  });
-
-  it("returns an error when to is a non-integer", async () => {
-    testFilePath = await writeTestFile(testFilename, "line1\nline2\n");
-    const result = await tool.execute("call-10", { action: "read_lines", filename: testFilename, from: 1, to: 1.5 });
-    expect(asText(result.content[0])).toMatch(/to must be an integer/i);
+  it.each([
+    { description: "'from' is below 1", params: { from: -5, to: 2 }, error: /from must be an integer >= 1/i },
+    { description: "'from' is a non-integer", params: { from: 1.5, to: 2 }, error: /from must be an integer >= 1/i },
+    { description: "'to' is a non-integer", params: { from: 1, to: 1.5 }, error: /to must be an integer/i },
+  ])("returns an error when $description", async ({ params, error }) => {
+    const result = await tool.execute("call-2", { action: "read_lines", filename: testFilename, ...params });
+    expect(asText(result.content[0])).toMatch(error);
   });
 });
 
@@ -224,56 +169,7 @@ describe("manage_files - write_lines", () => {
     testFilePath = await writeTestFile(testFilename, "line1\nline2\nline3\n");
     // 3 real lines; replacing 1 line (1-1) with 3 new lines: 3 - 1 + 3 = 5.
     const result = await tool.execute("call-4", { action: "write_lines", filename: testFilename, from: 1, to: 1, content: "a\nb\nc" });
-    const text = asText(result.content[0]);
-    expect(text).toContain("5");
-  });
-
-  it("returns an error when filename is missing", async () => {
-    testFilePath = path.join(FILES_DIR, testFilename);
-    const result = await tool.execute("call-5", { action: "write_lines", from: 1, to: 2, content: "x" });
-    expect(asText(result.content[0])).toMatch(/filename is required/i);
-  });
-
-  it("returns an error when from is missing", async () => {
-    testFilePath = await writeTestFile(testFilename, "content\n");
-    const result = await tool.execute("call-6", { action: "write_lines", filename: testFilename, to: 1, content: "x" });
-    expect(asText(result.content[0])).toMatch(/from is required/i);
-  });
-
-  it("returns an error when to is missing", async () => {
-    testFilePath = await writeTestFile(testFilename, "content\n");
-    const result = await tool.execute("call-7", { action: "write_lines", filename: testFilename, from: 1, content: "x" });
-    expect(asText(result.content[0])).toMatch(/to is required/i);
-  });
-
-  it("returns an error when content is missing", async () => {
-    testFilePath = await writeTestFile(testFilename, "content\n");
-    const result = await tool.execute("call-8", { action: "write_lines", filename: testFilename, from: 1, to: 1 });
-    expect(asText(result.content[0])).toMatch(/content is required/i);
-  });
-
-  it("returns an error when from is 0", async () => {
-    testFilePath = await writeTestFile(testFilename, "line1\nline2\n");
-    const result = await tool.execute("call-9", { action: "write_lines", filename: testFilename, from: 0, to: 1, content: "x" });
-    expect(asText(result.content[0])).toMatch(/from must be an integer >= 1/i);
-  });
-
-  it("returns an error when from is negative", async () => {
-    testFilePath = await writeTestFile(testFilename, "line1\nline2\n");
-    const result = await tool.execute("call-10", { action: "write_lines", filename: testFilename, from: -1, to: 1, content: "x" });
-    expect(asText(result.content[0])).toMatch(/from must be an integer >= 1/i);
-  });
-
-  it("returns an error when from is a non-integer", async () => {
-    testFilePath = await writeTestFile(testFilename, "line1\nline2\n");
-    const result = await tool.execute("call-11", { action: "write_lines", filename: testFilename, from: 1.5, to: 2, content: "x" });
-    expect(asText(result.content[0])).toMatch(/from must be an integer >= 1/i);
-  });
-
-  it("returns an error when to is a non-integer", async () => {
-    testFilePath = await writeTestFile(testFilename, "line1\nline2\n");
-    const result = await tool.execute("call-12", { action: "write_lines", filename: testFilename, from: 1, to: 1.5, content: "x" });
-    expect(asText(result.content[0])).toMatch(/to must be an integer/i);
+    expect(asText(result.content[0])).toContain("5");
   });
 
   it("preserves trailing newline after write", async () => {
@@ -288,6 +184,16 @@ describe("manage_files - write_lines", () => {
     await tool.execute("call-14", { action: "write_lines", filename: testFilename, from: 2, to: 2, content: "replaced" });
     const written = await fs.readFile(testFilePath, "utf-8");
     expect(written).toBe("line1\nreplaced\nline3");
+  });
+
+  it.each([
+    { description: "'from' is 0", params: { from: 0, to: 1 }, error: /from must be an integer >= 1/i },
+    { description: "'from' is negative", params: { from: -1, to: 1 }, error: /from must be an integer >= 1/i },
+    { description: "'from' is a non-integer", params: { from: 1.5, to: 2 }, error: /from must be an integer >= 1/i },
+    { description: "'to' is a non-integer", params: { from: 1, to: 1.5 }, error: /to must be an integer/i },
+  ])("returns an error when $description", async ({ params, error }) => {
+    const result = await tool.execute("call-9", { action: "write_lines", filename: testFilename, content: "x", ...params });
+    expect(asText(result.content[0])).toMatch(error);
   });
 });
 
@@ -307,15 +213,13 @@ describe("manage_files - line count correctness", () => {
   it("reports 3 lines for a file with trailing newline", async () => {
     testFilePath = await writeTestFile(testFilename, "a\nb\nc\n");
     const result = await tool.execute("call-1", { action: "read_lines", filename: testFilename, from: 1, to: 10 });
-    const text = asText(result.content[0]);
-    expect(text).toContain("of 3 total");
+    expect(asText(result.content[0])).toContain("of 3 total");
   });
 
   it("reports 3 lines for a file without trailing newline", async () => {
     testFilePath = await writeTestFile(testFilename, "a\nb\nc");
     const result = await tool.execute("call-2", { action: "read_lines", filename: testFilename, from: 1, to: 10 });
-    const text = asText(result.content[0]);
-    expect(text).toContain("of 3 total");
+    expect(asText(result.content[0])).toContain("of 3 total");
   });
 
   it("search does not report a phantom empty line at end of file with trailing newline", async () => {
@@ -350,39 +254,10 @@ describe("manage_files - copy", () => {
     sourceFilePath = await writeTestFile(sourceFilename, "copy me");
     destFilePath = path.join(FILES_DIR, destFilename);
     const result = await tool.execute("call-1", { action: "copy", source: sourceFilename, destination: destFilename });
-    const text = asText(result.content[0]);
-    expect(text).toBe(destFilePath);
+    expect(asText(result.content[0])).toBe(destFilePath);
     expect(await fileExists(destFilePath)).toBe(true);
     expect(await fs.readFile(destFilePath, "utf-8")).toBe("copy me");
     expect(await fileExists(sourceFilePath)).toBe(true);
-  });
-
-  it("returns an error when source is missing", async () => {
-    sourceFilePath = path.join(FILES_DIR, sourceFilename);
-    destFilePath = path.join(FILES_DIR, destFilename);
-    const result = await tool.execute("call-2", { action: "copy", destination: destFilename });
-    expect(asText(result.content[0])).toMatch(/source is required/i);
-  });
-
-  it("returns an error when destination is missing", async () => {
-    sourceFilePath = await writeTestFile(sourceFilename, "copy me");
-    destFilePath = path.join(FILES_DIR, destFilename);
-    const result = await tool.execute("call-3", { action: "copy", source: sourceFilename });
-    expect(asText(result.content[0])).toMatch(/destination is required/i);
-  });
-
-  it("rejects source paths outside TEMP_ATTACHMENTS_DIR", async () => {
-    sourceFilePath = path.join(FILES_DIR, sourceFilename);
-    destFilePath = path.join(FILES_DIR, destFilename);
-    const result = await tool.execute("call-4", { action: "copy", source: "/etc/passwd", destination: destFilename });
-    expect(asText(result.content[0])).toMatch(/path must be under/i);
-  });
-
-  it("rejects destination paths outside TEMP_ATTACHMENTS_DIR", async () => {
-    sourceFilePath = await writeTestFile(sourceFilename, "copy me");
-    destFilePath = path.join(FILES_DIR, destFilename);
-    const result = await tool.execute("call-5", { action: "copy", source: sourceFilename, destination: "/tmp/evil" });
-    expect(asText(result.content[0])).toMatch(/path must be under/i);
   });
 });
 
@@ -407,38 +282,41 @@ describe("manage_files - move", () => {
     sourceFilePath = await writeTestFile(sourceFilename, "move me");
     destFilePath = path.join(FILES_DIR, destFilename);
     const result = await tool.execute("call-1", { action: "move", source: sourceFilename, destination: destFilename });
-    const text = asText(result.content[0]);
-    expect(text).toBe(destFilePath);
+    expect(asText(result.content[0])).toBe(destFilePath);
     expect(await fileExists(destFilePath)).toBe(true);
     expect(await fs.readFile(destFilePath, "utf-8")).toBe("move me");
     expect(await fileExists(sourceFilePath)).toBe(false);
   });
+});
 
-  it("returns an error when source is missing", async () => {
-    sourceFilePath = path.join(FILES_DIR, sourceFilename);
-    destFilePath = path.join(FILES_DIR, destFilename);
-    const result = await tool.execute("call-2", { action: "move", destination: destFilename });
-    expect(asText(result.content[0])).toMatch(/source is required/i);
+// Path containment is the security boundary shared by search, copy and move, so
+// every case stays even though resolvePath is shared.
+describe("manage_files - path containment", () => {
+  const tool = createManageFilesTool();
+  const sourceFilename = "files-test-containment-source.txt";
+  const destFilename = "files-test-containment-dest.txt";
+  const sourceFilePath = path.join(FILES_DIR, sourceFilename);
+  const destFilePath = path.join(FILES_DIR, destFilename);
+
+  afterEach(async () => {
+    for (const filePath of [sourceFilePath, destFilePath]) {
+      try {
+        await fs.unlink(filePath);
+      } catch {
+        // File may not exist; ignore.
+      }
+    }
   });
 
-  it("returns an error when destination is missing", async () => {
-    sourceFilePath = await writeTestFile(sourceFilename, "move me");
-    destFilePath = path.join(FILES_DIR, destFilename);
-    const result = await tool.execute("call-3", { action: "move", source: sourceFilename });
-    expect(asText(result.content[0])).toMatch(/destination is required/i);
-  });
-
-  it("rejects source paths outside TEMP_ATTACHMENTS_DIR", async () => {
-    sourceFilePath = path.join(FILES_DIR, sourceFilename);
-    destFilePath = path.join(FILES_DIR, destFilename);
-    const result = await tool.execute("call-4", { action: "move", source: "/etc/passwd", destination: destFilename });
-    expect(asText(result.content[0])).toMatch(/path must be under/i);
-  });
-
-  it("rejects destination paths outside TEMP_ATTACHMENTS_DIR", async () => {
-    sourceFilePath = await writeTestFile(sourceFilename, "move me");
-    destFilePath = path.join(FILES_DIR, destFilename);
-    const result = await tool.execute("call-5", { action: "move", source: sourceFilename, destination: "/tmp/evil" });
+  it.each([
+    { description: "search", params: { action: "search", filename: "/etc/passwd", pattern: "root" } },
+    { description: "copy source", params: { action: "copy", source: "/etc/passwd", destination: destFilename } },
+    { description: "copy destination", params: { action: "copy", source: sourceFilename, destination: "/tmp/evil" } },
+    { description: "move source", params: { action: "move", source: "/etc/passwd", destination: destFilename } },
+    { description: "move destination", params: { action: "move", source: sourceFilename, destination: "/tmp/evil" } },
+  ])("rejects $description paths outside TEMP_ATTACHMENTS_DIR", async ({ params }) => {
+    await writeTestFile(sourceFilename, "content");
+    const result = await tool.execute("call-1", params);
     expect(asText(result.content[0])).toMatch(/path must be under/i);
   });
 });

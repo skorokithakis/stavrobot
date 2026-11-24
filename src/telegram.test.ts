@@ -27,89 +27,98 @@ function jsonResponse(payload: unknown): Response {
 }
 
 describe("applyTelegramEntitiesToMarkdown", () => {
-  it("returns text unchanged when entities is undefined", () => {
-    expect(applyTelegramEntitiesToMarkdown("hello world", undefined)).toBe("hello world");
+  it.each([
+    {
+      label: "bold",
+      text: "hello world",
+      entities: [{ type: "bold", offset: 6, length: 5 }],
+      expected: "hello **world**",
+    },
+    {
+      label: "italic",
+      text: "hello world",
+      entities: [{ type: "italic", offset: 0, length: 5 }],
+      expected: "_hello_ world",
+    },
+    {
+      label: "strikethrough",
+      text: "hello world",
+      entities: [{ type: "strikethrough", offset: 0, length: 11 }],
+      expected: "~~hello world~~",
+    },
+    {
+      label: "inline code",
+      text: "run ls -la now",
+      entities: [{ type: "code", offset: 4, length: 6 }],
+      expected: "run `ls -la` now",
+    },
+    {
+      label: "pre without language",
+      text: "code block",
+      entities: [{ type: "pre", offset: 0, length: 10 }],
+      expected: "```\ncode block\n```",
+    },
+    {
+      label: "pre with language",
+      text: "const x = 1",
+      entities: [{ type: "pre", offset: 0, length: 11, language: "javascript" }],
+      expected: "```javascript\nconst x = 1\n```",
+    },
+    {
+      label: "text_link",
+      text: "click here for more",
+      entities: [{ type: "text_link", offset: 6, length: 4, url: "https://example.com" }],
+      expected: "click [here](https://example.com) for more",
+    },
+    {
+      label: "spoiler",
+      text: "secret text here",
+      entities: [{ type: "spoiler", offset: 0, length: 11 }],
+      expected: "<spoiler>secret text</spoiler> here",
+    },
+    {
+      label: "an entity spanning the entire text",
+      text: "all bold",
+      entities: [{ type: "bold", offset: 0, length: 8 }],
+      expected: "**all bold**",
+    },
+  ])("applies $label formatting", ({ text, entities, expected }) => {
+    expect(applyTelegramEntitiesToMarkdown(text, entities)).toBe(expected);
   });
 
-  it("returns text unchanged when entities is empty", () => {
-    expect(applyTelegramEntitiesToMarkdown("hello world", [])).toBe("hello world");
-  });
-
-  it("applies bold formatting", () => {
-    const result = applyTelegramEntitiesToMarkdown("hello world", [
-      { type: "bold", offset: 6, length: 5 },
-    ]);
-    expect(result).toBe("hello **world**");
-  });
-
-  it("applies italic formatting", () => {
-    const result = applyTelegramEntitiesToMarkdown("hello world", [
-      { type: "italic", offset: 0, length: 5 },
-    ]);
-    expect(result).toBe("_hello_ world");
-  });
-
-  it("applies strikethrough formatting", () => {
-    const result = applyTelegramEntitiesToMarkdown("hello world", [
-      { type: "strikethrough", offset: 0, length: 11 },
-    ]);
-    expect(result).toBe("~~hello world~~");
-  });
-
-  it("applies inline code formatting", () => {
-    const result = applyTelegramEntitiesToMarkdown("run ls -la now", [
-      { type: "code", offset: 4, length: 6 },
-    ]);
-    expect(result).toBe("run `ls -la` now");
-  });
-
-  it("applies pre formatting without language", () => {
-    const result = applyTelegramEntitiesToMarkdown("code block", [
-      { type: "pre", offset: 0, length: 10 },
-    ]);
-    expect(result).toBe("```\ncode block\n```");
-  });
-
-  it("applies pre formatting with language", () => {
-    const result = applyTelegramEntitiesToMarkdown("const x = 1", [
-      { type: "pre", offset: 0, length: 11, language: "javascript" },
-    ]);
-    expect(result).toBe("```javascript\nconst x = 1\n```");
-  });
-
-  it("applies text_link formatting", () => {
-    const result = applyTelegramEntitiesToMarkdown("click here for more", [
-      { type: "text_link", offset: 6, length: 4, url: "https://example.com" },
-    ]);
-    expect(result).toBe("click [here](https://example.com) for more");
-  });
-
-  it("skips text_link when url is missing", () => {
-    const result = applyTelegramEntitiesToMarkdown("click here", [
-      { type: "text_link", offset: 6, length: 4 },
-    ]);
-    expect(result).toBe("click here");
-  });
-
-  it("applies spoiler formatting", () => {
-    const result = applyTelegramEntitiesToMarkdown("secret text here", [
-      { type: "spoiler", offset: 0, length: 11 },
-    ]);
-    expect(result).toBe("<spoiler>secret text</spoiler> here");
-  });
-
-  it("ignores unknown entity types", () => {
-    const result = applyTelegramEntitiesToMarkdown("@username hello", [
-      { type: "mention", offset: 0, length: 9 },
-    ]);
-    expect(result).toBe("@username hello");
-  });
-
-  it("ignores url entity type", () => {
-    const result = applyTelegramEntitiesToMarkdown("visit https://example.com now", [
-      { type: "url", offset: 6, length: 19 },
-    ]);
-    expect(result).toBe("visit https://example.com now");
+  it.each([
+    { label: "entities is undefined", text: "hello world", entities: undefined, expected: "hello world" },
+    { label: "entities is empty", text: "hello world", entities: [], expected: "hello world" },
+    {
+      label: "an entity type is unknown",
+      text: "@username hello",
+      entities: [{ type: "mention", offset: 0, length: 9 }],
+      expected: "@username hello",
+    },
+    {
+      label: "the entity type is url",
+      text: "visit https://example.com now",
+      entities: [{ type: "url", offset: 6, length: 19 }],
+      expected: "visit https://example.com now",
+    },
+    {
+      label: "all entities are of ignored types",
+      text: "@user #tag /cmd",
+      entities: [
+        { type: "mention", offset: 0, length: 5 },
+        { type: "hashtag", offset: 6, length: 4 },
+        { type: "bot_command", offset: 11, length: 4 },
+      ],
+      expected: "@user #tag /cmd",
+    },
+    {
+      label: "a text_link entity has no url",
+      text: "click here",
+      entities: [{ type: "text_link", offset: 6, length: 4 }],
+      expected: "click here",
+    },
+  ])("returns text unchanged when $label", ({ text, entities, expected }) => {
+    expect(applyTelegramEntitiesToMarkdown(text, entities)).toBe(expected);
   });
 
   it("handles multiple non-overlapping entities", () => {
@@ -160,22 +169,6 @@ describe("applyTelegramEntitiesToMarkdown", () => {
       { type: "bold", offset: 3, length: 5 },
     ]);
     expect(result).toBe("\u{1F600} **hello**");
-  });
-
-  it("handles entity spanning the entire text", () => {
-    const result = applyTelegramEntitiesToMarkdown("all bold", [
-      { type: "bold", offset: 0, length: 8 },
-    ]);
-    expect(result).toBe("**all bold**");
-  });
-
-  it("returns text unchanged when all entities are of ignored types", () => {
-    const result = applyTelegramEntitiesToMarkdown("@user #tag /cmd", [
-      { type: "mention", offset: 0, length: 5 },
-      { type: "hashtag", offset: 6, length: 4 },
-      { type: "bot_command", offset: 11, length: 4 },
-    ]);
-    expect(result).toBe("@user #tag /cmd");
   });
 });
 

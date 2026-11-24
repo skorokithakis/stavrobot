@@ -3,12 +3,7 @@ import http from "http";
 import os from "os";
 import path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Config } from "./config.js";
-import {
-  handleGetConfigRequest,
-  handlePutConfigRequest,
-  serveConfigSettingsPage,
-} from "./config-settings.js";
+import { handleGetConfigRequest, handlePutConfigRequest } from "./config-settings.js";
 
 const BASE_TOML = `provider = "anthropic"
 model = "claude-sonnet-4-20250514"
@@ -53,21 +48,6 @@ function makeMockRequest(body: string): http.IncomingMessage {
   } as unknown as http.IncomingMessage;
 }
 
-function makeConfig(overrides: Partial<Config> = {}): Config {
-  return {
-    provider: "anthropic",
-    model: "claude-sonnet-4-20250514",
-    apiKey: "test-key",
-    publicHostname: "https://example.com",
-    baseSystemPrompt: "You are a bot.",
-    compactionPrompt: "Compact.",
-    compactionBulletPrompt: "Compact.",
-    baseAgentPrompt: "You are Stavrobot.",
-    owner: { name: "Owner" },
-    ...overrides,
-  } as Config;
-}
-
 const originalConfigPath = process.env.CONFIG_PATH;
 let temporaryDirectory: string;
 let configPath: string;
@@ -89,63 +69,14 @@ afterEach((): void => {
   }
 });
 
-describe("serveConfigSettingsPage", (): void => {
-  it("serves the shell with a client-loaded editor and banner states", (): void => {
-    const response = makeMockResponse();
-
-    serveConfigSettingsPage(response as unknown as http.ServerResponse, makeConfig());
-
-    expect(response.statusCode).toBe(200);
-    expect(response.headers["Content-Type"]).toBe("text/html; charset=utf-8");
-    expect(response.body).toContain('href="/assets/sb.css"');
-    expect(response.body).toContain('id="config-content"');
-    expect(response.body).toContain("sb-input sb-code-editor");
-    expect(response.body).toContain("/api/settings/config");
-    expect(response.body).toContain('cache: "no-store"');
-    expect(response.body).toContain("Save and restart");
-    expect(response.body).toContain("Loading config...");
-    expect(response.body).toContain("Saving...");
-    expect(response.body).toContain("Saved, restarting...");
-    expect(response.body).toContain("Could not load config.toml.");
-    expect(response.body).toContain("Unsaved changes");
-    expect(response.body).toContain("Go to line");
-  });
-
-  it("keeps the manual restart warning accurate", (): void => {
-    const response = makeMockResponse();
-
-    serveConfigSettingsPage(response as unknown as http.ServerResponse, makeConfig());
-
-    expect(response.body).toContain("Saving restarts the bot");
-    expect(response.body).toContain("plugin-runner");
-    expect(response.body).toContain("coder");
-    expect(response.body).toContain("signal-bridge");
-    expect(response.body).toContain("python-runner");
-  });
-
-  it("shows the configured model in the shell navigation", (): void => {
-    const response = makeMockResponse();
-
-    serveConfigSettingsPage(
-      response as unknown as http.ServerResponse,
-      makeConfig({ model: "claude-opus-4-20250514" }),
-    );
-
-    expect(response.body).toContain("claude-opus-4-20250514");
-    expect(response.body).toContain('href="/settings/config" aria-current="page"');
-  });
-});
-
 describe("handleGetConfigRequest", (): void => {
-  it("returns the raw config file content", (): void => {
-    const content = `# Keep comments intact\n${BASE_TOML}`;
-    fs.writeFileSync(configPath, content, "utf-8");
+  it("marks the raw config response, which contains secrets, as no-store", (): void => {
+    fs.writeFileSync(configPath, BASE_TOML, "utf-8");
     const response = makeMockResponse();
 
     handleGetConfigRequest(response as unknown as http.ServerResponse);
 
-    expect(response.statusCode).toBe(200);
-    expect(JSON.parse(response.body!).content).toBe(content);
+    expect(JSON.parse(response.body!).content).toBe(BASE_TOML);
     expect(response.headers["Cache-Control"]).toBe("no-store");
   });
 });

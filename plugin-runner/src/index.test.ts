@@ -118,43 +118,22 @@ describe("migrateGitInstalledMarkers", () => {
 });
 
 describe("isGitUrlSchemeAllowed", () => {
-  it("allows https:// URLs", () => {
-    expect(isGitUrlSchemeAllowed("https://github.com/user/repo.git")).toBe(true);
-  });
+  // This guard stops a plugin URL from making git run an arbitrary command, so
+  // every accepted scheme and every rejected form stays in the table.
+  const cases: Array<[string, string, boolean]> = [
+    ["allows https:// URLs", "https://github.com/user/repo.git", true],
+    ["allows http:// URLs", "http://example.com/repo.git", true],
+    ["allows git:// URLs", "git://github.com/user/repo.git", true],
+    ["allows ssh:// URLs", "ssh://git@github.com/user/repo.git", true],
+    ["allows git@ SCP-style SSH URLs", "git@github.com:user/repo.git", true],
+    ["rejects ext:: URLs (arbitrary command execution)", "ext::sh -c 'id >/tmp/pwned'", false],
+    ["rejects file:// URLs", "file:///etc/passwd", false],
+    ["rejects bare paths", "/tmp/repo", false],
+    ["rejects empty string", "", false],
+    ["rejects URLs with no scheme", "github.com/user/repo", false],
+  ];
 
-  it("allows http:// URLs", () => {
-    expect(isGitUrlSchemeAllowed("http://example.com/repo.git")).toBe(true);
-  });
-
-  it("allows git:// URLs", () => {
-    expect(isGitUrlSchemeAllowed("git://github.com/user/repo.git")).toBe(true);
-  });
-
-  it("allows ssh:// URLs", () => {
-    expect(isGitUrlSchemeAllowed("ssh://git@github.com/user/repo.git")).toBe(true);
-  });
-
-  it("allows git@ SCP-style SSH URLs", () => {
-    expect(isGitUrlSchemeAllowed("git@github.com:user/repo.git")).toBe(true);
-  });
-
-  it("rejects ext:: URLs (arbitrary command execution)", () => {
-    expect(isGitUrlSchemeAllowed("ext::sh -c 'id >/tmp/pwned'")).toBe(false);
-  });
-
-  it("rejects file:// URLs", () => {
-    expect(isGitUrlSchemeAllowed("file:///etc/passwd")).toBe(false);
-  });
-
-  it("rejects bare paths", () => {
-    expect(isGitUrlSchemeAllowed("/tmp/repo")).toBe(false);
-  });
-
-  it("rejects empty string", () => {
-    expect(isGitUrlSchemeAllowed("")).toBe(false);
-  });
-
-  it("rejects URLs with no scheme", () => {
-    expect(isGitUrlSchemeAllowed("github.com/user/repo")).toBe(false);
+  it.each(cases)("%s", (_description, url, allowed) => {
+    expect(isGitUrlSchemeAllowed(url)).toBe(allowed);
   });
 });
