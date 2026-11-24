@@ -299,6 +299,7 @@ export interface InterlocutorInfo {
   agentId: number;
   isOwner: boolean;
   displayName: string;
+  mentionsOnly: boolean;
 }
 
 export async function resolveInterlocutorByName(
@@ -359,9 +360,10 @@ export async function resolveInterlocutor(
       agent_id: number | null;
       display_name: string;
       identifier: string;
+      mentions_only: boolean;
     }>(
       `SELECT i.id AS interlocutor_id, ii.id AS identity_id, i.agent_id,
-              i.display_name, ii.identifier
+              i.display_name, ii.identifier, i.mentions_only
        FROM interlocutor_identities ii
        JOIN interlocutors i ON i.id = ii.interlocutor_id
        WHERE ii.service = 'email' AND i.enabled = true
@@ -382,6 +384,7 @@ export async function resolveInterlocutor(
       agentId: matchedRow.agent_id,
       isOwner: matchedRow.interlocutor_id === getOwnerInterlocutorId(),
       displayName: matchedRow.display_name,
+      mentionsOnly: matchedRow.mentions_only,
     };
   }
 
@@ -390,8 +393,10 @@ export async function resolveInterlocutor(
     identity_id: number;
     agent_id: number | null;
     display_name: string;
+    mentions_only: boolean;
   }>(
-    `SELECT i.id AS interlocutor_id, ii.id AS identity_id, i.agent_id, i.display_name
+    `SELECT i.id AS interlocutor_id, ii.id AS identity_id, i.agent_id, i.display_name,
+            i.mentions_only
      FROM interlocutor_identities ii
      JOIN interlocutors i ON i.id = ii.interlocutor_id
      WHERE ii.service = $1 AND ii.identifier = $2 AND i.enabled = true`,
@@ -411,6 +416,7 @@ export async function resolveInterlocutor(
     agentId: row.agent_id,
     isOwner: row.interlocutor_id === getOwnerInterlocutorId(),
     displayName: row.display_name,
+    mentionsOnly: row.mentions_only,
   };
 }
 

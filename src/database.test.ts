@@ -56,6 +56,7 @@ describe("resolveInterlocutor — email wildcard matching", () => {
             agent_id: 5,
             display_name: "Example Corp",
             identifier: "*@example.com",
+            mentions_only: true,
           },
         ],
         rowCount: 1,
@@ -67,6 +68,7 @@ describe("resolveInterlocutor — email wildcard matching", () => {
     expect(result?.identityId).toBe(10);
     expect(result?.agentId).toBe(5);
     expect(result?.displayName).toBe("Example Corp");
+    expect(result?.mentionsOnly).toBe(true);
   });
 
   it("does not match *@example.com against user@other.com", async () => {
@@ -204,6 +206,7 @@ describe("resolveInterlocutor — non-email services (exact match)", () => {
             identity_id: 70,
             agent_id: 12,
             display_name: "Signal User",
+            mentions_only: true,
           },
         ],
         rowCount: 1,
@@ -212,6 +215,7 @@ describe("resolveInterlocutor — non-email services (exact match)", () => {
     const result = await resolveInterlocutor(pool, "signal", "+1234567890");
     expect(result).not.toBeNull();
     expect(result?.interlocutorId).toBe(7);
+    expect(result?.mentionsOnly).toBe(true);
   });
 
   it("returns null when no signal identity matches", async () => {

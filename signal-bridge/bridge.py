@@ -123,6 +123,7 @@ def send_agent_request(
     files: list[dict] | None = None,
     participant: dict | None = None,
     sender_label: str | None = None,
+    addressed_to_bot: bool = False,
 ) -> str:
     """Send a message to the agent API and return the response.
 
@@ -131,7 +132,7 @@ def send_agent_request(
     """
     log(f"send_agent_request: sending to agent API (message length={len(message_text) if message_text else 0}, files={len(files) if files else 0}, sender={sender}, participant={participant}, senderLabel={sender_label})")
     connection = http.client.HTTPConnection("app", 3000, timeout=60)
-    payload: dict = {"source": "signal", "sender": sender}
+    payload: dict = {"source": "signal", "sender": sender, "addressedToBot": addressed_to_bot}
     if participant is not None:
         payload["participant"] = participant
     if sender_label is not None:
@@ -500,12 +501,93 @@ def parse_sse_event(lines: list[str]) -> dict | None:
     return None
 
 
+# Signal puts one U+FFFC in the message text at each mention and lists the
+# mentions separately with offsets into the original text.
+_MENTION_PLACEHOLDER = "\ufffc"
+_WHITESPACE_PATTERN = re.compile(r"\s+")
+_QUOTE_PREVIEW_LENGTH = 300
+
+
+def first_present(values: list[object]) -> str | None:
+    """Return the first non-empty string in values, or None."""
+    for value in values:
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def mention_label(mention: dict, account: str) -> str:
+    """Return the label that replaces a mention placeholder."""
+    if account and account in (mention.get("number"), mention.get("uuid")):
+        return "you"
+    return first_present([mention.get("name"), mention.get("number"), mention.get("uuid")]) or ""
+
+
+def replace_mentions(message_text: str, mentions: list[dict], account: str) -> str:
+    """Replace each U+FFFC placeholder with the corresponding mention's label.
+
+    Markdown conversion inserts characters and shifts the mention offsets, so the
+    mentions are matched to placeholders in start order rather than by offset.
+    """
+    for mention in sorted(mentions, key=lambda mention: mention.get("start", 0)):
+        label = mention_label(mention, account)
+        message_text = message_text.replace(_MENTION_PLACEHOLDER, f"@{label}", 1)
+    return message_text
+
+
+def quote_author_label(quote: dict, account: str) -> str:
+    """Return the display label for the author of a quoted message."""
+    author_fields = [quote.get("author"), quote.get("authorNumber"), quote.get("authorUuid")]
+    if account and account in author_fields:
+        return "you"
+    return first_present(author_fields) or "unknown"
+
+
+def format_quote_line(quote: dict, account: str) -> str | None:
+    """Return the one-line quote summary, or None when the quote has no text."""
+    quote_text = quote.get("text")
+    if not isinstance(quote_text, str):
+        return None
+    flattened_text = _WHITESPACE_PATTERN.sub(" ", quote_text).strip()
+    if not flattened_text:
+        return None
+    if len(flattened_text) > _QUOTE_PREVIEW_LENGTH:
+        flattened_text = flattened_text[:_QUOTE_PREVIEW_LENGTH] + "…"
+    return f'[In reply to {quote_author_label(quote, account)}: "{flattened_text}"]'
+
+
+def message_addresses_bot(data_message: dict, account: str) -> bool:
+    """Return True when a mention or the quoted author is the bot's own account."""
+    if not account:
+        return False
+    mentions = data_message.get("mentions", [])
+    if isinstance(mentions, list) and any(
+        isinstance(mention, dict)
+        and account in (mention.get("number"), mention.get("uuid"))
+        for mention in mentions
+    ):
+        return True
+    quote = data_message.get("quote")
+    if isinstance(quote, dict) and account in (
+        quote.get("authorNumber"),
+        quote.get("authorUuid"),
+        quote.get("author"),
+    ):
+        return True
+    return False
+
+
 def process_signal_event(
     event_data: dict,
     request_counter: RequestCounter,
 ) -> None:
     """Process a Signal receive event and handle the message."""
     envelope = event_data.get("envelope", {})
+    # The top-level account is the bot's own number, used to spot mentions and
+    # replies that address it.
+    account = event_data.get("account")
+    if not isinstance(account, str):
+        account = ""
     log(f"Processing event: envelope keys={list(envelope.keys())}")
 
     source_number = envelope.get("sourceNumber")
@@ -518,13 +600,31 @@ def process_signal_event(
         return
 
     message_text: str | None = data_message.get("message")
-    log(f"dataMessage keys={list(data_message.keys())}, message_text={message_text!r}")
+    log(f"dataMessage keys={list(data_message.keys())}, message length={len(message_text) if message_text else 0}")
 
     if message_text:
         text_styles: list[dict] = data_message.get("textStyles", [])
         if text_styles:
             message_text = convert_signal_to_markdown(message_text, text_styles)
-            log(f"Converted Signal formatting to Markdown: {message_text!r}")
+            log(f"Converted Signal formatting to Markdown, message length={len(message_text)}")
+        mentions = data_message.get("mentions", [])
+        if isinstance(mentions, list) and mentions:
+            message_text = replace_mentions(message_text, mentions, account)
+
+    # A quote line would turn an attachment-only reply into a text message, which
+    # the queue steers (steering drops files), and it would hide a leading command
+    # from the queue's command match, which works on the trimmed text.
+    quote = data_message.get("quote")
+    if (
+        isinstance(quote, dict)
+        and message_text
+        and not message_text.lstrip().startswith("/")
+    ):
+        quote_line = format_quote_line(quote, account)
+        if quote_line is not None:
+            message_text = f"{quote_line}\n{message_text}"
+
+    addressed_to_bot = message_addresses_bot(data_message, account)
 
     # Map of MIME type prefixes/exact types to file extensions for deriving filenames
     # when signal-cli does not provide one.
@@ -611,7 +711,7 @@ def process_signal_event(
         if isinstance(source_name, str) and source_name:
             sender_label = source_name
 
-    log(f"Received message from {sender} (sender_id={sender_id}): {message_text!r} (file_attachments={len(file_attachments)})")
+    log(f"Received message from {sender} (sender_id={sender_id}), message length={len(message_text) if message_text else 0}, file_attachments={len(file_attachments)}, addressedToBot={addressed_to_bot}")
 
     # The bridge does not reply directly on Signal. The agent uses the
     # send_signal_message tool to send replies, which hits our /send endpoint.
@@ -622,8 +722,9 @@ def process_signal_event(
             file_attachments if file_attachments else None,
             participant,
             sender_label,
+            addressed_to_bot,
         )
-        log(f"Agent response: {agent_response}")
+        log(f"Agent response length={len(agent_response)}")
     except (OSError, RuntimeError, json.JSONDecodeError, KeyError, TypeError) as error:
         log(f"Error processing message: {error}")
 

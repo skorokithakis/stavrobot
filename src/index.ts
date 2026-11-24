@@ -187,6 +187,10 @@ export async function handleChatRequest(
       }
     }
     const senderLabel = "senderLabel" in parsedBody && typeof parsedBody.senderLabel === "string" ? parsedBody.senderLabel : undefined;
+    // Only a literal true counts, because channels that cannot detect a mention
+    // omit the field entirely and a false or malformed value must not be read as
+    // one.
+    const addressedToBot = "addressedToBot" in parsedBody && parsedBody.addressedToBot === true ? true : undefined;
 
     // Parse raw file data sent by external callers (e.g. the Signal bridge) that
     // cannot write to the app container's filesystem directly.
@@ -234,7 +238,7 @@ export async function handleChatRequest(
       return;
     }
 
-    const enqueuePromise = enqueueMessage(message, source, sender, combinedAttachments, undefined, participant, senderLabel);
+    const enqueuePromise = enqueueMessage(message, source, sender, combinedAttachments, undefined, participant, senderLabel, addressedToBot);
     if (asyncRequested) {
       // Keep async calls on the same queue so ordering and owner steering still apply.
       void enqueuePromise.catch((error: unknown) => {

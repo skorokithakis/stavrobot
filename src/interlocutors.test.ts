@@ -66,6 +66,7 @@ describe("manage_interlocutors — help", () => {
     expect(text).toContain("list");
     expect(text).toContain("agent_id");
     expect(text).toContain("subagent");
+    expect(text).toContain("mentions_only");
   });
 
   it("documents the enabled parameter for create", async () => {
@@ -433,6 +434,27 @@ describe("manage_interlocutors — update", () => {
     expect(result.details).toMatchObject({ id: 5, agent_id: null });
   });
 
+  it("updates mentions_only and returns the full record", async () => {
+    const pool = makeMockPool((text: string) => {
+      if (text.includes("WHERE i.id")) {
+        return Promise.resolve({
+          rows: [{ ...interlocutorRow5, mentions_only: true }],
+          rowCount: 1,
+        } as unknown as QueryResult);
+      }
+      return Promise.resolve({ rows: [], rowCount: 1 } as unknown as QueryResult);
+    });
+    const tool = createManageInterlocutorsTool(pool);
+    const result = await tool.execute("call-1", { action: "update", id: 5, mentions_only: true });
+    expect(result.details).toMatchObject({ id: 5, mentions_only: true });
+    const queryMock = pool.query as unknown as ReturnType<typeof vi.fn>;
+    const updateCall = queryMock.mock.calls.find(
+      (call: unknown[]) => typeof call[0] === "string" && (call[0] as string).includes("UPDATE interlocutors"),
+    );
+    expect(updateCall?.[0]).toContain("mentions_only");
+    expect(updateCall?.[1]).toContain(true);
+  });
+
   it("returns a not-found error when the id does not exist", async () => {
     const pool = makeMockPool((text: string) => {
       // The UPDATE succeeds (affects zero rows silently), and the subsequent
@@ -587,10 +609,10 @@ describe("manage_interlocutors — remove_identity", () => {
 describe("manage_interlocutors — list", () => {
   it("returns TOON-encoded interlocutors with their identities", async () => {
     const rows = [
-      { id: 1, display_name: "Owner", agent_id: 1, owner: true, enabled: true, created_at: new Date("2024-01-01"), service: "signal", identifier: "+1111111111" },
-      { id: 2, display_name: "Alice", agent_id: 2, owner: false, enabled: true, created_at: new Date("2024-02-01"), service: "telegram", identifier: "99999" },
-      { id: 2, display_name: "Alice", agent_id: 2, owner: false, enabled: true, created_at: new Date("2024-02-01"), service: "signal", identifier: "+2222222222" },
-      { id: 3, display_name: "Bob", agent_id: null, owner: false, enabled: false, created_at: new Date("2024-03-01"), service: null, identifier: null },
+      { id: 1, display_name: "Owner", agent_id: 1, owner: true, enabled: true, mentions_only: false, created_at: new Date("2024-01-01"), service: "signal", identifier: "+1111111111" },
+      { id: 2, display_name: "Alice", agent_id: 2, owner: false, enabled: true, mentions_only: true, created_at: new Date("2024-02-01"), service: "telegram", identifier: "99999" },
+      { id: 2, display_name: "Alice", agent_id: 2, owner: false, enabled: true, mentions_only: true, created_at: new Date("2024-02-01"), service: "signal", identifier: "+2222222222" },
+      { id: 3, display_name: "Bob", agent_id: null, owner: false, enabled: false, mentions_only: false, created_at: new Date("2024-03-01"), service: null, identifier: null },
     ];
     const pool = makeMockPool(() =>
       Promise.resolve({ rows, rowCount: rows.length } as unknown as QueryResult),
@@ -607,6 +629,7 @@ describe("manage_interlocutors — list", () => {
     expect(text).toContain("99999");
     expect(text).toContain("+2222222222");
     expect(text).toContain("agent_id");
+    expect(text).toContain("mentions_only");
     expect(text).not.toContain("instructions");
   });
 });

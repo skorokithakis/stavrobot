@@ -34,7 +34,7 @@ External caller (Telegram / Signal / WhatsApp / email / Pebble Index / CLI)
   → request handler  (src/index.ts)
   → enqueueMessage  (src/queue.ts)
   → processQueue  (single-threaded, serialises all turns)
-  → resolveTargetAgent  (allowlist + interlocutor lookup)
+  → resolveTargetAgent  (allowlist + interlocutor lookup + mentions-only gate)
   → handlePrompt  (src/agent/index.ts)
   → Agent.prompt  (@earendil-works/pi-agent-core)
   → tool callbacks (execute_sql, manage_plugins, run_plugin_tool, …)
@@ -60,11 +60,34 @@ when the participant id matches an owner identity. `senderLabel` is used only to
 rejected senders in the buffer below; it never overrides the Sender line, which is the
 owner-controlled interlocutor display name.
 
+`POST /chat` also accepts an optional boolean `addressedToBot`, which a channel sets when
+the message mentions the bot or replies to one of its messages. Only a literal `true`
+counts; absent or any other value means the message does not address the bot. It feeds
+the mentions-only gate described below. The Telegram channel sets it when a message
+mentions the bot by username or replies to one of the bot's messages.
+
+On Telegram, a message that replies to another gets a one-line
+`[In reply to <author>: "<quoted text>"]` prefix added to its text before it reaches the
+agent, except when the message has no text of its own or its text starts with `/`.
+Attachment-only replies stay textless so the attachment survives steering, and commands
+must keep their exact text. The quoted text has whitespace runs collapsed to one space
+and is truncated at 300 code points; the author reads `you` when the bot wrote the
+replied-to message and `unknown` when it cannot be resolved. A forum topic's
+topic-creation service message is not treated as a reply.
+
 Group messages are routed by the group's channel ID, carried in `sender`: a Telegram group
 uses its negative chat ID and a Signal group uses its group ID. The allowlist and the
 interlocutor lookup match against that ID, so a group is a first-class interlocutor rather
 than a collection of its members. The `Participant` line names the individual member who
 sent the message within the group.
+
+An interlocutor with `mentions_only` set drops messages that do not address the bot. The
+gate runs in `resolveTargetAgent` after the interlocutor lookup and only applies to
+`signal` and `telegram`, the channels that can report a mention; on every other source
+the flag has no effect, because those channels cannot detect a mention and the flag would
+drop everything. Dropped messages are not recorded as rejected senders and log a single
+text-free info line instead of the warn-level unresolved-target line. Owner direct chats
+return earlier in `resolveTargetAgent`, so the flag does not affect them.
 
 Owner messages arriving while a turn is in progress are **steered** into the running
 turn via `Agent.steer()` rather than queued. Non-owner messages are always queued.
@@ -427,7 +450,7 @@ Plugins live in `/plugins/<name>/` (shared volume between `plugin-runner` and `c
 | `cron_entries` | Scheduled entries (cron expression or one-shot fire_at) |
 | `pages` | LLM-authored pages (path, mimetype, data BYTEA, is_public, queries JSONB, mutations JSONB, version INTEGER); append-only versioning — each update inserts a new row; empty `data` is a tombstone |
 | `agents` | Subagent definitions (name, system_prompt, allowed_tools TEXT[], allowed_plugins TEXT[]) |
-| `interlocutors` | Contact records (display_name, owner bool, enabled bool, agent_id FK) |
+| `interlocutors` | Contact records (display_name, owner bool, enabled bool, mentions_only bool, agent_id FK) |
 | `interlocutor_identities` | Per-channel identifiers (service, identifier; nullable for soft-delete) |
 | `message_embeddings` | OpenAI vector embeddings for semantic search (vector(1536)) |
 
@@ -662,6 +685,18 @@ individual sender (`{ id, name }`) and `senderLabel` set to the group name. Outs
 group, the sender is the individual's phone number or, when no phone number is present
 (e.g. phone number privacy is enabled), their UUID; `senderLabel` is the profile name.
 Messages with neither text nor attachments are skipped.
+
+The bridge sets `addressedToBot` when a mention or the quoted author matches the event's
+`account`, which is the bot's own number. Each mention placeholder (`U+FFFC`) in the text
+is replaced with `@<name>`, using the mention's name, number, or UUID in that order, and
+the bot's own mention becomes `@you`. When `dataMessage.quote.text` is non-empty, one line
+`[In reply to <author>: "<quoted text>"]` is prepended to the message text, with each run
+of whitespace collapsed to one space, the result trimmed, and the quote cut at 300 code
+points with an ellipsis; `<author>` is `you` when the bot wrote the quoted message and
+`unknown` when no author field is present. The line is not added to a message with no text
+of its own, because the queue would steer the synthesized text and drop the attachment,
+nor to a message whose own text starts with `/`, so commands still match. Message text and
+the agent response are logged by length only.
 
 Outbound: `POST /send` accepts `{ recipient, message?, attachment?, attachmentFilename? }`.
 A recipient that is an E.164 phone number (`+` followed by digits) or a UUID is addressed

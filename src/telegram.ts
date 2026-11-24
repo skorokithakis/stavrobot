@@ -25,6 +25,15 @@ interface TelegramUser {
   username?: string;
 }
 
+// Only the fields the reply quote needs; Telegram's reply_to_message carries a full
+// Message, but chat and the entity lists are irrelevant to a plain-text quote.
+interface TelegramReplyMessage {
+  from?: TelegramUser;
+  text?: string;
+  caption?: string;
+  forum_topic_created?: unknown;
+}
+
 interface TelegramMessage {
   chat: { id: number; type: string; title?: string };
   from?: TelegramUser;
@@ -36,6 +45,12 @@ interface TelegramMessage {
   audio?: TelegramVoice;
   photo?: Array<{ file_id: string; file_size?: number }>;
   document?: { file_id: string; file_name?: string; mime_type?: string };
+  reply_to_message?: TelegramReplyMessage;
+}
+
+export interface TelegramBotInfo {
+  id: number;
+  username: string;
 }
 
 interface TelegramUpdate {
@@ -53,6 +68,12 @@ interface GetUpdatesResponse {
 interface GetFileResponse {
   ok: boolean;
   result: { file_path: string };
+}
+
+interface GetMeResponse {
+  ok: boolean;
+  description?: string;
+  result: TelegramUser;
 }
 
 // Escapes characters that have special meaning in Telegram's HTML parse mode.
@@ -310,6 +331,23 @@ async function deleteTelegramWebhook(config: TelegramConfig, fetchFunction: Fetc
   log.info("[stavrobot] Telegram webhook deleted; starting long polling.");
 }
 
+async function getTelegramBotInfo(config: TelegramConfig, fetchFunction: FetchFunction): Promise<TelegramBotInfo> {
+  log.info("[stavrobot] Fetching Telegram bot identity.");
+
+  const response = await fetchFunction(`https://api.telegram.org/bot${config.botToken}/getMe`);
+  const result = await response.json() as GetMeResponse;
+
+  if (!result.ok) {
+    throw new Error(`Failed to fetch Telegram bot identity: ${result.description ?? "unknown error"}`);
+  }
+  if (result.result.username === undefined || result.result.username === "") {
+    throw new Error("Telegram getMe returned no username.");
+  }
+
+  log.info(`[stavrobot] Telegram bot identity: @${result.result.username} (${result.result.id}).`);
+  return { id: result.result.id, username: result.result.username };
+}
+
 // Deletes any webhook, then runs the getUpdates loop in the background forever.
 export async function startTelegramPolling(
   config: TelegramConfig,
@@ -317,13 +355,15 @@ export async function startTelegramPolling(
   sleepFunction: SleepFunction = sleep
 ): Promise<void> {
   await deleteTelegramWebhook(config, fetchFunction);
-  void runTelegramPollingLoop(config, fetchFunction, sleepFunction);
+  const bot = await getTelegramBotInfo(config, fetchFunction);
+  void runTelegramPollingLoop(config, bot, fetchFunction, sleepFunction);
 }
 
 // Long-polls getUpdates and hands each update to the handler, advancing the offset past
 // the last update seen. Errors are logged and retried forever; the loop never exits.
 export async function runTelegramPollingLoop(
   config: TelegramConfig,
+  bot: TelegramBotInfo,
   fetchFunction: FetchFunction = fetch,
   sleepFunction: SleepFunction = sleep
 ): Promise<void> {
@@ -359,7 +399,7 @@ export async function runTelegramPollingLoop(
 
       const updates = result.result ?? [];
       for (const update of updates) {
-        await handleTelegramUpdate(update, config);
+        await handleTelegramUpdate(update, config, bot);
         // Advance per update so that, if a later handler in the batch throws, the
         // already-enqueued earlier updates are not fetched and replayed again.
         if (typeof update.update_id === "number") {
@@ -420,9 +460,59 @@ function telegramUserName(from: TelegramUser): string {
   return String(from.id);
 }
 
+// Mention entity offsets count UTF-16 code units, which is exactly what string indexes
+// are, so a plain slice locates the mentioned text without any conversion.
+export function hasBotMention(
+  text: string | undefined,
+  entities: TelegramEntity[] | undefined,
+  botUsername: string
+): boolean {
+  if (text === undefined || entities === undefined) {
+    return false;
+  }
+  const botMention = `@${botUsername}`.toLowerCase();
+  return entities.some((entity) =>
+    entity.type === "mention" &&
+    text.slice(entity.offset, entity.offset + entity.length).toLowerCase() === botMention
+  );
+}
+
+const MAX_REPLY_QUOTE_LENGTH = 300;
+
+// Slicing by code point rather than by UTF-16 index keeps a surrogate pair, such as an
+// emoji, from being cut in half at the truncation point.
+function truncateReplyQuote(text: string): string {
+  const codePoints = [...text];
+  if (codePoints.length <= MAX_REPLY_QUOTE_LENGTH) {
+    return text;
+  }
+  return `${codePoints.slice(0, MAX_REPLY_QUOTE_LENGTH).join("")}…`;
+}
+
+export function buildReplyQuote(replyTo: TelegramReplyMessage, botId: number): string | undefined {
+  const quotedText = replyTo.text ?? replyTo.caption;
+  if (quotedText === undefined) {
+    return undefined;
+  }
+
+  const author = replyTo.from === undefined
+    ? "unknown"
+    : replyTo.from.id === botId
+      ? "you"
+      : telegramUserName(replyTo.from);
+  // Collapsing every whitespace run also handles a lone carriage return and the Unicode
+  // line separators that Telegram can deliver, so the quote always occupies one line.
+  const singleLine = quotedText.replace(/\s+/g, " ").trim();
+  if (singleLine === "") {
+    return undefined;
+  }
+  return `[In reply to ${author}: "${truncateReplyQuote(singleLine)}"]`;
+}
+
 export async function handleTelegramUpdate(
   body: unknown,
-  config: TelegramConfig
+  config: TelegramConfig,
+  bot: TelegramBotInfo
 ): Promise<void> {
   if (!isTelegramUpdate(body)) {
     log.debug("[stavrobot] Telegram update is not an object, ignoring.");
@@ -470,6 +560,26 @@ export async function handleTelegramUpdate(
     ? applyTelegramEntitiesToMarkdown(message.caption, message.caption_entities)
     : undefined;
 
+  const replyTo = message.reply_to_message;
+  // Telegram attaches the topic-creation service message as reply_to_message to every
+  // message in a forum topic, so it never counts as a reply even when the bot created
+  // the topic.
+  const isReply = replyTo !== undefined && replyTo.forum_topic_created === undefined;
+
+  const addressedToBot =
+    hasBotMention(message.text, message.entities, bot.username) ||
+    hasBotMention(message.caption, message.caption_entities, bot.username) ||
+    (isReply && replyTo.from !== undefined && replyTo.from.id === bot.id);
+
+  const replyQuote = isReply ? buildReplyQuote(replyTo, bot.id) : undefined;
+  const messageText = formattedText ?? formattedCaption;
+  // A reply with no text of its own must stay textless: steering carries text only, so a
+  // quote-only text would make an attachment-only owner message lose its file. Commands
+  // are matched on the trimmed text, so a quote in front would turn "/stop" into a prompt.
+  const shouldQuote =
+    replyQuote !== undefined && messageText !== undefined && !messageText.trimStart().startsWith("/");
+  const agentText = shouldQuote ? `${replyQuote}\n${messageText}` : messageText;
+
   const voiceOrAudio = message.voice ?? message.audio;
 
   if (voiceOrAudio !== undefined) {
@@ -487,7 +597,7 @@ export async function handleTelegramUpdate(
         mimeType,
         size: buffer.length,
       };
-      void enqueueMessage(formattedText ?? formattedCaption, "telegram", String(chatId), [attachment], undefined, participant, senderLabel);
+      void enqueueMessage(agentText, "telegram", String(chatId), [attachment], undefined, participant, senderLabel, addressedToBot);
     }).catch((error: unknown) => {
       log.error("[stavrobot] Error downloading Telegram voice/audio:", error);
     });
@@ -510,7 +620,7 @@ export async function handleTelegramUpdate(
         mimeType,
         size: buffer.length,
       };
-      void enqueueMessage(formattedCaption, "telegram", String(chatId), [attachment], undefined, participant, senderLabel);
+      void enqueueMessage(agentText, "telegram", String(chatId), [attachment], undefined, participant, senderLabel, addressedToBot);
     }).catch((error: unknown) => {
       log.error("[stavrobot] Error downloading Telegram photo:", error);
     });
@@ -532,7 +642,7 @@ export async function handleTelegramUpdate(
         mimeType,
         size: buffer.length,
       };
-      void enqueueMessage(formattedCaption, "telegram", String(chatId), [attachment], undefined, participant, senderLabel);
+      void enqueueMessage(agentText, "telegram", String(chatId), [attachment], undefined, participant, senderLabel, addressedToBot);
     }).catch((error: unknown) => {
       log.error("[stavrobot] Error downloading Telegram document:", error);
     });
@@ -542,7 +652,7 @@ export async function handleTelegramUpdate(
   if (formattedText !== undefined) {
     log.debug("[stavrobot] Telegram text message from chat:", chatId);
     // Fire-and-forget: Telegram requires a fast 200 response, so we don't await.
-    void enqueueMessage(formattedText, "telegram", String(chatId), undefined, undefined, participant, senderLabel);
+    void enqueueMessage(agentText, "telegram", String(chatId), undefined, undefined, participant, senderLabel, addressedToBot);
     return;
   }
 

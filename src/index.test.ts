@@ -474,7 +474,7 @@ describe("handleChatRequest base64 file handling", () => {
   });
 });
 
-describe("handleChatRequest participant and senderLabel parsing", () => {
+describe("handleChatRequest participant, senderLabel, and addressedToBot parsing", () => {
   it("passes a well-formed participant and senderLabel to enqueueMessage", async () => {
     const mockEnqueue = vi.mocked(enqueueMessage);
     mockEnqueue.mockClear();
@@ -499,6 +499,7 @@ describe("handleChatRequest participant and senderLabel parsing", () => {
       undefined,
       { id: "42", name: "Alice" },
       "Group chat",
+      undefined,
     );
   });
 
@@ -516,8 +517,56 @@ describe("handleChatRequest participant and senderLabel parsing", () => {
     await handleChatRequest(request, response as unknown as http.ServerResponse);
 
     expect(mockEnqueue).toHaveBeenCalledOnce();
-    expect(mockEnqueue).toHaveBeenCalledWith("hello", undefined, undefined, undefined, undefined, undefined, undefined);
+    expect(mockEnqueue).toHaveBeenCalledWith("hello", undefined, undefined, undefined, undefined, undefined, undefined, undefined);
   });
+
+  it("passes a literal true addressedToBot to enqueueMessage", async () => {
+    const mockEnqueue = vi.mocked(enqueueMessage);
+    mockEnqueue.mockClear();
+
+    const request = makeBodyRequest(Buffer.from(JSON.stringify({
+      message: "hey bot",
+      source: "signal",
+      sender: "group.abc123",
+      addressedToBot: true,
+    })));
+    const response = makeMockResponse();
+
+    await handleChatRequest(request, response as unknown as http.ServerResponse);
+
+    expect(mockEnqueue).toHaveBeenCalledWith(
+      "hey bot",
+      "signal",
+      "group.abc123",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      true,
+    );
+  });
+
+  for (const { label, value } of [
+    { label: "false", value: false },
+    { label: "string", value: "true" },
+    { label: "number", value: 1 },
+    { label: "null", value: null },
+  ]) {
+    it(`treats a non-true addressedToBot as absent (${label})`, async () => {
+      const mockEnqueue = vi.mocked(enqueueMessage);
+      mockEnqueue.mockClear();
+
+      const request = makeBodyRequest(Buffer.from(JSON.stringify({
+        message: "hello",
+        addressedToBot: value,
+      })));
+      const response = makeMockResponse();
+
+      await handleChatRequest(request, response as unknown as http.ServerResponse);
+
+      expect(mockEnqueue).toHaveBeenCalledWith("hello", undefined, undefined, undefined, undefined, undefined, undefined, undefined);
+    });
+  }
 });
 
 describe("handleChatRequest async acknowledgement", () => {
@@ -540,7 +589,7 @@ describe("handleChatRequest async acknowledgement", () => {
     expect(response.statusCode).toBe(202);
     expect(response.body).toBe(JSON.stringify({ accepted: true }));
     expect(mockEnqueue).toHaveBeenCalledOnce();
-    expect(mockEnqueue).toHaveBeenCalledWith("test", "signal", "+1234567890", undefined, undefined, undefined, undefined);
+    expect(mockEnqueue).toHaveBeenCalledWith("test", "signal", "+1234567890", undefined, undefined, undefined, undefined, undefined);
 
     deferred.resolve("complete");
   });

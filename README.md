@@ -425,6 +425,11 @@ To set up a group:
 
 The group ID is Telegram's negative chat ID or Signal's opaque group ID.
 
+A group interlocutor can be marked mentions only, in which case the bot only acts on
+messages that mention it or reply to one of its messages; everything else is dropped
+silently. This only works on Signal and Telegram, and it applies to your own messages in
+the group too. It is a cost-saving feature rather than a security boundary.
+
 Telegram groups need extra setup: a bot only receives every message if its privacy mode
 is disabled (talk to @BotFather and turn off Group Privacy) or if the bot is an
 administrator of the group. Otherwise it only sees commands and replies addressed to it.

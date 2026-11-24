@@ -358,6 +358,7 @@ describe("message routing", () => {
       identityId: 10,
       agentId: 5,
       isOwner: false,
+      mentionsOnly: false,
       displayName: "Alice",
     });
 
@@ -396,6 +397,89 @@ describe("message routing", () => {
     expect(mockRecordRejectedSender).not.toHaveBeenCalled();
   });
 
+  it("drops a signal message from a mentions-only interlocutor when it does not address the bot", async () => {
+    mockIsInAllowlist.mockReturnValue(true);
+    mockResolveInterlocutor.mockResolvedValue({
+      interlocutorId: 42,
+      identityId: 10,
+      agentId: 5,
+      isOwner: false,
+      displayName: "Group chat",
+      mentionsOnly: true,
+    });
+
+    const result = await enqueueMessage("chatter", "signal", "group.abc123");
+
+    expect(result).toBe("");
+    expect(mockHandlePrompt).not.toHaveBeenCalled();
+    // The mentions-only gate is a quiet feature, not a rejected sender.
+    expect(mockRecordRejectedSender).not.toHaveBeenCalled();
+  });
+
+  it("delivers a signal message from a mentions-only interlocutor when it addresses the bot", async () => {
+    mockIsInAllowlist.mockReturnValue(true);
+    mockResolveInterlocutor.mockResolvedValue({
+      interlocutorId: 42,
+      identityId: 10,
+      agentId: 5,
+      isOwner: false,
+      displayName: "Group chat",
+      mentionsOnly: true,
+    });
+
+    await enqueueMessage("hey bot", "signal", "group.abc123", undefined, undefined, undefined, undefined, true);
+
+    expect(mockHandlePrompt).toHaveBeenCalledOnce();
+  });
+
+  it("delivers a telegram message from a mentions-only interlocutor when it addresses the bot", async () => {
+    mockIsInAllowlist.mockReturnValue(true);
+    mockResolveInterlocutor.mockResolvedValue({
+      interlocutorId: 42,
+      identityId: 10,
+      agentId: 5,
+      isOwner: false,
+      displayName: "Group chat",
+      mentionsOnly: true,
+    });
+
+    await enqueueMessage("hey bot", "telegram", "-100", undefined, undefined, undefined, undefined, true);
+
+    expect(mockHandlePrompt).toHaveBeenCalledOnce();
+  });
+
+  it("ignores mentions_only on sources that cannot detect a mention", async () => {
+    mockIsInAllowlist.mockReturnValue(true);
+    mockResolveInterlocutor.mockResolvedValue({
+      interlocutorId: 42,
+      identityId: 10,
+      agentId: 5,
+      isOwner: false,
+      displayName: "Alice",
+      mentionsOnly: true,
+    });
+
+    await enqueueMessage("hi", "email", "alice@example.com");
+
+    expect(mockHandlePrompt).toHaveBeenCalledOnce();
+  });
+
+  it("delivers unflagged group messages regardless of addressedToBot", async () => {
+    mockIsInAllowlist.mockReturnValue(true);
+    mockResolveInterlocutor.mockResolvedValue({
+      interlocutorId: 42,
+      identityId: 10,
+      agentId: 5,
+      isOwner: false,
+      displayName: "Group chat",
+      mentionsOnly: false,
+    });
+
+    await enqueueMessage("chatter", "signal", "group.abc123");
+
+    expect(mockHandlePrompt).toHaveBeenCalledOnce();
+  });
+
   it("passes participant through to handlePrompt and does not pass senderLabel", async () => {
     mockIsInAllowlist.mockReturnValue(true);
     mockResolveInterlocutor.mockResolvedValue({
@@ -403,6 +487,7 @@ describe("message routing", () => {
       identityId: 10,
       agentId: 5,
       isOwner: false,
+      mentionsOnly: false,
       displayName: "Group chat",
     });
 
@@ -586,6 +671,7 @@ describe("steering", () => {
       identityId: 10,
       agentId: 1,
       isOwner: false,
+      mentionsOnly: false,
       displayName: "Alice",
     });
     mockHandlePrompt.mockResolvedValue("done");
@@ -621,6 +707,7 @@ describe("steering", () => {
       identityId: 10,
       agentId: 2,
       isOwner: false,
+      mentionsOnly: false,
       displayName: "Alice",
     });
     mockHandlePrompt.mockImplementationOnce(
@@ -722,6 +809,7 @@ describe("subagent final message forwarding", () => {
       identityId: 10,
       agentId: 5,
       isOwner: false,
+      mentionsOnly: false,
       displayName: "Alice",
     });
     mockHandlePrompt.mockResolvedValueOnce("reply for Alice").mockResolvedValueOnce("ack");

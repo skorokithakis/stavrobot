@@ -41,6 +41,7 @@ const migrations: Migration[] = [
         display_name TEXT NOT NULL UNIQUE,
         owner BOOLEAN NOT NULL DEFAULT FALSE,
         enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        mentions_only BOOLEAN NOT NULL DEFAULT FALSE,
         agent_id INTEGER REFERENCES agents(id),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
@@ -48,6 +49,7 @@ const migrations: Migration[] = [
     // Existing databases may have the old instructions column or be missing agent_id.
     await client.query(`ALTER TABLE interlocutors DROP COLUMN IF EXISTS instructions`);
     await client.query(`ALTER TABLE interlocutors ADD COLUMN IF NOT EXISTS agent_id INTEGER REFERENCES agents(id)`);
+    await client.query(`ALTER TABLE interlocutors ADD COLUMN IF NOT EXISTS mentions_only BOOLEAN NOT NULL DEFAULT FALSE`);
     await client.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS one_owner ON interlocutors (owner) WHERE owner = true
     `);

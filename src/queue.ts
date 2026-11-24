@@ -58,6 +58,14 @@ export interface Participant {
   name: string;
 }
 
+// A routing outcome that deliberately drops the message without treating it as
+// an error. The mentions-only drop is a cost-saving feature that can fire for
+// every message in a busy group, so it must not share the warn-level unresolved
+// path.
+interface DroppedRouting {
+  dropReason: "mentions_only";
+}
+
 interface QueueEntry {
   message: string | undefined;
   source: string | undefined;
@@ -66,6 +74,7 @@ interface QueueEntry {
   targetAgentId: number | undefined;
   participant: Participant | undefined;
   senderLabel: string | undefined;
+  addressedToBot: boolean | undefined;
   retries: number;
   resolve: (value: string) => void;
   reject: (reason: unknown) => void;
@@ -101,7 +110,8 @@ async function resolveTargetAgent(
   sender: string | undefined,
   targetAgentId: number | undefined,
   senderLabel: string | undefined,
-): Promise<RoutingResult | null> {
+  addressedToBot: boolean | undefined,
+): Promise<RoutingResult | DroppedRouting | null> {
   const mainAgentId = getMainAgentId();
 
   // Agent-to-agent message: targetAgentId must be set.
@@ -201,6 +211,19 @@ async function resolveTargetAgent(
   if (interlocutor === null) {
     return null;
   }
+
+  // Mentions-only is a cost-saving measure, not a security boundary, so it sits
+  // next to the interlocutor lookup rather than in the allowlist. Only Signal and
+  // Telegram can report that a message addresses the bot; on any other source
+  // the flag would drop every message, so it has no effect there.
+  if (
+    interlocutor.mentionsOnly &&
+    (source === "signal" || source === "telegram") &&
+    addressedToBot !== true
+  ) {
+    return { dropReason: "mentions_only" };
+  }
+
   return {
     agentId: interlocutor.agentId,
     senderIdentityId: interlocutor.identityId,
@@ -283,16 +306,24 @@ async function processQueue(): Promise<void> {
   processing = true;
   while (queue.length > 0) {
     const entry = queue.shift()!;
-    const preview = (entry.message ?? "").slice(0, 200);
-    log.info(`[stavrobot] message in: ${entry.source} - ${entry.sender} - ${preview}`);
     currentEntry = entry;
     try {
-      const routing = await resolveTargetAgent(queuePool!, entry.source, entry.sender, entry.targetAgentId, entry.senderLabel);
+      const routing = await resolveTargetAgent(queuePool!, entry.source, entry.sender, entry.targetAgentId, entry.senderLabel, entry.addressedToBot);
       if (routing === null) {
         log.warn(`[stavrobot] Dropping message: could not resolve target agent. source=${entry.source}, sender=${entry.sender}`);
         entry.resolve("");
         continue;
       }
+      if ("dropReason" in routing) {
+        // Deliberately quiet and text-free: a busy mentions-only group would
+        // otherwise flood the log with message previews and warnings.
+        log.info(`[stavrobot] Dropping message from mentions-only interlocutor: source=${entry.source}, sender=${entry.sender}`);
+        entry.resolve("");
+        continue;
+      }
+      // Logged after routing so messages dropped above never print their text.
+      const preview = (entry.message ?? "").slice(0, 200);
+      log.info(`[stavrobot] message in: ${entry.source} - ${entry.sender} - ${preview}`);
       const response = await handlePrompt(queueAgent!, queuePool!, entry.message, queueConfig!, routing, entry.source, entry.attachments, entry.retries > 0, entry.participant);
       forwardSubagentFinalMessage(routing, response);
       entry.resolve(response);
@@ -361,6 +392,7 @@ export function enqueueMessage(
   targetAgentId?: number,
   participant?: Participant,
   senderLabel?: string,
+  addressedToBot?: boolean,
 ): Promise<string> {
   // Agent-to-agent messages are data, not owner commands, so a subagent that
   // happens to reply "/stop" must be delivered literally instead of aborting.
@@ -387,7 +419,7 @@ export function enqueueMessage(
   }
 
   return new Promise<string>((resolve, reject) => {
-    queue.push({ message, source, sender, attachments, targetAgentId, participant, senderLabel, retries: 0, resolve, reject });
+    queue.push({ message, source, sender, attachments, targetAgentId, participant, senderLabel, addressedToBot, retries: 0, resolve, reject });
     if (!processing) {
       void processQueue();
     }

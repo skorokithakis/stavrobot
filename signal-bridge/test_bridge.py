@@ -1,11 +1,12 @@
 """Tests for the Signal bridge's message parsing and recipient classification."""
 
+import base64
 import json
 import os
 import sys
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import mock_open, patch
 
 # Allow importing from the signal-bridge directory without installing.
 sys.path.insert(0, os.path.dirname(__file__))
@@ -21,6 +22,10 @@ import bridge  # noqa: E402
 PHONE_NUMBER = "+15551234567"
 UUID = "123e4567-e89b-12d3-a456-426614174000"
 GROUP_ID = "group.abc123+/="
+BOT_ACCOUNT = "+15550000001"
+BOT_UUID = "00000000-0000-0000-0000-000000000001"
+OTHER_PHONE_NUMBER = "+15550000002"
+OTHER_UUID = "00000000-0000-0000-0000-000000000002"
 
 
 class FakeResponse:
@@ -76,7 +81,7 @@ class ProcessSignalEventTests(unittest.TestCase):
         with patch.object(bridge, "send_agent_request") as send:
             bridge.process_signal_event(event, bridge.RequestCounter())
 
-        send.assert_called_once_with("hi", PHONE_NUMBER, None, None, "Alice")
+        send.assert_called_once_with("hi", PHONE_NUMBER, None, None, "Alice", False)
 
     def test_sender_falls_back_to_the_uuid_when_source_number_is_missing(self) -> None:
         event = {
@@ -90,7 +95,7 @@ class ProcessSignalEventTests(unittest.TestCase):
             bridge.process_signal_event(event, bridge.RequestCounter())
 
         # A direct message carries no participant, and the label is the profile name.
-        send.assert_called_once_with("hi", UUID, None, None, "Alice")
+        send.assert_called_once_with("hi", UUID, None, None, "Alice", False)
 
     def test_sender_falls_back_to_the_uuid_when_source_number_is_empty(self) -> None:
         event = {
@@ -103,7 +108,7 @@ class ProcessSignalEventTests(unittest.TestCase):
         with patch.object(bridge, "send_agent_request") as send:
             bridge.process_signal_event(event, bridge.RequestCounter())
 
-        send.assert_called_once_with("hi", UUID, None, None, None)
+        send.assert_called_once_with("hi", UUID, None, None, None, False)
 
     def test_group_message_is_routed_by_group_id_with_participant_and_label(self) -> None:
         event = {
@@ -126,6 +131,7 @@ class ProcessSignalEventTests(unittest.TestCase):
             None,
             {"id": PHONE_NUMBER, "name": "Alice"},
             "The Group",
+            False,
         )
 
     def test_group_message_falls_back_to_uuid_for_the_participant(self) -> None:
@@ -149,7 +155,261 @@ class ProcessSignalEventTests(unittest.TestCase):
             None,
             {"id": UUID, "name": UUID},
             None,
+            False,
         )
+
+    def test_group_message_mentioning_the_bot_addresses_the_bot(self) -> None:
+        event = {
+            "account": BOT_ACCOUNT,
+            "envelope": {
+                "sourceNumber": PHONE_NUMBER,
+                "sourceUuid": UUID,
+                "sourceName": "Alice",
+                "dataMessage": {
+                    "message": "\ufffc hello",
+                    "mentions": [
+                        {
+                            "name": BOT_ACCOUNT,
+                            "number": BOT_ACCOUNT,
+                            "uuid": BOT_UUID,
+                            "start": 0,
+                            "length": 1,
+                        }
+                    ],
+                    "groupInfo": {"groupId": GROUP_ID, "groupName": "The Group"},
+                },
+            },
+        }
+        with patch.object(bridge, "send_agent_request") as send:
+            bridge.process_signal_event(event, bridge.RequestCounter())
+
+        send.assert_called_once_with(
+            "@you hello",
+            GROUP_ID,
+            None,
+            {"id": PHONE_NUMBER, "name": "Alice"},
+            "The Group",
+            True,
+        )
+
+    def test_reply_to_the_bot_addresses_the_bot_and_prepends_the_quote(self) -> None:
+        event = {
+            "account": BOT_ACCOUNT,
+            "envelope": {
+                "sourceNumber": PHONE_NUMBER,
+                "sourceUuid": UUID,
+                "sourceName": "Alice",
+                "dataMessage": {
+                    "message": "thanks",
+                    "quote": {
+                        "id": 1,
+                        "author": BOT_ACCOUNT,
+                        "authorNumber": BOT_ACCOUNT,
+                        "authorUuid": BOT_UUID,
+                        "text": "hello there",
+                        "attachments": [],
+                    },
+                },
+            },
+        }
+        with patch.object(bridge, "send_agent_request") as send:
+            bridge.process_signal_event(event, bridge.RequestCounter())
+
+        send.assert_called_once_with(
+            '[In reply to you: "hello there"]\nthanks',
+            PHONE_NUMBER,
+            None,
+            None,
+            "Alice",
+            True,
+        )
+
+    def test_reply_to_another_person_mentioning_the_bot_addresses_the_bot(self) -> None:
+        event = {
+            "account": BOT_ACCOUNT,
+            "envelope": {
+                "sourceNumber": PHONE_NUMBER,
+                "sourceName": "Alice",
+                "dataMessage": {
+                    "message": "\ufffc can you help",
+                    "mentions": [
+                        {
+                            "name": BOT_ACCOUNT,
+                            "number": BOT_ACCOUNT,
+                            "uuid": BOT_UUID,
+                            "start": 0,
+                            "length": 1,
+                        }
+                    ],
+                    "quote": {
+                        "id": 2,
+                        "author": OTHER_PHONE_NUMBER,
+                        "authorNumber": OTHER_PHONE_NUMBER,
+                        "authorUuid": OTHER_UUID,
+                        "text": "some text",
+                        "attachments": [],
+                    },
+                },
+            },
+        }
+        with patch.object(bridge, "send_agent_request") as send:
+            bridge.process_signal_event(event, bridge.RequestCounter())
+
+        send.assert_called_once_with(
+            '[In reply to +15550000002: "some text"]\n@you can you help',
+            PHONE_NUMBER,
+            None,
+            None,
+            "Alice",
+            True,
+        )
+
+    def test_command_reply_does_not_get_a_quote_line(self) -> None:
+        event = {
+            "account": BOT_ACCOUNT,
+            "envelope": {
+                "sourceNumber": PHONE_NUMBER,
+                "sourceName": "Alice",
+                "dataMessage": {
+                    "message": "/stop",
+                    "quote": {
+                        "id": 1,
+                        "author": BOT_ACCOUNT,
+                        "authorNumber": BOT_ACCOUNT,
+                        "authorUuid": BOT_UUID,
+                        "text": "hello there",
+                        "attachments": [],
+                    },
+                },
+            },
+        }
+        with patch.object(bridge, "send_agent_request") as send:
+            bridge.process_signal_event(event, bridge.RequestCounter())
+
+        send.assert_called_once_with("/stop", PHONE_NUMBER, None, None, "Alice", True)
+
+    def test_attachment_only_reply_does_not_get_a_quote_line(self) -> None:
+        event = {
+            "account": BOT_ACCOUNT,
+            "envelope": {
+                "sourceNumber": PHONE_NUMBER,
+                "sourceName": "Alice",
+                "dataMessage": {
+                    "attachments": [
+                        {"id": "0000", "contentType": "image/png", "filename": "photo.png"}
+                    ],
+                    "quote": {
+                        "id": 1,
+                        "author": BOT_ACCOUNT,
+                        "authorNumber": BOT_ACCOUNT,
+                        "authorUuid": BOT_UUID,
+                        "text": "hello there",
+                        "attachments": [],
+                    },
+                },
+            },
+        }
+        with patch.object(bridge.os.path, "isfile", return_value=True):
+            with patch.object(bridge.os.path, "getsize", return_value=4):
+                with patch("builtins.open", mock_open(read_data=b"data")):
+                    with patch.object(bridge, "send_agent_request") as send:
+                        bridge.process_signal_event(event, bridge.RequestCounter())
+
+        send.assert_called_once_with(
+            None,
+            PHONE_NUMBER,
+            [{
+                "data": base64.b64encode(b"data").decode("ascii"),
+                "filename": "photo.png",
+                "mimeType": "image/png",
+            }],
+            None,
+            "Alice",
+            True,
+        )
+
+    def test_mentions_are_replaced_in_start_order_with_fallback_labels(self) -> None:
+        event = {
+            "account": BOT_ACCOUNT,
+            "envelope": {
+                "sourceNumber": PHONE_NUMBER,
+                "dataMessage": {
+                    "message": "\ufffc hi \ufffc",
+                    # Deliberately out of order, as the sort by start must decide
+                    # which placeholder belongs to which mention.
+                    "mentions": [
+                        {
+                            "number": OTHER_PHONE_NUMBER,
+                            "uuid": OTHER_UUID,
+                            "start": 7,
+                            "length": 1,
+                        },
+                        {"name": "Alice", "start": 0, "length": 1},
+                    ],
+                },
+            },
+        }
+        with patch.object(bridge, "send_agent_request") as send:
+            bridge.process_signal_event(event, bridge.RequestCounter())
+
+        send.assert_called_once_with(
+            "@Alice hi @+15550000002",
+            PHONE_NUMBER,
+            None,
+            None,
+            None,
+            False,
+        )
+
+    def test_message_text_and_agent_response_are_not_logged(self) -> None:
+        event = {
+            "account": BOT_ACCOUNT,
+            "envelope": {
+                "sourceNumber": PHONE_NUMBER,
+                "sourceName": "Alice",
+                "dataMessage": {"message": "unique incoming text"},
+            },
+        }
+        with patch.object(bridge, "send_agent_request", return_value="unique agent response"):
+            with patch.object(bridge, "log") as log:
+                bridge.process_signal_event(event, bridge.RequestCounter())
+
+        logged_lines = [str(call.args[0]) for call in log.call_args_list]
+        self.assertFalse(any("unique incoming text" in line for line in logged_lines))
+        self.assertFalse(any("unique agent response" in line for line in logged_lines))
+
+
+class QuoteFormattingTests(unittest.TestCase):
+    """format_quote_line flattens whitespace, names an unknown author, and truncates."""
+
+    def test_long_quote_is_flattened_and_truncated(self) -> None:
+        quote = {
+            "text": "a" * 200 + "\r \u2028\t" + "b" * 200,
+        }
+
+        line = bridge.format_quote_line(quote, BOT_ACCOUNT)
+
+        self.assertEqual(
+            line,
+            '[In reply to unknown: "' + "a" * 200 + " " + "b" * 99 + '…"]',
+        )
+
+
+class SendAgentRequestTests(unittest.TestCase):
+    """send_agent_request includes the addressed flag in the /chat body."""
+
+    def test_addressed_to_bot_is_sent_as_a_boolean(self) -> None:
+        FakeHTTPConnection.instances = []
+
+        class SuccessfulConnection(FakeHTTPConnection):
+            def getresponse(self) -> FakeResponse:
+                return FakeResponse(body=b'{"response": "ok"}')
+
+        with patch("http.client.HTTPConnection", SuccessfulConnection):
+            bridge.send_agent_request("hi", PHONE_NUMBER, addressed_to_bot=True)
+
+        payload = json.loads(FakeHTTPConnection.instances[-1].requests[-1]["body"])
+        self.assertIs(payload["addressedToBot"], True)
 
 
 class RecipientParamTests(unittest.TestCase):
