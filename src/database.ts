@@ -9,6 +9,13 @@ import { matchesEmailEntry } from "./allowlist.js";
 
 export async function connectDatabase(): Promise<pg.Pool> {
   const config = loadPostgresConfig();
+  if (config.password === "stavrobot") {
+    // Postgres only applies POSTGRES_PASSWORD when it initialises an empty data
+    // directory, so pointing an existing deployment at a new password is not enough.
+    console.warn(
+      `[stavrobot] Postgres is using the default password. Set POSTGRES_PASSWORD to a strong value, and run the SQL statement ALTER USER "${config.user.replaceAll("\"", "\"\"")}" WITH PASSWORD '<new password>'; on any existing database, because POSTGRES_PASSWORD only takes effect when the data directory is first initialised.`,
+    );
+  }
   const pool = new pg.Pool({
     host: config.host,
     port: config.port,

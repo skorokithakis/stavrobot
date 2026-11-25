@@ -9,15 +9,22 @@ arbitrary scripts in isolated Unix user accounts.
 
 ## Containers (docker-compose.yml)
 
-| Service | Image / Build | Port | Role |
-|---|---|---|---|
-| `postgres` | `pgvector/pgvector:pg17` | internal | Primary database (with pgvector extension) |
-| `app` | `./Dockerfile` | 10567→3000 | Main HTTP server + LLM agent |
-| `plugin-runner` | `./plugin-runner` | internal:3003 | Executes plugin scripts |
-| `coder` | `./coder` | internal:3002 | Runs `claude -p` for plugin authoring (optional, `coder` profile) |
-| `python-runner` | `./python-runner` | internal | Executes Python snippets |
-| `pg-backup` | `pgvector/pgvector:pg17` | — | Hourly pg_dump to `./data/db-backups` |
-| `signal-bridge` | `./signal-bridge` | internal:8081 | Signal protocol bridge (optional profile) |
+| Service | Image / Build | Port | Networks | Role |
+|---|---|---|---|---|
+| `postgres` | `pgvector/pgvector:pg17` | internal | `database` | Primary database (with pgvector extension) |
+| `app` | `./Dockerfile` | 10567→3000 | `default`, `database` | Main HTTP server + LLM agent |
+| `plugin-runner` | `./plugin-runner` | internal:3003 | `default` | Executes plugin scripts |
+| `coder` | `./coder` | internal:3002 | `default` | Runs `claude -p` for plugin authoring (optional, `coder` profile) |
+| `python-runner` | `./python-runner` | internal | `default` | Executes Python snippets |
+| `pg-backup` | `pgvector/pgvector:pg17` | — | `database` | Hourly pg_dump to `./data/db-backups` |
+| `signal-bridge` | `./signal-bridge` | internal:8081 | `default` | Signal protocol bridge (optional profile) |
+
+`postgres` is only on the `database` network, and only `app` and `pg-backup` join it.
+The containers that run untrusted code (`python-runner`, `plugin-runner`, `coder`) and
+`signal-bridge` are only on the default network, so they cannot resolve or connect to
+the database. `app` joins both networks, so it can still reach the runners by service
+name. The `database` network is `internal: true`, so it has no route to the internet;
+neither `postgres` nor `pg-backup` needs one.
 
 The app mounts `./data/main` read-write at `/app/config` so its configuration editor can
 update `config.toml`. `plugin-runner`, `coder`, `signal-bridge`, and `python-runner`
@@ -397,6 +404,12 @@ Plugins live in `/plugins/<name>/` (shared volume between `plugin-runner` and `c
   (manifest defaults are stripped) and `set` is a boolean per key. Saving still goes
   through `POST /configure`, which accepts values and merges them server-side.
 - The Docker socket is never mounted into any container.
+- Only `app` and `pg-backup` join the `database` network, which is `internal: true`.
+  `postgres` is attached to that network alone, so the containers that run untrusted
+  code (`python-runner`, `plugin-runner`, `coder`) cannot resolve the `postgres` hostname
+  or open a connection to it, even though they share the default network with `app`.
+  `pg-backup` needs the database to dump it; nothing else that runs LLM-controlled code
+  does.
 
 ### Tool execution (sync)
 - `plugin-runner` receives `POST /bundles/<plugin>/tools/<tool>/run` with JSON body.

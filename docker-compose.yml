@@ -21,6 +21,8 @@ services:
       retries: 10
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
+    networks:
+      - database
 
   app:
     build: .
@@ -41,6 +43,9 @@ services:
       - ./data/main:/app/config
       - ./data/app:/app/data
       - ./data/whatsapp:/app/data/whatsapp
+    networks:
+      - default
+      - database
     depends_on:
       postgres:
         condition: service_healthy
@@ -98,6 +103,8 @@ services:
     volumes:
       - ./scripts:/scripts:ro
       - ./data/db-backups:/backups
+    networks:
+      - database
     depends_on:
       postgres:
         condition: service_healthy
@@ -113,3 +120,11 @@ services:
     depends_on:
       app:
         condition: service_started
+
+networks:
+  # Only the app and the backup container need the database. Keeping Postgres on its
+  # own network means the containers that run untrusted code (python-runner,
+  # plugin-runner, coder), which stay on the default network, cannot resolve or reach
+  # it. The network is internal because neither Postgres nor pg-backup needs internet.
+  database:
+    internal: true
