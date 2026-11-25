@@ -550,15 +550,17 @@ export async function seedCronEntries(pool: pg.Pool): Promise<void> {
     const note = `${entry.marker} ${promptText}`;
     const manualFreezePrefix = `${entry.marker}[manual]`;
 
+    // Scope the seed to the main agent's own entries. A subagent entry must never be
+    // mistaken for the seeded maintenance job, or it could suppress or overwrite it.
     const existing = await pool.query<{ id: number; note: string }>(
-      "SELECT id, note FROM cron_entries WHERE note LIKE $1",
-      [`${entry.marker}%`],
+      "SELECT id, note FROM cron_entries WHERE note LIKE $1 AND agent_id = $2",
+      [`${entry.marker}%`, getMainAgentId()],
     );
 
     if (existing.rows.length === 0) {
       await pool.query(
-        "INSERT INTO cron_entries (cron_expression, note) VALUES ($1, $2)",
-        [entry.cronExpression, note],
+        "INSERT INTO cron_entries (agent_id, cron_expression, note) VALUES ($1, $2, $3)",
+        [getMainAgentId(), entry.cronExpression, note],
       );
       log.info(`[stavrobot] Cron entry created for ${entry.marker}.`);
     } else {
@@ -567,8 +569,8 @@ export async function seedCronEntries(pool: pg.Pool): Promise<void> {
         log.info(`[stavrobot] Cron entry for ${entry.marker} is manually frozen, skipping update.`);
       } else if (row.note !== note) {
         await pool.query(
-          "UPDATE cron_entries SET note = $1 WHERE id = $2",
-          [note, row.id],
+          "UPDATE cron_entries SET note = $1 WHERE id = $2 AND agent_id = $3",
+          [note, row.id, getMainAgentId()],
         );
         log.info(`[stavrobot] Cron entry updated for ${entry.marker}.`);
       } else {
@@ -580,39 +582,52 @@ export async function seedCronEntries(pool: pg.Pool): Promise<void> {
 
 export interface CronEntry {
   id: number;
+  agentId: number;
   cronExpression: string | null;
   fireAt: Date | null;
   note: string;
 }
 
-export async function createCronEntry(
-  pool: pg.Pool,
-  cronExpression: string | null,
-  fireAt: Date | null,
-  note: string,
-): Promise<CronEntry> {
-  const result = await pool.query(
-    "INSERT INTO cron_entries (cron_expression, fire_at, note) VALUES ($1, $2, $3) RETURNING id, cron_expression, fire_at, note",
-    [cronExpression, fireAt, note],
-  );
-  const row = result.rows[0];
+function rowToCronEntry(row: Record<string, unknown>): CronEntry {
   return {
     id: row.id as number,
+    agentId: row.agent_id as number,
     cronExpression: row.cron_expression as string | null,
     fireAt: row.fire_at as Date | null,
     note: row.note as string,
   };
 }
 
+export async function createCronEntry(
+  pool: pg.Pool,
+  agentId: number,
+  cronExpression: string | null,
+  fireAt: Date | null,
+  note: string,
+): Promise<CronEntry> {
+  const result = await pool.query(
+    "INSERT INTO cron_entries (agent_id, cron_expression, fire_at, note) VALUES ($1, $2, $3, $4) RETURNING id, agent_id, cron_expression, fire_at, note",
+    [agentId, cronExpression, fireAt, note],
+  );
+  return rowToCronEntry(result.rows[0]);
+}
+
+// ownerAgentId scopes the update to that agent's entries. When it is omitted the
+// caller is the main agent, which may update any entry.
 export async function updateCronEntry(
   pool: pg.Pool,
   id: number,
-  fields: { cronExpression?: string | null; fireAt?: Date | null; note?: string },
-): Promise<CronEntry> {
+  fields: { agentId?: number; cronExpression?: string | null; fireAt?: Date | null; note?: string },
+  ownerAgentId?: number,
+): Promise<CronEntry | null> {
   const setClauses: string[] = [];
   const values: unknown[] = [];
   let paramIndex = 1;
 
+  if ("agentId" in fields) {
+    setClauses.push(`agent_id = $${paramIndex++}`);
+    values.push(fields.agentId);
+  }
   if ("cronExpression" in fields) {
     setClauses.push(`cron_expression = $${paramIndex++}`);
     values.push(fields.cronExpression);
@@ -627,33 +642,40 @@ export async function updateCronEntry(
   }
 
   values.push(id);
+  let where = `id = $${paramIndex++}`;
+  if (ownerAgentId !== undefined) {
+    where += ` AND agent_id = $${paramIndex++}`;
+    values.push(ownerAgentId);
+  }
   const result = await pool.query(
-    `UPDATE cron_entries SET ${setClauses.join(", ")} WHERE id = $${paramIndex} RETURNING id, cron_expression, fire_at, note`,
+    `UPDATE cron_entries SET ${setClauses.join(", ")} WHERE ${where} RETURNING id, agent_id, cron_expression, fire_at, note`,
     values,
   );
-  const row = result.rows[0];
-  return {
-    id: row.id as number,
-    cronExpression: row.cron_expression as string | null,
-    fireAt: row.fire_at as Date | null,
-    note: row.note as string,
-  };
+  if (result.rows.length === 0) {
+    return null;
+  }
+  return rowToCronEntry(result.rows[0]);
 }
 
-export async function deleteCronEntry(pool: pg.Pool, id: number): Promise<void> {
-  await pool.query("DELETE FROM cron_entries WHERE id = $1", [id]);
+// Returns the number of deleted rows so the caller can report a not-found entry
+// when ownerAgentId scoped the delete to another agent's rows.
+export async function deleteCronEntry(pool: pg.Pool, id: number, ownerAgentId?: number): Promise<number> {
+  const result = ownerAgentId === undefined
+    ? await pool.query("DELETE FROM cron_entries WHERE id = $1", [id])
+    : await pool.query("DELETE FROM cron_entries WHERE id = $1 AND agent_id = $2", [id, ownerAgentId]);
+  return result.rowCount ?? 0;
 }
 
-export async function listCronEntries(pool: pg.Pool): Promise<CronEntry[]> {
-  const result = await pool.query(
-    "SELECT id, cron_expression, fire_at, note FROM cron_entries ORDER BY id",
-  );
-  return result.rows.map((row) => ({
-    id: row.id as number,
-    cronExpression: row.cron_expression as string | null,
-    fireAt: row.fire_at as Date | null,
-    note: row.note as string,
-  }));
+export async function listCronEntries(pool: pg.Pool, agentId?: number): Promise<CronEntry[]> {
+  const result = agentId === undefined
+    ? await pool.query(
+      "SELECT id, agent_id, cron_expression, fire_at, note FROM cron_entries ORDER BY id",
+    )
+    : await pool.query(
+      "SELECT id, agent_id, cron_expression, fire_at, note FROM cron_entries WHERE agent_id = $1 ORDER BY id",
+      [agentId],
+    );
+  return result.rows.map(rowToCronEntry);
 }
 
 export interface Page {

@@ -543,8 +543,8 @@ async function main(): Promise<void> {
   loadAllowlist(config);
   const pool = await connectDatabase();
   await runMigrations(pool);
-  await seedCronEntries(pool);
   await seedOwner(pool, config.owner);
+  await seedCronEntries(pool);
   const agent = await createAgent(config, pool);
   initializeQueue(agent, pool, config);
   await initializeScheduler(pool);

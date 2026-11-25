@@ -9,7 +9,7 @@ import type { FileAttachment } from "../uploads.js";
 import { getApiKey, AuthError } from "../auth.js";
 import { executeSql, loadMessages, saveMessage, saveCompaction, loadLatestCompaction, loadAllMemories, upsertMemory, deleteMemory, upsertScratchpad, deleteScratchpad, readScratchpad, createCronEntry, updateCronEntry, deleteCronEntry, listCronEntries, loadAllScratchpadTitles, getMainAgentId, isOwnerIdentity, loadAgent, type Memory, type Agent as AgentRow } from "../database.js";
 import type { Participant, RoutingResult } from "../queue.js";
-import { reloadScheduler } from "../scheduler.js";
+import { isValidCronExpression, reloadScheduler } from "../scheduler.js";
 import { createManagePluginsTool, createRunPluginToolTool, createRequestCodingTaskTool } from "../plugin-tools.js";
 import { createRunPythonTool } from "../python.js";
 import { createManagePagesTool } from "../pages.js";
@@ -290,19 +290,22 @@ export function createManageKnowledgeTool(pool: pg.Pool, getCurrentAgentId: () =
 
 const MANAGE_CRON_HELP_TEXT = `manage_cron: create, update, delete, or list scheduled cron entries.
 
+Every entry belongs to an agent, and when it fires the message goes to that agent. A subagent can only see and manage its own entries. The main agent sees all entries and can assign entries to any agent.
+
 Actions:
-- create: create a new cron entry. Parameters: note (required), schedule or fire_at (exactly one required).
-- update: update an existing entry. Parameters: id (required), plus at least one of note, schedule, or fire_at (schedule and fire_at are mutually exclusive).
+- create: create a new cron entry. Parameters: note (required), schedule or fire_at (exactly one required), agent_id (optional, main agent only; defaults to the main agent).
+- update: update an existing entry. Parameters: id (required), plus at least one of note, schedule, fire_at, or agent_id (main agent only). schedule and fire_at are mutually exclusive. agent_id reassigns the entry to another agent.
 - delete: remove an entry. Parameters: id (required).
-- list: list all cron entries.
+- list: list cron entries. The main agent sees all entries and their agent_id; a subagent sees only its own.
 - help: show this help text.
 
 Constraints:
 - schedule: a cron expression for recurring entries (e.g. '0 9 * * *' for daily at 9am, '*/30 * * * *' for every 30 minutes).
 - fire_at: an ISO 8601 datetime for one-shot entries (e.g. '2026-03-01T09:00:00Z'). The entry is removed after it fires.
-- schedule and fire_at are mutually exclusive.`;
+- schedule and fire_at are mutually exclusive.
+- agent_id is only available to the main agent. Subagents always create and manage entries for themselves.`;
 
-export function createManageCronTool(pool: pg.Pool): AgentTool {
+export function createManageCronTool(pool: pg.Pool, getCurrentAgentId: () => number): AgentTool {
   return {
     name: "manage_cron",
     label: "Manage cron",
@@ -319,6 +322,7 @@ export function createManageCronTool(pool: pg.Pool): AgentTool {
       schedule: Type.Optional(Type.String({ description: "Cron expression for recurring entries (e.g. '*/30 * * * *'). Mutually exclusive with fire_at." })),
       fire_at: Type.Optional(Type.String({ description: "ISO 8601 datetime for one-shot entries (e.g. '2026-03-01T09:00:00Z'). Mutually exclusive with schedule." })),
       note: Type.Optional(Type.String({ description: "The note/message for this cron entry. Required for create." })),
+      agent_id: Type.Optional(Type.Number({ description: "The agent that owns this entry. Main agent only; subagents always own their own entries." })),
     }),
     execute: async (
       toolCallId: string,
@@ -330,12 +334,23 @@ export function createManageCronTool(pool: pg.Pool): AgentTool {
         schedule?: string;
         fire_at?: string;
         note?: string;
+        agent_id?: number;
       };
 
       const action = raw.action;
 
       if (action === "help") {
         return toolSuccess(MANAGE_CRON_HELP_TEXT);
+      }
+
+      const currentAgentId = getCurrentAgentId();
+      const isMainAgent = currentAgentId === getMainAgentId();
+
+      // Subagents must never create or move an entry onto another agent, because a cron
+      // message delivered to the main agent is treated as trusted internal input.
+      // Ownership comes from the turn context, never from model-supplied parameters.
+      if (!isMainAgent && raw.agent_id !== undefined) {
+        return toolError("Error: agent_id is only available to the main agent. Subagents always own their cron entries.");
       }
 
       if (action === "create") {
@@ -348,9 +363,13 @@ export function createManageCronTool(pool: pg.Pool): AgentTool {
         if (raw.schedule !== undefined && raw.fire_at !== undefined) {
           return toolError("Error: schedule and fire_at are mutually exclusive.");
         }
+        if (raw.schedule !== undefined && !isValidCronExpression(raw.schedule)) {
+          return toolError(`Error: invalid cron expression '${raw.schedule}'.`);
+        }
         const cronExpression = raw.schedule ?? null;
         const fireAt = raw.fire_at !== undefined ? new Date(raw.fire_at) : null;
-        const entry = await createCronEntry(pool, cronExpression, fireAt, raw.note.trim());
+        const ownerAgentId = isMainAgent ? (raw.agent_id ?? getMainAgentId()) : currentAgentId;
+        const entry = await createCronEntry(pool, ownerAgentId, cronExpression, fireAt, raw.note.trim());
         await reloadScheduler(pool);
         const message = `Cron entry ${entry.id} created.`;
         log.info(`[stavrobot] ${message}`);
@@ -364,10 +383,16 @@ export function createManageCronTool(pool: pg.Pool): AgentTool {
         if (raw.schedule !== undefined && raw.fire_at !== undefined) {
           return toolError("Error: schedule and fire_at are mutually exclusive.");
         }
-        if (raw.schedule === undefined && raw.fire_at === undefined && raw.note === undefined) {
-          return toolError("Error: provide at least one of note, schedule, or fire_at for update.");
+        if (raw.schedule !== undefined && !isValidCronExpression(raw.schedule)) {
+          return toolError(`Error: invalid cron expression '${raw.schedule}'.`);
         }
-        const fields: { cronExpression?: string | null; fireAt?: Date | null; note?: string } = {};
+        if (raw.schedule === undefined && raw.fire_at === undefined && raw.note === undefined && raw.agent_id === undefined) {
+          return toolError("Error: provide at least one of note, schedule, fire_at, or agent_id for update.");
+        }
+        const fields: { agentId?: number; cronExpression?: string | null; fireAt?: Date | null; note?: string } = {};
+        if (raw.agent_id !== undefined) {
+          fields.agentId = raw.agent_id;
+        }
         if (raw.schedule !== undefined) {
           fields.cronExpression = raw.schedule;
           fields.fireAt = null;
@@ -379,7 +404,10 @@ export function createManageCronTool(pool: pg.Pool): AgentTool {
         if (raw.note !== undefined) {
           fields.note = raw.note;
         }
-        await updateCronEntry(pool, raw.id, fields);
+        const updatedEntry = await updateCronEntry(pool, raw.id, fields, isMainAgent ? undefined : currentAgentId);
+        if (updatedEntry === null) {
+          return toolError(`Error: cron entry ${raw.id} not found.`);
+        }
         await reloadScheduler(pool);
         const message = `Cron entry ${raw.id} updated.`;
         log.info(`[stavrobot] ${message}`);
@@ -390,7 +418,10 @@ export function createManageCronTool(pool: pg.Pool): AgentTool {
         if (raw.id === undefined) {
           return toolError("Error: id is required for delete.");
         }
-        await deleteCronEntry(pool, raw.id);
+        const rowCount = await deleteCronEntry(pool, raw.id, isMainAgent ? undefined : currentAgentId);
+        if (rowCount === 0) {
+          return toolError(`Error: cron entry ${raw.id} not found.`);
+        }
         await reloadScheduler(pool);
         const message = `Cron entry ${raw.id} deleted.`;
         log.info(`[stavrobot] ${message}`);
@@ -398,7 +429,7 @@ export function createManageCronTool(pool: pg.Pool): AgentTool {
       }
 
       if (action === "list") {
-        const entries = await listCronEntries(pool);
+        const entries = await listCronEntries(pool, isMainAgent ? undefined : currentAgentId);
         return toolSuccess(encodeToToon(entries));
       }
 
@@ -461,7 +492,7 @@ export async function createAgent(config: Config, pool: pg.Pool): Promise<Agent>
   if (knownModel === undefined && config.baseUrl === undefined) {
     log.warn(`[stavrobot] Model "${config.model}" not found in provider "${config.provider}" model registry, using fallback (contextWindow=${DEFAULT_CONTEXT_WINDOW}, maxTokens=${DEFAULT_MAX_TOKENS}).`);
   }
-  const tools = [createExecuteSqlTool(pool), createManageKnowledgeTool(pool, () => currentAgentId), createManageCronTool(pool), createRunPythonTool(), createManagePagesTool(pool), createManageUploadsTool(), createSearchTool(pool, () => currentAgentId, config.embeddings), createManageFilesTool(), createManageInterlocutorsTool(pool), createManageAgentsTool(pool), createSendAgentMessageTool(pool, () => currentAgentId)];
+  const tools = [createExecuteSqlTool(pool), createManageKnowledgeTool(pool, () => currentAgentId), createManageCronTool(pool, () => currentAgentId), createRunPythonTool(), createManagePagesTool(pool), createManageUploadsTool(), createSearchTool(pool, () => currentAgentId, config.embeddings), createManageFilesTool(), createManageInterlocutorsTool(pool), createManageAgentsTool(pool), createSendAgentMessageTool(pool, () => currentAgentId)];
   tools.push(
     createManagePluginsTool({ coderEnabled: config.coder !== undefined }),
     createRunPluginToolTool(),

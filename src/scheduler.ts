@@ -9,6 +9,7 @@ import { log } from "./log.js";
 
 interface ScheduledEntry {
   id: number;
+  agentId: number;
   note: string;
   nextFireAt: Date;
   cronExpression: string | null;
@@ -22,12 +23,25 @@ function computeNextFireAt(cronExpression: string): Date {
   return interval.next().toDate();
 }
 
+// Cron expressions come from model output, so an invalid one is an expected result
+// rather than an error to propagate. This must catch: an unparseable expression would
+// otherwise be persisted and then crash the scheduler at startup.
+export function isValidCronExpression(cronExpression: string): boolean {
+  try {
+    computeNextFireAt(cronExpression);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function loadEntries(pool: pg.Pool): Promise<void> {
   const entries = await listCronEntries(pool);
   scheduledEntries = entries.map((entry) => {
     if (entry.cronExpression !== null) {
       return {
         id: entry.id,
+        agentId: entry.agentId,
         note: entry.note,
         nextFireAt: computeNextFireAt(entry.cronExpression),
         cronExpression: entry.cronExpression,
@@ -35,6 +49,7 @@ async function loadEntries(pool: pg.Pool): Promise<void> {
     } else {
       return {
         id: entry.id,
+        agentId: entry.agentId,
         note: entry.note,
         nextFireAt: entry.fireAt!,
         cronExpression: null,
@@ -104,7 +119,7 @@ function tick(): void {
 
   for (const entry of toFire) {
     const framedNote = `[Cron entry ${entry.id} has fired] ${entry.note}`;
-    void enqueueMessage(framedNote, "cron");
+    void enqueueMessage(framedNote, "cron", undefined, undefined, entry.agentId);
   }
 
   void cleanupOldUploads();

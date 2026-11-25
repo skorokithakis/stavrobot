@@ -163,6 +163,7 @@ const migrations: Migration[] = [
     await client.query(`
       CREATE TABLE IF NOT EXISTS cron_entries (
         id SERIAL PRIMARY KEY,
+        agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
         cron_expression TEXT,
         fire_at TIMESTAMPTZ,
         note TEXT NOT NULL,
@@ -173,6 +174,12 @@ const migrations: Migration[] = [
         )
       )
     `);
+    await client.query(`ALTER TABLE cron_entries ADD COLUMN IF NOT EXISTS agent_id INTEGER REFERENCES agents(id) ON DELETE CASCADE`);
+    // Backfill existing rows to the main agent. This runs before seedOwner(), so
+    // getMainAgentId() is not available; the main agent id is the seeded literal 1.
+    // The main agent row was inserted above, so the foreign key holds here.
+    await client.query(`UPDATE cron_entries SET agent_id = 1 WHERE agent_id IS NULL`);
+    await client.query(`ALTER TABLE cron_entries ALTER COLUMN agent_id SET NOT NULL`);
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS pages (

@@ -164,9 +164,10 @@ After seeding, the ID is cached in a module-level variable and exposed via
 `getMainAgentId()` (also in `src/database.ts`). All routing, permission checks, and
 user-facing strings use `getMainAgentId()` rather than the literal `1`. The only places
 the literal `1` appears are the seed INSERT itself (`src/database.ts`) and the baseline
-migration's `memories`/`scratchpad` `agent_id` backfill, which runs before `seedOwner()`
-and therefore cannot call `getMainAgentId()`. Because that migration may run on a database
-that has memory or scratchpad rows but no agents yet, it inserts the same main agent row
+migration's `memories`/`scratchpad`/`cron_entries` `agent_id` backfill, which runs
+before `seedOwner()` and therefore cannot call `getMainAgentId()`. Because that migration
+may run on a database that has memory, scratchpad, or cron rows but no agents yet, it
+inserts the same main agent row
 first (`ON CONFLICT (id) DO NOTHING`) so the backfill satisfies the foreign key; the
 `seedOwner()` upsert still sets the final values. Because explicit IDs do not advance the
 `agents.id` sequence, `seedOwner()` then calls `setval` to move the sequence to
@@ -189,6 +190,10 @@ Subagents never get `send_agent_message`, even if `allowed_tools` lists it. They
 to the main agent through their final text response (see "Subagent reports" below).
 `manage_knowledge` is always granted to every subagent in full, regardless of
 `allowed_tools`, so each agent can keep private memories and a scratchpad.
+`manage_cron` can be granted through `allowed_tools`; a subagent can then only create,
+list, update, and delete its own cron entries. Ownership is taken from the turn context,
+so passing `agent_id` is rejected for subagents. Only the main agent sees all entries and
+can create or reassign an entry for any agent.
 
 ### Subagent reports
 When a subagent turn ends successfully, `processQueue` (`src/queue.ts`) forwards the
@@ -447,7 +452,7 @@ Plugins live in `/plugins/<name>/` (shared volume between `plugin-runner` and `c
 | `memories` | Per-agent always-injected knowledge (agent_id FK; short facts, full text in system prompt every turn) |
 | `compactions` | Summarised history snapshots (up_to_message_id boundary); only the latest row per agent is retained |
 | `scratchpad` | Per-agent on-demand knowledge (agent_id FK; title injected, body fetched on read via manage_knowledge) |
-| `cron_entries` | Scheduled entries (cron expression or one-shot fire_at) |
+| `cron_entries` | Per-agent scheduled entries (agent_id FK; cron expression or one-shot fire_at). Fired entries are routed to their owning agent. |
 | `pages` | LLM-authored pages (path, mimetype, data BYTEA, is_public, queries JSONB, mutations JSONB, version INTEGER); append-only versioning — each update inserts a new row; empty `data` is a tombstone |
 | `agents` | Subagent definitions (name, system_prompt, allowed_tools TEXT[], allowed_plugins TEXT[]) |
 | `interlocutors` | Contact records (display_name, owner bool, enabled bool, mentions_only bool, agent_id FK) |
@@ -666,10 +671,12 @@ to the endpoint (as `reasoning_effort` for `openai-completions`). It is ignored 
 | `"agent"` | Main agent to subagent message, or a forwarded subagent final response |
 | `"upload"` | File upload trigger |
 
-Internal sources (`cli`, `cron`, `coder`, `plugin:*`, `upload`) always route to the
-main agent. External sources (`signal`, `telegram`, `whatsapp`, `email`) go through
-allowlist + interlocutor lookup to determine the target agent. The Basic-authenticated
-`pebble-index` source routes directly to the main agent without those gates.
+Internal sources (`cli`, `cron`, `coder`, `plugin:*`, `upload`) route to the main agent
+by default. Cron entries carry an explicit target agent (the entry's owner), so a fired
+entry goes to that agent instead. External sources (`signal`, `telegram`, `whatsapp`,
+`email`) go through allowlist + interlocutor lookup to determine the target agent. The
+Basic-authenticated `pebble-index` source routes directly to the main agent without those
+gates.
 
 ---
 

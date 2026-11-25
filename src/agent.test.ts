@@ -3,7 +3,7 @@ import type { Agent, AgentMessage, AgentTool, AgentToolResult } from "@earendil-
 import type { JsonObject } from "@earendil-works/pi-ai";
 import { complete } from "@earendil-works/pi-ai/compat";
 import type { Pool } from "pg";
-import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool, injectAutoSearchBlock, pendingAutoSearchBlocks, handlePrompt, createAgent, escalatingSummarize, selectCompactionCutIndex, isTurnBoundary, triggerCompactionIfNeeded, formatUserMessage, CHARS_PER_TOKEN, COMPACTION_THRESHOLD_FRACTION, LEVEL3_MAX_OUTPUT_FRACTION } from "./agent/index.js";
+import { serializeMessagesForSummary, filterToolsForSubagent, formatPluginListSection, truncateContext, createManageKnowledgeTool, createManageCronTool, injectAutoSearchBlock, pendingAutoSearchBlocks, handlePrompt, createAgent, escalatingSummarize, selectCompactionCutIndex, isTurnBoundary, triggerCompactionIfNeeded, formatUserMessage, CHARS_PER_TOKEN, COMPACTION_THRESHOLD_FRACTION, LEVEL3_MAX_OUTPUT_FRACTION } from "./agent/index.js";
 import { getApiKey } from "./auth.js";
 import { loadMessages, loadAllMemories, loadAllScratchpadTitles, getMainAgentId, saveMessage, loadAgent, loadLatestCompaction, saveCompaction, isOwnerIdentity } from "./database.js";
 import { runSearch } from "./search.js";
@@ -54,7 +54,7 @@ vi.mock("./auth.js", () => ({
   },
 }));
 vi.mock("./queue.js", () => ({}));
-vi.mock("./scheduler.js", () => ({ reloadScheduler: vi.fn() }));
+vi.mock("./scheduler.js", () => ({ reloadScheduler: vi.fn(), isValidCronExpression: vi.fn().mockReturnValue(true) }));
 vi.mock("./plugin-tools.js", () => ({
   createManagePluginsTool: vi.fn().mockReturnValue(makeMinimalTool("manage_plugins")),
   createRunPluginToolTool: vi.fn().mockReturnValue(makeMinimalTool("run_plugin_tool")),
@@ -884,6 +884,78 @@ describe("createManageKnowledgeTool — agent scoping", () => {
 
     expect(dbCall).toHaveBeenCalledWith(...expectedDbArgs);
     expect(resultText(result)).toContain(expectedText);
+  });
+});
+
+describe("createManageCronTool — agent scoping", () => {
+  const MAIN_AGENT_ID = 1;
+  const SUBAGENT_ID = 2;
+  const pool = {} as Pool;
+
+  function makeCronTool(agentId: number = SUBAGENT_ID): AgentTool {
+    return createManageCronTool(pool, () => agentId);
+  }
+
+  async function getMock(name: "createCronEntry" | "updateCronEntry" | "deleteCronEntry" | "listCronEntries"): Promise<MockedFunction<(...args: never[]) => Promise<unknown>>> {
+    const db = await import("./database.js");
+    return db[name] as unknown as MockedFunction<(...args: never[]) => Promise<unknown>>;
+  }
+
+  beforeEach(() => {
+    vi.mocked(getMainAgentId).mockReturnValue(MAIN_AGENT_ID);
+  });
+
+  it("rejects agent_id from a subagent instead of silently ignoring it", async () => {
+    const createCronEntry = await getMock("createCronEntry");
+
+    const result = await makeCronTool().execute("tc1", {
+      action: "create",
+      note: "Reminder.",
+      schedule: "0 9 * * *",
+      agent_id: MAIN_AGENT_ID,
+    });
+
+    expect(resultText(result)).toContain("only available to the main agent");
+    expect(createCronEntry).not.toHaveBeenCalled();
+  });
+
+  it("stamps a subagent's new entries with the subagent's own id", async () => {
+    const createCronEntry = await getMock("createCronEntry");
+    createCronEntry.mockResolvedValueOnce({ id: 4, agentId: SUBAGENT_ID });
+
+    await makeCronTool().execute("tc1", { action: "create", note: "Reminder.", schedule: "0 9 * * *" });
+
+    expect(createCronEntry).toHaveBeenCalledWith(pool, SUBAGENT_ID, "0 9 * * *", null, "Reminder.");
+  });
+
+  it("returns an error when a subagent updates another agent's entry", async () => {
+    const updateCronEntry = await getMock("updateCronEntry");
+    // The DB layer scopes the update to the owner, so another agent's row looks like a miss.
+    updateCronEntry.mockResolvedValueOnce(null);
+
+    const result = await makeCronTool().execute("tc1", { action: "update", id: 99, note: "Changed." });
+
+    expect(updateCronEntry).toHaveBeenCalledWith(pool, 99, { note: "Changed." }, SUBAGENT_ID);
+    expect(resultText(result)).toContain("cron entry 99 not found");
+  });
+
+  it("returns an error when a subagent deletes another agent's entry", async () => {
+    const deleteCronEntry = await getMock("deleteCronEntry");
+    deleteCronEntry.mockResolvedValueOnce(0);
+
+    const result = await makeCronTool().execute("tc1", { action: "delete", id: 99 });
+
+    expect(deleteCronEntry).toHaveBeenCalledWith(pool, 99, SUBAGENT_ID);
+    expect(resultText(result)).toContain("cron entry 99 not found");
+  });
+
+  it("lists only the subagent's own entries", async () => {
+    const listCronEntries = await getMock("listCronEntries");
+    listCronEntries.mockResolvedValueOnce([]);
+
+    await makeCronTool().execute("tc1", { action: "list" });
+
+    expect(listCronEntries).toHaveBeenCalledWith(pool, SUBAGENT_ID);
   });
 });
 

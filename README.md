@@ -196,7 +196,8 @@ Request body is a JSON object (maximum 25 MB) with these fields. At least one of
 Routing by `source`:
 
 - Absent, or one of `cli`, `cron`, `coder`, `upload`, or `plugin:<name>`: goes to the
-  main agent as a message from you.
+  main agent as a message from you. Separately, the scheduler enqueues fired cron entries
+  directly to the entry's current owner agent.
 - `signal`, `telegram`, `whatsapp`, `email`: `sender` is required. If it matches one of
   your identities in `[owner]`, the message goes to the main agent. Otherwise the sender
   must be in the allowlist and be assigned to an agent as an interlocutor; if not, the

@@ -217,8 +217,9 @@ describe("seedCronEntries", () => {
 
     const insertQuery = queries.find((q) => q.text.includes("INSERT INTO cron_entries"));
     expect(insertQuery).toBeDefined();
-    expect(insertQuery?.values[0]).toBe("0 3 * * *");
-    expect(insertQuery?.values[1]).toBe("[nightly-review] do the nightly review");
+    expect(insertQuery?.values[0]).toBe(1);
+    expect(insertQuery?.values[1]).toBe("0 3 * * *");
+    expect(insertQuery?.values[2]).toBe("[nightly-review] do the nightly review");
   });
 
   it("updates an existing entry when the note has changed", async () => {

@@ -20,6 +20,7 @@ const SUBAGENT_TOOL_ALLOWLIST = new Set([
   "manage_uploads",
   "run_python",
   "db_search",
+  "manage_cron",
 ]);
 
 function buildHelpText(): string {
@@ -33,7 +34,7 @@ help — Show this documentation.
 create — Create a new subagent.
   name (required): A short, descriptive name for the agent.
   system_prompt (required): The agent's specific instructions, context, and constraints. This is appended to the base agent prompt. Write it as if you're briefing a colleague on a task — include what the agent should do, what information it has, and what constraints it must follow.
-  allowed_tools (optional): Whitelist of core tool names the agent may use. Defaults to [] (no tools). Allowed values: send_signal_message, send_telegram_message, send_whatsapp_message, send_email, manage_files, manage_uploads, run_python, db_search. Use dot notation to scope to specific actions: "manage_uploads.read" allows only the read action of that tool. Subagents do not have send_agent_message — do not include it here. Subagents always have manage_knowledge (private memory and scratchpad), so it need not be listed. If allowed_plugins is non-empty, run_plugin_tool is implicitly available — do not include it here either.
+  allowed_tools (optional): Whitelist of core tool names the agent may use. Defaults to [] (no tools). Allowed values: send_signal_message, send_telegram_message, send_whatsapp_message, send_email, manage_files, manage_uploads, run_python, db_search, manage_cron. Use dot notation to scope to specific actions: "manage_uploads.read" allows only the read action of that tool. Subagents do not have send_agent_message — do not include it here. Subagents always have manage_knowledge (private memory and scratchpad), so it need not be listed. If allowed_plugins is non-empty, run_plugin_tool is implicitly available — do not include it here either.
   allowed_plugins (optional): Whitelist of plugins the agent may use. Defaults to [] (no plugins). Use ["*"] to allow all plugins, ["weather"] to allow all tools in the weather plugin, or ["weather.get_forecast"] to allow a specific tool. Empty list or omission means no plugin access. When non-empty, run_plugin_tool is implicitly available.
   Returns the new agent's ID.
 
