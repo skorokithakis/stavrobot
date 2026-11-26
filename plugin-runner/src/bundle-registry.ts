@@ -18,7 +18,10 @@ export interface BundleManifest {
   // Consumed by the website build for the public plugin listing; not used by the runner.
   summary?: string;
   type?: BundleType;
-  config?: Record<string, { description: string; required: boolean; default?: unknown }>;
+  config?: Record<
+    string,
+    { description: string; required: boolean; secret?: boolean; default?: unknown }
+  >;
   instructions?: string;
   init?: { entrypoint: string; async?: boolean };
 }

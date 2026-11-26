@@ -22,11 +22,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export interface PluginConfigFieldSchema {
   description: string;
   required: boolean;
+  secret: boolean;
 }
 
 export interface PluginConfigProxyResponse {
   schema: Record<string, PluginConfigFieldSchema>;
   set: Record<string, boolean>;
+  values: Record<string, unknown>;
 }
 
 export async function handlePluginsListRequest(
@@ -54,8 +56,10 @@ export async function handlePluginDetailRequest(
 
 // The plugin-runner returns config values that may contain secrets. The browser
 // must never receive them: this proxy rewrites the response to report, per key,
-// only whether a value is set, plus the (non-secret) manifest schema. The
-// configure endpoint still accepts values and merges them server-side.
+// only whether a value is set, plus the (non-secret) manifest schema. Fields the
+// manifest marks with `secret: false` are explicitly non-sensitive, so their
+// saved values are included for editing in the settings UI. The configure
+// endpoint still accepts values and merges them server-side.
 export async function handlePluginConfigRequest(
   response: http.ServerResponse,
   pluginName: string,
@@ -89,10 +93,12 @@ export async function handlePluginConfigRequest(
   }
 
   const schemaSource = isRecord(parsed) && isRecord(parsed["schema"]) ? parsed["schema"] : {};
-  const values = isRecord(parsed) && isRecord(parsed["values"]) ? parsed["values"] : {};
+  const valuesSource = isRecord(parsed) && isRecord(parsed["values"]) ? parsed["values"] : {};
 
   // Rebuild the schema from known, non-secret fields only. In particular, drop
   // the manifest's `default`, which may in principle hold a sensitive value.
+  // `secret` defaults to true so manifests written before the flag existed keep
+  // their values hidden.
   const schema: Record<string, PluginConfigFieldSchema> = {};
   for (const [key, entry] of Object.entries(schemaSource)) {
     if (!isRecord(entry)) {
@@ -101,15 +107,21 @@ export async function handlePluginConfigRequest(
     schema[key] = {
       description: typeof entry["description"] === "string" ? entry["description"] : "",
       required: entry["required"] === true,
+      secret: entry["secret"] !== false,
     };
   }
 
   const set: Record<string, boolean> = {};
+  const values: Record<string, unknown> = {};
   for (const key of Object.keys(schema)) {
-    set[key] = Object.prototype.hasOwnProperty.call(values, key);
+    const isSet = Object.prototype.hasOwnProperty.call(valuesSource, key);
+    set[key] = isSet;
+    if (isSet && schema[key].secret === false) {
+      values[key] = valuesSource[key];
+    }
   }
 
-  const result: PluginConfigProxyResponse = { schema, set };
+  const result: PluginConfigProxyResponse = { schema, set, values };
   response.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
   response.end(JSON.stringify(result));
 }
@@ -450,10 +462,26 @@ function buildPluginsContent(): string {
     return '<span class="sb-status is-on sb-small"><span class="sb-dot sb-dot-on"></span>Configured</span>';
   }
 
-  function configFieldHtml(key, field, isSet) {
+  function configValueText(value) {
+    return typeof value === "string" ? value : JSON.stringify(value);
+  }
+
+  function configFieldHtml(key, field, isSet, value) {
     var requiredBadge = field.required ? '<span class="sb-req">Required</span>' : '<span class="sb-opt">(optional)</span>';
     var hint = field.description ? '<span class="sb-hint">' + esc(field.description) + "</span>" : "";
     var label = esc(key) + " " + requiredBadge;
+    if (field.secret === false) {
+      var errorId = "cfge-" + esc(key);
+      var invalid = Boolean(field.required) && !isSet;
+      return '<div class="sb-field" data-field="' + esc(key) + '">'
+        + '<label for="cfg-' + esc(key) + '">' + label + "</label>"
+        + '<input id="cfg-' + esc(key) + '" class="sb-input sb-mono' + (invalid ? " is-invalid" : "") + '" type="text" data-config-input="' + esc(key) + '"'
+        + ' value="' + esc(isSet ? configValueText(value) : "") + '"'
+        + (invalid ? ' aria-invalid="true" aria-describedby="' + errorId + '"' : "")
+        + ' placeholder="' + esc(field.description) + '">'
+        + (invalid ? '<span id="' + errorId + '" class="sb-field-error">' + ERROR_SM + "Required. The plugin does not work until this is set.</span>" : "")
+        + hint + "</div>";
+    }
     if (isSet) {
       return '<div class="sb-field" data-field="' + esc(key) + '">'
         + '<span class="sb-field-label">' + label + "</span>"
@@ -463,11 +491,11 @@ function buildPluginsContent(): string {
         + hint + "</div>";
     }
     if (field.required) {
-      var errorId = "cfge-" + esc(key);
+      var requiredErrorId = "cfge-" + esc(key);
       return '<div class="sb-field" data-field="' + esc(key) + '">'
         + '<label for="cfg-' + esc(key) + '">' + label + "</label>"
-        + '<input id="cfg-' + esc(key) + '" class="sb-input sb-mono is-invalid" type="text" data-config-input="' + esc(key) + '" placeholder="Not set: ' + esc(field.description) + '" aria-invalid="true" aria-describedby="' + errorId + '">'
-        + '<span id="' + errorId + '" class="sb-field-error">' + ERROR_SM + "Required. The plugin does not work until this is set.</span>"
+        + '<input id="cfg-' + esc(key) + '" class="sb-input sb-mono is-invalid" type="text" data-config-input="' + esc(key) + '" placeholder="Not set: ' + esc(field.description) + '" aria-invalid="true" aria-describedby="' + requiredErrorId + '">'
+        + '<span id="' + requiredErrorId + '" class="sb-field-error">' + ERROR_SM + "Required. The plugin does not work until this is set.</span>"
         + "</div>";
     }
     return '<div class="sb-field" data-field="' + esc(key) + '">'
@@ -481,16 +509,17 @@ function buildPluginsContent(): string {
   function settingsSectionHtml(plugin) {
     var schema = plugin.schema || {};
     var set = plugin.set || {};
+    var values = plugin.values || {};
     var fields = "";
     for (var key in schema) {
       if (Object.prototype.hasOwnProperty.call(schema, key)) {
-        fields += configFieldHtml(key, schema[key], Boolean(set[key]));
+        fields += configFieldHtml(key, schema[key], Boolean(set[key]), values[key]);
       }
     }
     return '<div class="sb-detail-sec" data-settings-section>'
       + '<div class="sb-sec-h"><h3 class="sb-h3">Settings</h3>' + settingsStatusHtml(plugin) + "</div>"
       + fields
-      + '<div class="sb-controls-row"><button class="sb-btn sb-btn-primary" type="button" data-save-settings disabled>Save settings</button><span class="sb-hint">Saved values are never shown again. Use Replace to change one.</span></div>'
+      + '<div class="sb-controls-row"><button class="sb-btn sb-btn-primary" type="button" data-save-settings disabled>Save settings</button><span class="sb-hint">Secret values are never shown again. Use Replace to change one.</span></div>'
       + "</div>";
   }
 
@@ -748,6 +777,7 @@ function buildPluginsContent(): string {
     if (config.ok && config.data && typeof config.data === "object") {
       plugin.schema = config.data.schema || {};
       plugin.set = config.data.set || {};
+      plugin.values = config.data.values || {};
     }
     return plugin;
   }
@@ -777,6 +807,7 @@ function buildPluginsContent(): string {
         tools: detail.tools || [],
         schema: config.schema || {},
         set: config.set || {},
+        values: config.values || {},
       });
     }
     state.plugins = loaded;
@@ -1105,6 +1136,11 @@ function buildPluginsContent(): string {
     if (!hasEdited) {
       return;
     }
+    var saveButtons = detailCard.querySelectorAll("[data-save-settings]");
+    setButtonBusy(saveButtons, "Saving...");
+    for (var j = 0; j < inputs.length; j++) {
+      inputs[j].disabled = true;
+    }
     setDetailFeedback("Saving...", null);
     try {
       var result = await fetchJson(CONFIGURE_URL, {
@@ -1113,9 +1149,13 @@ function buildPluginsContent(): string {
         body: JSON.stringify({ name: plugin.name, config: config }),
       });
       if (result.ok) {
+        plugin.values = plugin.values || {};
         for (var key in config) {
           if (Object.prototype.hasOwnProperty.call(config, key)) {
             plugin.set[key] = true;
+            if (plugin.schema && plugin.schema[key] && plugin.schema[key].secret === false) {
+              plugin.values[key] = config[key];
+            }
           }
         }
         renderList();
@@ -1127,6 +1167,13 @@ function buildPluginsContent(): string {
       }
     } catch (error) {
       setDetailFeedback("Could not reach the server.", false);
+    } finally {
+      // On success the detail view has been re-rendered, so these nodes are
+      // detached and restoring them is harmless.
+      restoreButtons(saveButtons);
+      for (var k = 0; k < inputs.length; k++) {
+        inputs[k].disabled = false;
+      }
     }
   }
 

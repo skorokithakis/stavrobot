@@ -399,9 +399,11 @@ Plugins live in `/plugins/<name>/` (shared volume between `plugin-runner` and `c
 - `config.json` is never returned to the LLM agent; only key presence/absence is
   reported. The `permissions` key in `config.json` is set via the web UI only.
 - The app's plugin config proxy (`GET /api/settings/plugins/<name>/config`) likewise
-  never returns config values to the browser: it rewrites the plugin-runner response to
-  `{ schema, set }`, where `schema` holds only each key's description/required flag
-  (manifest defaults are stripped) and `set` is a boolean per key. Saving still goes
+  never returns secret config values to the browser: it rewrites the plugin-runner
+  response to `{ schema, set, values }`, where `schema` holds only each key's
+  description/required/secret flags (manifest defaults are stripped), `set` is a boolean
+  per key, and `values` holds saved values only for keys the manifest explicitly marks
+  `"secret": false`. Fields without that flag are treated as secret. Saving still goes
   through `POST /configure`, which accepts values and merges them server-side.
 - The Docker socket is never mounted into any container.
 - Only `app` and `pg-backup` join the `database` network, which is `internal: true`.

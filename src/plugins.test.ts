@@ -107,15 +107,92 @@ describe("handlePluginConfigRequest", (): void => {
     expect(response.statusCode).toBe(200);
     const parsed = JSON.parse(response.body!);
     expect(parsed.schema).toEqual({
-      serverUrl: { description: "The server address.", required: true },
-      apiKey: { description: "The API key.", required: true },
-      defaultCalendar: { description: "Calendar to use.", required: false },
+      serverUrl: { description: "The server address.", required: true, secret: true },
+      apiKey: { description: "The API key.", required: true, secret: true },
+      defaultCalendar: { description: "Calendar to use.", required: false, secret: true },
     });
     expect(parsed.set).toEqual({ serverUrl: true, apiKey: true, defaultCalendar: false });
+    expect(parsed.values).toEqual({});
     expect(response.body).not.toContain("super-secret-token");
     expect(response.body).not.toContain("dav.example.com");
     expect(response.body).not.toContain("permissions");
     expect(response.headers["Cache-Control"]).toBe("no-store");
+  });
+
+  it("returns values only for fields the manifest marks as non-secret", async (): Promise<void> => {
+    mockFetch(
+      200,
+      JSON.stringify({
+        schema: {
+          region: { description: "Region.", required: false, secret: false },
+          username: { description: "Username.", required: false, secret: false },
+          missingUsername: { description: "Unset username.", required: false, secret: false },
+          apiKey: { description: "API key.", required: true },
+          stringSecret: { description: "Secret flag as a string.", required: false, secret: "false" },
+          zeroSecret: { description: "Secret flag as zero.", required: false, secret: 0 },
+        },
+        values: {
+          region: "eu-west-1",
+          username: "stavros",
+          apiKey: "key-secret-value",
+          stringSecret: "string-secret-value",
+          zeroSecret: "zero-secret-value",
+        },
+      }),
+    );
+    const response = makeMockResponse();
+
+    await handlePluginConfigRequest(
+      response as unknown as http.ServerResponse,
+      "calendar",
+      "test-password",
+    );
+
+    expect(response.statusCode).toBe(200);
+    const parsed = JSON.parse(response.body!);
+    expect(parsed.schema.region.secret).toBe(false);
+    expect(parsed.values).toEqual({ region: "eu-west-1", username: "stavros" });
+    expect(parsed.set).toEqual({
+      region: true,
+      username: true,
+      missingUsername: false,
+      apiKey: true,
+      stringSecret: true,
+      zeroSecret: true,
+    });
+    const secretCases = [
+      { key: "apiKey", value: "key-secret-value" },
+      { key: "stringSecret", value: "string-secret-value" },
+      { key: "zeroSecret", value: "zero-secret-value" },
+    ];
+    for (const secretCase of secretCases) {
+      expect(parsed.schema[secretCase.key].secret).toBe(true);
+      expect(parsed.values).not.toHaveProperty(secretCase.key);
+      expect(response.body).not.toContain(secretCase.value);
+    }
+  });
+
+  it("defaults secret to true when the manifest omits it", async (): Promise<void> => {
+    mockFetch(
+      200,
+      JSON.stringify({
+        schema: { region: { description: "Region.", required: false } },
+        values: { region: "eu-west-1" },
+      }),
+    );
+    const response = makeMockResponse();
+
+    await handlePluginConfigRequest(
+      response as unknown as http.ServerResponse,
+      "calendar",
+      "test-password",
+    );
+
+    expect(response.statusCode).toBe(200);
+    const parsed = JSON.parse(response.body!);
+    expect(parsed.schema.region.secret).toBe(true);
+    expect(parsed.values).toEqual({});
+    expect(response.body).not.toContain("eu-west-1");
   });
 
   it("drops manifest defaults so they never reach the browser", async (): Promise<void> => {
@@ -136,8 +213,9 @@ describe("handlePluginConfigRequest", (): void => {
 
     expect(response.statusCode).toBe(200);
     const parsed = JSON.parse(response.body!);
-    expect(parsed.schema.apiKey).toEqual({ description: "Key.", required: false });
+    expect(parsed.schema.apiKey).toEqual({ description: "Key.", required: false, secret: true });
     expect(parsed.set).toEqual({ apiKey: false });
+    expect(parsed.values).toEqual({});
     expect(response.body).not.toContain("leaked-default");
   });
 
