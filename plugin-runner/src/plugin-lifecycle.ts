@@ -12,6 +12,7 @@ import {
   findBundle,
   isBundleManifest,
   readJsonFile,
+  resolveConfigField,
 } from "./bundle-registry.js";
 import { ensurePluginUser, removePluginUser, getPluginUserIds, derivePluginUsername } from "./plugin-user.js";
 import { connect, disconnect, parseMcpServerSpec } from "./mcp-client.js";
@@ -22,7 +23,13 @@ import {
   TOOL_TIMEOUT_MS,
   ASYNC_TIMEOUT_MS,
 } from "./script-runner.js";
-import type { BundleManifest, LoadedBundle, ToolManifest } from "./bundle-registry.js";
+import type {
+  BundleConfigField,
+  BundleManifest,
+  LoadedBundle,
+  ResolvedBundleConfigField,
+  ToolManifest,
+} from "./bundle-registry.js";
 import type { McpServerSpec } from "./mcp-client.js";
 import type { ScriptResult } from "./script-runner.js";
 
@@ -264,7 +271,7 @@ async function runInitScript(
 // Returns the set of keys that were written from defaults (may be empty).
 function applyConfigDefaults(
   bundleDir: string,
-  manifestConfig: Record<string, { description: string; required: boolean; default?: unknown }>,
+  manifestConfig: Record<string, BundleConfigField>,
   uid: number,
   gid: number,
 ): Set<string> {
@@ -1032,6 +1039,28 @@ export async function handleRemove(
   response.end(JSON.stringify({ message: `Plugin '${pluginName}' removed successfully.` }));
 }
 
+// Secret and text values are deliberately not type-checked. The MCP plugin's
+// `server` key is a secret field that accepts an object or a JSON string, and
+// legacy text fields have always accepted whatever JSON the caller sent.
+function describeConfigValueProblem(
+  field: ResolvedBundleConfigField,
+  value: unknown,
+): string | null {
+  if (field.type === "boolean") {
+    return typeof value === "boolean" ? null : "must be a boolean";
+  }
+  if (field.type === "number") {
+    return typeof value === "number" && Number.isFinite(value) ? null : "must be a finite number";
+  }
+  if (field.type === "select") {
+    const options = field.options ?? [];
+    return typeof value === "string" && options.includes(value)
+      ? null
+      : `must be one of the allowed options: ${options.join(", ")}`;
+  }
+  return null;
+}
+
 export async function handleConfigure(
   request: http.IncomingMessage,
   response: http.ServerResponse,
@@ -1102,6 +1131,18 @@ export async function handleConfigure(
       response.writeHead(400, { "Content-Type": "application/json" });
       response.end(JSON.stringify({ error: `Unknown config keys: ${unknownKeys.join(", ")}` }));
       return;
+    }
+
+    // Validate before anything is written. The rejected value is never echoed
+    // because it may be a secret the user pasted into the chat.
+    for (const [key, value] of Object.entries(providedConfig)) {
+      const resolvedField = resolveConfigField(pluginName, key, manifestConfig[key]);
+      const problem = describeConfigValueProblem(resolvedField, value);
+      if (problem !== null) {
+        response.writeHead(400, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ error: `Config key "${key}" ${problem}` }));
+        return;
+      }
     }
   }
 

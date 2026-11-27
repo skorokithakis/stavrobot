@@ -107,9 +107,9 @@ describe("handlePluginConfigRequest", (): void => {
     expect(response.statusCode).toBe(200);
     const parsed = JSON.parse(response.body!);
     expect(parsed.schema).toEqual({
-      serverUrl: { description: "The server address.", required: true, secret: true },
-      apiKey: { description: "The API key.", required: true, secret: true },
-      defaultCalendar: { description: "Calendar to use.", required: false, secret: true },
+      serverUrl: { description: "The server address.", required: true, type: "secret" },
+      apiKey: { description: "The API key.", required: true, type: "secret" },
+      defaultCalendar: { description: "Calendar to use.", required: false, type: "secret" },
     });
     expect(parsed.set).toEqual({ serverUrl: true, apiKey: true, defaultCalendar: false });
     expect(parsed.values).toEqual({});
@@ -119,24 +119,37 @@ describe("handlePluginConfigRequest", (): void => {
     expect(response.headers["Cache-Control"]).toBe("no-store");
   });
 
-  it("returns values only for fields the manifest marks as non-secret", async (): Promise<void> => {
+  it("passes types through and returns values only for non-secret fields", async (): Promise<void> => {
     mockFetch(
       200,
       JSON.stringify({
         schema: {
-          region: { description: "Region.", required: false, secret: false },
-          username: { description: "Username.", required: false, secret: false },
-          missingUsername: { description: "Unset username.", required: false, secret: false },
+          region: { description: "Region.", required: false, type: "text" },
+          username: { description: "Username.", required: false, type: "text" },
+          missingUsername: { description: "Unset username.", required: false, type: "text" },
           apiKey: { description: "API key.", required: true },
-          stringSecret: { description: "Secret flag as a string.", required: false, secret: "false" },
-          zeroSecret: { description: "Secret flag as zero.", required: false, secret: 0 },
+          booleanFlag: { description: "Boolean flag.", required: false, type: "boolean" },
+          count: { description: "Count.", required: false, type: "number" },
+          mode: { description: "Mode.", required: false, type: "select", options: ["fast", "slow"] },
+          unknownType: { description: "Unknown type.", required: false, type: "colour" },
+          brokenSelect: { description: "Broken select.", required: false, type: "select", options: [] },
+          emptyOptionSelect: {
+            description: "Empty option select.",
+            required: false,
+            type: "select",
+            options: ["fast", ""],
+          },
         },
         values: {
           region: "eu-west-1",
           username: "stavros",
           apiKey: "key-secret-value",
-          stringSecret: "string-secret-value",
-          zeroSecret: "zero-secret-value",
+          booleanFlag: true,
+          count: 3,
+          mode: "fast",
+          unknownType: "unknown-secret-value",
+          brokenSelect: "broken-secret-value",
+          emptyOptionSelect: "empty-option-secret-value",
         },
       }),
     );
@@ -150,29 +163,49 @@ describe("handlePluginConfigRequest", (): void => {
 
     expect(response.statusCode).toBe(200);
     const parsed = JSON.parse(response.body!);
-    expect(parsed.schema.region.secret).toBe(false);
-    expect(parsed.values).toEqual({ region: "eu-west-1", username: "stavros" });
+    expect(parsed.schema).toEqual({
+      region: { description: "Region.", required: false, type: "text" },
+      username: { description: "Username.", required: false, type: "text" },
+      missingUsername: { description: "Unset username.", required: false, type: "text" },
+      apiKey: { description: "API key.", required: true, type: "secret" },
+      booleanFlag: { description: "Boolean flag.", required: false, type: "boolean" },
+      count: { description: "Count.", required: false, type: "number" },
+      mode: { description: "Mode.", required: false, type: "select", options: ["fast", "slow"] },
+      unknownType: { description: "Unknown type.", required: false, type: "secret" },
+      brokenSelect: { description: "Broken select.", required: false, type: "secret" },
+      emptyOptionSelect: { description: "Empty option select.", required: false, type: "secret" },
+    });
     expect(parsed.set).toEqual({
       region: true,
       username: true,
       missingUsername: false,
       apiKey: true,
-      stringSecret: true,
-      zeroSecret: true,
+      booleanFlag: true,
+      count: true,
+      mode: true,
+      unknownType: true,
+      brokenSelect: true,
+      emptyOptionSelect: true,
     });
-    const secretCases = [
-      { key: "apiKey", value: "key-secret-value" },
-      { key: "stringSecret", value: "string-secret-value" },
-      { key: "zeroSecret", value: "zero-secret-value" },
+    expect(parsed.values).toEqual({
+      region: "eu-west-1",
+      username: "stavros",
+      booleanFlag: true,
+      count: 3,
+      mode: "fast",
+    });
+    const secretValues = [
+      "key-secret-value",
+      "unknown-secret-value",
+      "broken-secret-value",
+      "empty-option-secret-value",
     ];
-    for (const secretCase of secretCases) {
-      expect(parsed.schema[secretCase.key].secret).toBe(true);
-      expect(parsed.values).not.toHaveProperty(secretCase.key);
-      expect(response.body).not.toContain(secretCase.value);
+    for (const secretValue of secretValues) {
+      expect(response.body).not.toContain(secretValue);
     }
   });
 
-  it("defaults secret to true when the manifest omits it", async (): Promise<void> => {
+  it("defaults the type to secret when the manifest omits it", async (): Promise<void> => {
     mockFetch(
       200,
       JSON.stringify({
@@ -190,7 +223,7 @@ describe("handlePluginConfigRequest", (): void => {
 
     expect(response.statusCode).toBe(200);
     const parsed = JSON.parse(response.body!);
-    expect(parsed.schema.region.secret).toBe(true);
+    expect(parsed.schema.region.type).toBe("secret");
     expect(parsed.values).toEqual({});
     expect(response.body).not.toContain("eu-west-1");
   });
@@ -213,7 +246,7 @@ describe("handlePluginConfigRequest", (): void => {
 
     expect(response.statusCode).toBe(200);
     const parsed = JSON.parse(response.body!);
-    expect(parsed.schema.apiKey).toEqual({ description: "Key.", required: false, secret: true });
+    expect(parsed.schema.apiKey).toEqual({ description: "Key.", required: false, type: "secret" });
     expect(parsed.set).toEqual({ apiKey: false });
     expect(parsed.values).toEqual({});
     expect(response.body).not.toContain("leaked-default");

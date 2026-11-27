@@ -19,10 +19,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export type PluginConfigFieldType = "secret" | "text" | "boolean" | "number" | "select";
+
 export interface PluginConfigFieldSchema {
   description: string;
   required: boolean;
-  secret: boolean;
+  type: PluginConfigFieldType;
+  options?: string[];
+}
+
+function resolveConfigFieldType(rawType: unknown): PluginConfigFieldType {
+  if (rawType === "text" || rawType === "boolean" || rawType === "number" || rawType === "select") {
+    return rawType;
+  }
+  // Defence in depth: the plugin-runner already resolves unknown types to
+  // secret, so anything unexpected here must be treated as secret too.
+  return "secret";
+}
+
+function resolveConfigFieldOptions(rawOptions: unknown): string[] | null {
+  if (
+    Array.isArray(rawOptions) &&
+    rawOptions.length > 0 &&
+    // An empty option would collide with the "not set" placeholder.
+    rawOptions.every((option) => typeof option === "string" && option.length > 0)
+  ) {
+    return rawOptions as string[];
+  }
+  return null;
 }
 
 export interface PluginConfigProxyResponse {
@@ -56,8 +80,8 @@ export async function handlePluginDetailRequest(
 
 // The plugin-runner returns config values that may contain secrets. The browser
 // must never receive them: this proxy rewrites the response to report, per key,
-// only whether a value is set, plus the (non-secret) manifest schema. Fields the
-// manifest marks with `secret: false` are explicitly non-sensitive, so their
+// only whether a value is set, plus the (non-secret) manifest schema. Fields
+// whose resolved type is not `secret` are explicitly non-sensitive, so their
 // saved values are included for editing in the settings UI. The configure
 // endpoint still accepts values and merges them server-side.
 export async function handlePluginConfigRequest(
@@ -95,20 +119,30 @@ export async function handlePluginConfigRequest(
   const schemaSource = isRecord(parsed) && isRecord(parsed["schema"]) ? parsed["schema"] : {};
   const valuesSource = isRecord(parsed) && isRecord(parsed["values"]) ? parsed["values"] : {};
 
-  // Rebuild the schema from known, non-secret fields only. In particular, drop
-  // the manifest's `default`, which may in principle hold a sensitive value.
-  // `secret` defaults to true so manifests written before the flag existed keep
-  // their values hidden.
+  // Rebuild the schema from known fields only. In particular, drop the
+  // manifest's `default`, which may in principle hold a sensitive value. The
+  // plugin-runner resolves the legacy `secret` flag to a `type` before sending
+  // this, but an unknown or malformed type is downgraded to secret here too.
   const schema: Record<string, PluginConfigFieldSchema> = {};
   for (const [key, entry] of Object.entries(schemaSource)) {
     if (!isRecord(entry)) {
       continue;
     }
-    schema[key] = {
+    let type = resolveConfigFieldType(entry["type"]);
+    const options = type === "select" ? resolveConfigFieldOptions(entry["options"]) : null;
+    // A select without usable options cannot be rendered as a drop-down.
+    if (type === "select" && options === null) {
+      type = "secret";
+    }
+    const field: PluginConfigFieldSchema = {
       description: typeof entry["description"] === "string" ? entry["description"] : "",
       required: entry["required"] === true,
-      secret: entry["secret"] !== false,
+      type,
     };
+    if (type === "select" && options !== null) {
+      field.options = options;
+    }
+    schema[key] = field;
   }
 
   const set: Record<string, boolean> = {};
@@ -116,7 +150,7 @@ export async function handlePluginConfigRequest(
   for (const key of Object.keys(schema)) {
     const isSet = Object.prototype.hasOwnProperty.call(valuesSource, key);
     set[key] = isSet;
-    if (isSet && schema[key].secret === false) {
+    if (isSet && schema[key].type !== "secret") {
       values[key] = valuesSource[key];
     }
   }
@@ -467,21 +501,59 @@ function buildPluginsContent(): string {
     return typeof value === "string" ? value : JSON.stringify(value);
   }
 
+  function configFieldType(field) {
+    var type = field ? field.type : null;
+    if (type === "text" || type === "boolean" || type === "number" || type === "select") {
+      return type;
+    }
+    return "secret";
+  }
+
   function configFieldHtml(key, field, isSet, value) {
+    var type = configFieldType(field);
     var requiredBadge = field.required ? '<span class="sb-req">Required</span>' : '<span class="sb-opt">(optional)</span>';
     var hint = field.description ? '<span class="sb-hint">' + esc(field.description) + "</span>" : "";
     var label = esc(key) + " " + requiredBadge;
-    if (field.secret === false) {
-      var errorId = "cfge-" + esc(key);
-      var invalid = Boolean(field.required) && !isSet;
+    var errorId = "cfge-" + esc(key);
+    var invalid = Boolean(field.required) && !isSet;
+    var invalidClass = invalid ? " is-invalid" : "";
+    var invalidAttributes = invalid ? ' aria-invalid="true" aria-describedby="' + errorId + '"' : "";
+    var errorHtml = invalid ? '<span id="' + errorId + '" class="sb-field-error">' + ERROR_SM + "Required. The plugin does not work until this is set.</span>" : "";
+    if (type === "text" || type === "number") {
       return '<div class="sb-field" data-field="' + esc(key) + '">'
         + '<label for="cfg-' + esc(key) + '">' + label + "</label>"
-        + '<input id="cfg-' + esc(key) + '" class="sb-input sb-mono' + (invalid ? " is-invalid" : "") + '" type="text" data-config-input="' + esc(key) + '"'
+        + '<input id="cfg-' + esc(key) + '" class="sb-input sb-mono' + invalidClass + '" type="' + type + '" data-config-input="' + esc(key) + '"'
+        + (type === "number" ? ' step="any"' : "")
         + ' value="' + esc(isSet ? configValueText(value) : "") + '"'
-        + (invalid ? ' aria-invalid="true" aria-describedby="' + errorId + '"' : "")
+        + invalidAttributes
         + ' placeholder="' + esc(field.description) + '">'
-        + (invalid ? '<span id="' + errorId + '" class="sb-field-error">' + ERROR_SM + "Required. The plugin does not work until this is set.</span>" : "")
-        + hint + "</div>";
+        + errorHtml + hint + "</div>";
+    }
+    if (type === "boolean") {
+      return '<div class="sb-field" data-field="' + esc(key) + '">'
+        + '<label class="sb-check"><input class="sb-checkbox" type="checkbox" data-config-input="' + esc(key) + '"'
+        + (isSet && value === true ? " checked" : "")
+        + invalidAttributes + "><span>" + label + "</span></label>"
+        + errorHtml + hint + "</div>";
+    }
+    if (type === "select") {
+      var options = Array.isArray(field.options) ? field.options : [];
+      var currentValue = isSet && typeof value === "string" ? value : "";
+      var optionHtml = "";
+      // An unset or stale value must not silently select the first option.
+      if (options.indexOf(currentValue) === -1) {
+        optionHtml += '<option value="" selected>Not set</option>';
+      }
+      for (var optionIndex = 0; optionIndex < options.length; optionIndex++) {
+        optionHtml += '<option value="' + esc(options[optionIndex]) + '"'
+          + (options[optionIndex] === currentValue ? " selected" : "") + ">"
+          + esc(options[optionIndex]) + "</option>";
+      }
+      return '<div class="sb-field" data-field="' + esc(key) + '">'
+        + '<label for="cfg-' + esc(key) + '">' + label + "</label>"
+        + '<div class="sb-select-wrap"><select id="cfg-' + esc(key) + '" class="sb-input' + invalidClass + '" data-config-input="' + esc(key) + '"'
+        + invalidAttributes + ">" + optionHtml + "</select>" + SELECT_CHEV + "</div>"
+        + errorHtml + hint + "</div>";
     }
     if (isSet) {
       return '<div class="sb-field" data-field="' + esc(key) + '">'
@@ -492,12 +564,11 @@ function buildPluginsContent(): string {
         + hint + "</div>";
     }
     if (field.required) {
-      var requiredErrorId = "cfge-" + esc(key);
       return '<div class="sb-field" data-field="' + esc(key) + '">'
         + '<label for="cfg-' + esc(key) + '">' + label + "</label>"
-        + '<input id="cfg-' + esc(key) + '" class="sb-input sb-mono is-invalid" type="text" data-config-input="' + esc(key) + '" placeholder="Not set: ' + esc(field.description) + '" aria-invalid="true" aria-describedby="' + requiredErrorId + '">'
-        + '<span id="' + requiredErrorId + '" class="sb-field-error">' + ERROR_SM + "Required. The plugin does not work until this is set.</span>"
-        + "</div>";
+        + '<input id="cfg-' + esc(key) + '" class="sb-input sb-mono is-invalid" type="text" data-config-input="' + esc(key) + '" placeholder="Not set: ' + esc(field.description) + '"'
+        + invalidAttributes + ">"
+        + errorHtml + "</div>";
     }
     return '<div class="sb-field" data-field="' + esc(key) + '">'
       + '<span class="sb-field-label">' + label + "</span>"
@@ -1141,10 +1212,27 @@ function buildPluginsContent(): string {
     var config = {};
     var hasEdited = false;
     for (var i = 0; i < inputs.length; i++) {
-      if (inputs[i]._edited === true) {
-        config[inputs[i].getAttribute("data-config-input")] = inputs[i].value;
-        hasEdited = true;
+      if (inputs[i]._edited !== true) {
+        continue;
       }
+      var configKey = inputs[i].getAttribute("data-config-input");
+      var field = plugin.schema ? plugin.schema[configKey] : null;
+      var type = configFieldType(field);
+      if (type === "boolean") {
+        config[configKey] = inputs[i].checked;
+      } else if (type === "number") {
+        // An empty number input is not a number; send null so the plugin-runner
+        // rejects it with the same 400 it uses for any other wrong type.
+        config[configKey] = inputs[i].value.trim() === "" ? null : Number(inputs[i].value);
+      } else if (type === "select") {
+        if (inputs[i].value === "") {
+          continue;
+        }
+        config[configKey] = inputs[i].value;
+      } else {
+        config[configKey] = inputs[i].value;
+      }
+      hasEdited = true;
     }
     if (!hasEdited) {
       return;
@@ -1166,7 +1254,7 @@ function buildPluginsContent(): string {
         for (var key in config) {
           if (Object.prototype.hasOwnProperty.call(config, key)) {
             plugin.set[key] = true;
-            if (plugin.schema && plugin.schema[key] && plugin.schema[key].secret === false) {
+            if (plugin.schema && plugin.schema[key] && configFieldType(plugin.schema[key]) !== "secret") {
               plugin.values[key] = config[key];
             }
           }
@@ -1454,6 +1542,11 @@ function buildPluginsContent(): string {
     if (target.matches("[data-select-all]")) {
       toggleSelectAll(target.checked);
       updatePermCount();
+      return;
+    }
+    if (target.matches("[data-config-input]")) {
+      target._edited = true;
+      updateSettingsDirty();
       return;
     }
     if (target.matches("[data-tool]")) {

@@ -310,10 +310,10 @@ These proxy to the plugin runner. Bodies are JSON.
 - `GET /api/settings/plugins/<name>/detail`: one plugin's manifest.
 - `GET /api/settings/plugins/<name>/config`: the plugin's configuration **without its
   secret values**. Returns `{ "schema", "set", "values" }`. `schema` maps each key to
-  its description, whether it is required, and whether it is secret (always `true` unless
-  the manifest sets `"secret": false`). `set` maps each key to whether a value is stored.
-  `values` contains saved values only for keys the manifest marks non-secret
-  (`"secret": false`); secret values are never sent to the browser.
+  its description, whether it is required, and its resolved `type` (`secret`, `text`,
+  `boolean`, `number`, or `select`; selects also include `options`). `set` maps each key
+  to whether a value is stored. `values` contains saved values only for non-secret
+  types; secret values are never sent to the browser.
 - `POST /api/settings/plugins/install`: body `{ "url": "<git url>" }`.
 - `POST /api/settings/plugins/add-mcp`: body `{ "name", "description", "server" }`; adds an
   MCP server as a plugin. `server` is the spec object described below.

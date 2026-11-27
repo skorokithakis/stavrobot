@@ -353,6 +353,26 @@ Plugins live in `/plugins/<name>/` (shared volume between `plugin-runner` and `c
   retries the init. Async init failures are reported through the callback and do not
   roll back the checkout.
 
+### Plugin config schema
+- A manifest's `config` entry may set `type`: `secret` (the default), `text`,
+  `boolean`, `number`, or `select`. A `select` needs a non-empty `options` array of
+  strings. `"secret": false` is the legacy spelling of `text`, and an explicit `type`
+  wins over it.
+- `resolveConfigSchema`/`resolveConfigField` in `bundle-registry.ts` are the single
+  source of truth for the effective type. An unknown `type`, or a `select` without
+  usable options, falls back to `secret` and logs a `console.warn` naming the plugin
+  and key, so a malformed manifest never fails install or update.
+- `GET /bundles/<name>/config` returns the resolved schema (`description`, `required`,
+  `type`, and `options` for selects; no separate `secret` flag, because `type` is the
+  single source of truth) alongside the raw values. `POST /configure` validates
+  provided values against the resolved type: booleans must be JSON booleans, numbers
+  finite JSON numbers, and select values one of the declared options. Rejections
+  return 400 naming the key and the expected type, never the rejected value.
+- Secret and text values are not type-checked, because the MCP plugin's `server` key
+  is a secret field that legitimately accepts either an object or a JSON string.
+- Manifest `default` values are not validated, and existing `config.json` values are
+  not converted.
+
 ### MCP plugins
 - A plugin can wrap an MCP (Model Context Protocol) server instead of scripts: its
   `manifest.json` declares `"type": "mcp"`, and its tools come from the live server, not
@@ -401,10 +421,10 @@ Plugins live in `/plugins/<name>/` (shared volume between `plugin-runner` and `c
 - The app's plugin config proxy (`GET /api/settings/plugins/<name>/config`) likewise
   never returns secret config values to the browser: it rewrites the plugin-runner
   response to `{ schema, set, values }`, where `schema` holds only each key's
-  description/required/secret flags (manifest defaults are stripped), `set` is a boolean
-  per key, and `values` holds saved values only for keys the manifest explicitly marks
-  `"secret": false`. Fields without that flag are treated as secret. Saving still goes
-  through `POST /configure`, which accepts values and merges them server-side.
+  description/required/type (`options` too for selects; manifest defaults are
+  stripped), `set` is a boolean per key, and `values` holds saved values only for
+  non-secret types. An unknown or malformed type is treated as secret. Saving still
+  goes through `POST /configure`, which accepts values and merges them server-side.
 - The Docker socket is never mounted into any container.
 - Only `app` and `pg-backup` join the `database` network, which is `internal: true`.
   `postgres` is attached to that network alone, so the containers that run untrusted

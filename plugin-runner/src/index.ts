@@ -4,7 +4,14 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import { loadBundles, getBundles, findBundle, findTool, readJsonFile } from "./bundle-registry.js";
+import {
+  loadBundles,
+  getBundles,
+  findBundle,
+  findTool,
+  readJsonFile,
+  resolveConfigSchema,
+} from "./bundle-registry.js";
 import { callTool, connect, translateCallToolResult } from "./mcp-client.js";
 import { getPluginUserIds } from "./plugin-user.js";
 import {
@@ -139,7 +146,9 @@ function handleGetBundleConfig(bundleName: string, response: http.ServerResponse
     return;
   }
 
-  const schema = bundle.manifest.config ?? {};
+  // The app renders one input per field from this schema, so resolve the
+  // effective type here rather than making the app repeat the legacy rules.
+  const schema = resolveConfigSchema(bundleName, bundle.manifest.config);
   const configPath = path.join(bundle.bundleDir, "config.json");
   const rawValues = readJsonFile(configPath);
   const values = typeof rawValues === "object" && rawValues !== null ? rawValues : {};

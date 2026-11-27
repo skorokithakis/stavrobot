@@ -12,16 +12,32 @@ export const GIT_INSTALLED_DIR = path.join(PLUGINS_DIR, GIT_INSTALLED_DIR_NAME);
 
 export type BundleType = "script" | "mcp";
 
+export type BundleConfigFieldType = "secret" | "text" | "boolean" | "number" | "select";
+
+export interface BundleConfigField {
+  description: string;
+  required: boolean;
+  secret?: boolean;
+  type?: string;
+  options?: string[];
+  default?: unknown;
+}
+
+export interface ResolvedBundleConfigField {
+  description: string;
+  required: boolean;
+  type: BundleConfigFieldType;
+  options?: string[];
+  default?: unknown;
+}
+
 export interface BundleManifest {
   name: string;
   description: string;
   // Consumed by the website build for the public plugin listing; not used by the runner.
   summary?: string;
   type?: BundleType;
-  config?: Record<
-    string,
-    { description: string; required: boolean; secret?: boolean; default?: unknown }
-  >;
+  config?: Record<string, BundleConfigField>;
   instructions?: string;
   init?: { entrypoint: string; async?: boolean };
 }
@@ -93,6 +109,105 @@ export function isBundleManifest(manifest: unknown): manifest is BundleManifest 
   }
 
   return true;
+}
+
+const BUNDLE_CONFIG_FIELD_TYPES: readonly BundleConfigFieldType[] = [
+  "secret",
+  "text",
+  "boolean",
+  "number",
+  "select",
+];
+
+function isBundleConfigFieldType(value: string): value is BundleConfigFieldType {
+  return (BUNDLE_CONFIG_FIELD_TYPES as readonly string[]).includes(value);
+}
+
+function isSelectOptions(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    // An empty option would be indistinguishable from the "not set"
+    // placeholder in the settings page.
+    value.every((option) => typeof option === "string" && option.length > 0)
+  );
+}
+
+// Manifests are untrusted JSON, so an unknown `type` or a `select` without a
+// usable options list must not make a field unconfigurable. Falling back to
+// `secret` matches how every field behaved before types existed, and keeps a
+// malformed manifest from breaking install or update.
+export function resolveConfigField(
+  pluginName: string,
+  key: string,
+  field: BundleConfigField,
+): ResolvedBundleConfigField {
+  const buildResolved = (
+    type: BundleConfigFieldType,
+    options?: string[],
+  ): ResolvedBundleConfigField => {
+    const resolved: ResolvedBundleConfigField = {
+      description: field.description,
+      required: field.required,
+      type,
+    };
+    if (options !== undefined) {
+      resolved.options = options;
+    }
+    if ("default" in field) {
+      resolved.default = field.default;
+    }
+    return resolved;
+  };
+
+  const rawType: unknown = field.type;
+
+  if (rawType !== undefined) {
+    if (typeof rawType !== "string" || !isBundleConfigFieldType(rawType)) {
+      // The value is untrusted JSON, so it must never be stringified: an object
+      // can have a non-callable toString and throw. The plugin and key are
+      // enough to locate the bad manifest.
+      console.warn(
+        `[stavrobot-plugin-runner] Plugin "${pluginName}" config key "${key}" has an unknown config type (${typeof rawType}); falling back to secret`
+      );
+      return buildResolved("secret");
+    }
+
+    if (rawType === "select") {
+      const options: unknown = field.options;
+      if (!isSelectOptions(options)) {
+        console.warn(
+          `[stavrobot-plugin-runner] Plugin "${pluginName}" config key "${key}" declares type "select" without a non-empty array of non-empty string options; falling back to secret`
+        );
+        return buildResolved("secret");
+      }
+      return buildResolved("select", options);
+    }
+
+    return buildResolved(rawType);
+  }
+
+  // `secret: false` predates types and means a plain text field.
+  if (field.secret === false) {
+    return buildResolved("text");
+  }
+
+  return buildResolved("secret");
+}
+
+export function resolveConfigSchema(
+  pluginName: string,
+  manifestConfig: Record<string, BundleConfigField> | undefined,
+): Record<string, ResolvedBundleConfigField> {
+  if (manifestConfig === undefined) {
+    return {};
+  }
+
+  const schema: Record<string, ResolvedBundleConfigField> = {};
+  for (const [key, field] of Object.entries(manifestConfig)) {
+    schema[key] = resolveConfigField(pluginName, key, field);
+  }
+  return schema;
 }
 
 function isToolManifest(manifest: unknown): manifest is ToolManifest {
