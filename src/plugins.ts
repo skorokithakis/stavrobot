@@ -316,6 +316,7 @@ function buildPluginsContent(): string {
   // reopened in the meantime keep a fresh marker.
   var detailHistoryPending = false;
   var detailHistoryReopened = false;
+  var listScrollY = 0;
 
   var listBody = document.querySelector("[data-list-body]");
   var countBadge = document.querySelector("[data-count-badge]");
@@ -707,6 +708,9 @@ function buildPluginsContent(): string {
   function selectPlugin(name, focusItem) {
     state.selectedName = name;
     if (mobileQuery.matches) {
+      if (!state.mobileShowDetail) {
+        listScrollY = window.scrollY;
+      }
       state.mobileShowDetail = true;
     }
     renderList();
@@ -718,6 +722,14 @@ function buildPluginsContent(): string {
       } else {
         pushDetailHistory();
       }
+    }
+    // On mobile the detail replaces the list in the same window scroll, so
+    // without this it opens at the list's offset (often clamped to the bottom).
+    // This must run after the history push: the browser saves the scroll
+    // position of the entry being left and restores it on back, so scrolling
+    // first would make back restore the top instead of the list position.
+    if (mobileQuery.matches) {
+      window.scrollTo(0, 0);
     }
     if (focusItem) {
       var item = listBody.querySelector('[data-name="' + name + '"]');
@@ -731,6 +743,7 @@ function buildPluginsContent(): string {
     state.mobileShowDetail = false;
     renderList();
     updateView();
+    window.scrollTo(0, listScrollY);
   }
 
   function isDetailHistoryCurrent() {
